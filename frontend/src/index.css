@@ -1,0 +1,117 @@
+:root {
+  color-scheme: dark;
+  --bg-color: #111217;
+  --panel-color: #171d29;
+  --accent-color: #5e7bff;
+  --text-color: #f4f6ff;
+  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg-color);
+  color: var(--text-color);
+}
+
+button,
+input {
+  border: 1px solid color-mix(in srgb, var(--accent-color) 22%, #222);
+  background: color-mix(in srgb, var(--panel-color) 88%, #000);
+  color: var(--text-color);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+button:hover {
+  cursor: pointer;
+  background: color-mix(in srgb, var(--panel-color) 78%, #000);
+}
+
+.auth-wrapper {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+}
+
+.card {
+  width: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 24px;
+  background: var(--panel-color);
+  border: 1px solid color-mix(in srgb, var(--accent-color) 30%, #111);
+  border-radius: 14px;
+}
+
+.row { display: flex; gap: 10px; }
+.row button { flex: 1; }
+.active { border-color: var(--accent-color); }
+
+.chat-layout {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 300px 1fr;
+}
+
+.sidebar {
+  border-right: 1px solid color-mix(in srgb, var(--accent-color) 20%, #111);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: color-mix(in srgb, var(--panel-color) 90%, #000);
+}
+
+.chat-panel {
+  display: flex;
+  flex-direction: column;
+  padding: 20px;
+  gap: 12px;
+}
+
+.messages {
+  flex: 1;
+  overflow: auto;
+  border: 1px solid color-mix(in srgb, var(--accent-color) 20%, #111);
+  border-radius: 10px;
+  padding: 12px;
+  background: var(--panel-color);
+}
+
+.message {
+  padding: 8px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--accent-color) 14%, #222);
+}
+
+.message:last-child { border-bottom: none; }
+
+.message-form { display: flex; gap: 10px; }
+.message-form input { flex: 1; }
+
+.voice-controls,
+.settings-card {
+  border: 1px solid color-mix(in srgb, var(--accent-color) 20%, #111);
+  border-radius: 10px;
+  padding: 10px;
+  background: color-mix(in srgb, var(--panel-color) 88%, #000);
+}
+
+.settings-card label,
+.volume-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.volume-row input[type='range'] { flex: 1; }
+
+.error { color: #ff8b8b; }
+.muted { color: color-mix(in srgb, var(--text-color) 65%, #666); }
+.danger { border-color: #773333; }

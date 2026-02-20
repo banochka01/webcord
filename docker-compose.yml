@@ -1,0 +1,37 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: webcord
+      POSTGRES_PASSWORD: webcord
+      POSTGRES_DB: webcord
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  backend:
+    build:
+      context: ./backend
+    environment:
+      PORT: 3000
+      DATABASE_URL: postgresql://webcord:webcord@postgres:5432/webcord?schema=public
+      JWT_SECRET: super-secret-change-me
+      CLIENT_URL: http://localhost:5173
+    depends_on:
+      - postgres
+    ports:
+      - "3000:3000"
+
+  frontend:
+    build:
+      context: ./frontend
+    environment:
+      VITE_API_URL: http://localhost:3000
+    depends_on:
+      - backend
+    ports:
+      - "5173:5173"
+
+volumes:
+  pgdata:
