@@ -4,6 +4,13 @@ import { io } from 'socket.io-client';
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 const CHANNEL_ID_KEY = 'webcord_channel_id';
 const GUILD_ID_KEY = 'webcord_guild_id';
+const THEME_KEY = 'webcord_theme';
+const defaultTheme = {
+  bg: '#111217',
+  panel: '#171d29',
+  accent: '#5e7bff',
+  text: '#f4f6ff'
+};
 
 async function apiFetch(path, options = {}, token) {
   const res = await fetch(`${API_URL}${path}`, {
@@ -35,6 +42,11 @@ export default function App() {
   const [newMessage, setNewMessage] = useState('');
   const [error, setError] = useState('');
   const [voiceJoined, setVoiceJoined] = useState(false);
+  const [theme, setTheme] = useState(() => {
+    const raw = localStorage.getItem(THEME_KEY);
+    return raw ? JSON.parse(raw) : defaultTheme;
+  });
+  const [participantVolumes, setParticipantVolumes] = useState({});
 
   const socketRef = useRef(null);
   const peersRef = useRef({});
@@ -49,6 +61,15 @@ export default function App() {
     }),
     []
   );
+
+  useEffect(() => {
+    const root = document.documentElement;
+    root.style.setProperty('--bg-color', theme.bg);
+    root.style.setProperty('--panel-color', theme.panel);
+    root.style.setProperty('--accent-color', theme.accent);
+    root.style.setProperty('--text-color', theme.text);
+    localStorage.setItem(THEME_KEY, JSON.stringify(theme));
+  }, [theme]);
 
   useEffect(() => {
     if (!isAuthed || !channelId) {
@@ -79,12 +100,13 @@ export default function App() {
     });
 
     socket.on('voice-participants', async (participants) => {
-      for (const socketId of participants) {
-        await createPeerAndOffer(socketId);
+      for (const participant of participants) {
+        await createPeerAndOffer(participant.socketId);
       }
     });
 
     socket.on('voice-user-joined', async ({ socketId }) => {
+      setParticipantVolumes((prev) => (prev[socketId] ? prev : { ...prev, [socketId]: 100 }));
       await createPeerAndOffer(socketId);
     });
 
@@ -132,7 +154,7 @@ export default function App() {
       socketRef.current = null;
       cleanupVoice();
     };
-  }, [API_URL, isAuthed, token, channelId, peerConfig]);
+  }, [isAuthed, token, channelId, peerConfig]);
 
   useEffect(() => {
     if (socketRef.current && channelId) {
@@ -225,6 +247,7 @@ export default function App() {
 
     const peer = new RTCPeerConnection(peerConfig);
     peersRef.current[remoteSocketId] = peer;
+    setParticipantVolumes((prev) => (prev[remoteSocketId] ? prev : { ...prev, [remoteSocketId]: 100 }));
 
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach((track) => {
@@ -250,13 +273,14 @@ export default function App() {
         remoteAudioRef.current[remoteSocketId] = audio;
       }
       audio.srcObject = event.streams[0];
+      audio.volume = (participantVolumes[remoteSocketId] ?? 100) / 100;
     };
 
     return peer;
   }
 
   async function createPeerAndOffer(remoteSocketId) {
-    if (!voiceJoined || !localStreamRef.current || !socketRef.current) {
+    if (!voiceJoined || !localStreamRef.current || !socketRef.current || !remoteSocketId) {
       return;
     }
     const peer = await getOrCreatePeer(remoteSocketId);
@@ -279,6 +303,12 @@ export default function App() {
       remoteAudioRef.current[remoteSocketId].srcObject = null;
       delete remoteAudioRef.current[remoteSocketId];
     }
+
+    setParticipantVolumes((prev) => {
+      const clone = { ...prev };
+      delete clone[remoteSocketId];
+      return clone;
+    });
   }
 
   function cleanupVoice() {
@@ -307,6 +337,22 @@ export default function App() {
       socketRef.current?.emit('join-voice', { channelId: Number(channelId) });
     } catch {
       setError('Could not access microphone');
+    }
+  }
+
+  function handleThemeChange(key, value) {
+    setTheme((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function resetTheme() {
+    setTheme(defaultTheme);
+  }
+
+  function handleVolumeChange(socketId, value) {
+    setParticipantVolumes((prev) => ({ ...prev, [socketId]: value }));
+    const audio = remoteAudioRef.current[socketId];
+    if (audio) {
+      audio.volume = value / 100;
     }
   }
 
@@ -358,9 +404,48 @@ export default function App() {
         <button onClick={handleLogout} className="danger">
           Logout
         </button>
+
+        <div className="settings-card">
+          <h3>Theme</h3>
+          <label>
+            Background <input type="color" value={theme.bg} onChange={(e) => handleThemeChange('bg', e.target.value)} />
+          </label>
+          <label>
+            Panel <input type="color" value={theme.panel} onChange={(e) => handleThemeChange('panel', e.target.value)} />
+          </label>
+          <label>
+            Accent <input type="color" value={theme.accent} onChange={(e) => handleThemeChange('accent', e.target.value)} />
+          </label>
+          <label>
+            Text <input type="color" value={theme.text} onChange={(e) => handleThemeChange('text', e.target.value)} />
+          </label>
+          <button onClick={resetTheme}>Reset Theme</button>
+        </div>
       </aside>
       <section className="chat-panel">
         <header>Global Channel</header>
+        {voiceJoined && (
+          <div className="voice-controls">
+            <h3>Voice Users Volume</h3>
+            {Object.keys(participantVolumes).length === 0 ? (
+              <p className="muted">No remote users yet</p>
+            ) : (
+              Object.entries(participantVolumes).map(([socketId, volume]) => (
+                <label key={socketId} className="volume-row">
+                  <span>{socketId.slice(0, 8)}</span>
+                  <input
+                    type="range"
+                    min="0"
+                    max="200"
+                    value={volume}
+                    onChange={(e) => handleVolumeChange(socketId, Number(e.target.value))}
+                  />
+                  <span>{volume}%</span>
+                </label>
+              ))
+            )}
+          </div>
+        )}
         <div className="messages">
           {messages.map((message) => (
             <div key={message.id} className="message">

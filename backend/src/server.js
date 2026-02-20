@@ -193,27 +193,48 @@ io.on('connection', (socket) => {
   });
 
   socket.on('voice-offer', ({ channelId, offer, targetSocketId }) => {
-    socket.to(`channel:${channelId}`).emit('voice-offer', {
+    const payload = {
       offer,
       fromSocketId: socket.id,
       targetSocketId
-    });
+    };
+
+    if (targetSocketId) {
+      io.to(targetSocketId).emit('voice-offer', payload);
+      return;
+    }
+
+    socket.to(`voice:${channelId}`).emit('voice-offer', payload);
   });
 
   socket.on('voice-answer', ({ channelId, answer, targetSocketId }) => {
-    socket.to(`channel:${channelId}`).emit('voice-answer', {
+    const payload = {
       answer,
       fromSocketId: socket.id,
       targetSocketId
-    });
+    };
+
+    if (targetSocketId) {
+      io.to(targetSocketId).emit('voice-answer', payload);
+      return;
+    }
+
+    socket.to(`voice:${channelId}`).emit('voice-answer', payload);
   });
 
   socket.on('voice-ice-candidate', ({ channelId, candidate, targetSocketId }) => {
-    socket.to(`channel:${channelId}`).emit('voice-ice-candidate', {
+    const payload = {
       candidate,
       fromSocketId: socket.id,
       targetSocketId
-    });
+    };
+
+    if (targetSocketId) {
+      io.to(targetSocketId).emit('voice-ice-candidate', payload);
+      return;
+    }
+
+    socket.to(`voice:${channelId}`).emit('voice-ice-candidate', payload);
   });
 
   socket.on('join-voice', ({ channelId }) => {
@@ -224,7 +245,7 @@ io.on('connection', (socket) => {
     socket.join(roomKey);
 
     const participants = voiceParticipants.get(roomKey) || new Set();
-    socket.emit('voice-participants', Array.from(participants));
+    socket.emit('voice-participants', Array.from(participants).map((socketId) => ({ socketId })));
     participants.add(socket.id);
     voiceParticipants.set(roomKey, participants);
 
