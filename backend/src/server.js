@@ -2,6 +2,10 @@ import 'dotenv/config';
 import express from 'express';
 import http from 'http';
 import cors from 'cors';
+import fs from 'node:fs';
+import path from 'node:path';
+import multer from 'multer';
+import { fileURLToPath } from 'node:url';
 import { Server } from 'socket.io';
 import { prisma } from './prisma.js';
 import {
@@ -18,8 +22,42 @@ const server = http.createServer(app);
 const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:5173';
 const PORT = Number(process.env.PORT || 3000);
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const uploadDir = path.resolve(__dirname, '../uploads');
+
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+}
+
+const storage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, uploadDir),
+  filename: (_req, file, cb) => {
+    const safeName = file.originalname.replace(/[^a-zA-Z0-9_.-]/g, '_');
+    cb(null, `${Date.now()}-${safeName}`);
+  }
+});
+
+const upload = multer({
+  storage,
+  limits: {
+    fileSize: 25 * 1024 * 1024
+  }
+});
+
+function getAttachmentType(mimeType = '') {
+  if (mimeType.startsWith('image/')) {
+    return 'IMAGE';
+  }
+  if (mimeType.startsWith('video/')) {
+    return 'VIDEO';
+  }
+  return 'FILE';
+}
+
 app.use(cors({ origin: CLIENT_URL }));
 app.use(express.json());
+app.use('/uploads', express.static(uploadDir));
 
 app.get('/health', (_req, res) => {
   res.json({ ok: true });
@@ -87,11 +125,35 @@ app.post('/guilds', authMiddleware, async (req, res) => {
   }
 });
 
+app.get('/channels/:guildId', authMiddleware, async (req, res) => {
+  try {
+    const guildId = Number(req.params.guildId);
+    if (Number.isNaN(guildId)) {
+      return res.status(400).json({ error: 'Invalid guild id' });
+    }
+
+    const channels = await prisma.channel.findMany({
+      where: { guildId },
+      orderBy: { id: 'asc' }
+    });
+
+    return res.json(channels);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ error: 'Failed to fetch channels' });
+  }
+});
+
 app.post('/channels', authMiddleware, async (req, res) => {
   try {
-    const { name, guildId } = req.body;
+    const { name, guildId, type } = req.body;
     if (!name || !guildId) {
       return res.status(400).json({ error: 'name and guildId are required' });
+    }
+
+    const channelType = type || 'TEXT';
+    if (!['TEXT', 'VOICE'].includes(channelType)) {
+      return res.status(400).json({ error: 'Invalid channel type' });
     }
 
     const guild = await prisma.guild.findUnique({ where: { id: Number(guildId) } });
@@ -102,6 +164,7 @@ app.post('/channels', authMiddleware, async (req, res) => {
     const channel = await prisma.channel.create({
       data: {
         name,
+        type: channelType,
         guildId: Number(guildId)
       }
     });
@@ -111,6 +174,18 @@ app.post('/channels', authMiddleware, async (req, res) => {
     console.error(error);
     return res.status(500).json({ error: 'Failed to create channel' });
   }
+});
+
+app.post('/upload', authMiddleware, upload.single('file'), async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: 'No file uploaded' });
+  }
+
+  return res.status(201).json({
+    url: `/uploads/${req.file.filename}`,
+    type: getAttachmentType(req.file.mimetype),
+    name: req.file.originalname
+  });
 });
 
 app.get('/messages/:channelId', authMiddleware, async (req, res) => {
@@ -140,6 +215,18 @@ app.get('/messages/:channelId', authMiddleware, async (req, res) => {
   }
 });
 
+app.use((error, _req, res, next) => {
+  if (error instanceof multer.MulterError && error.code === 'LIMIT_FILE_SIZE') {
+    return res.status(413).json({ error: 'File too large. Max 25MB.' });
+  }
+
+  if (error) {
+    return res.status(500).json({ error: 'Unexpected server error' });
+  }
+
+  return next();
+});
+
 const io = new Server(server, {
   cors: {
     origin: CLIENT_URL,
@@ -160,7 +247,6 @@ io.use((socket, next) => {
   }
 });
 
-
 const voiceParticipants = new Map();
 
 io.on('connection', (socket) => {
@@ -168,16 +254,26 @@ io.on('connection', (socket) => {
     socket.join(`channel:${channelId}`);
   });
 
-  socket.on('send-message', async ({ channelId, content }) => {
-    if (!content?.trim() || !channelId) {
+  socket.on('send-message', async (payload = {}) => {
+    const channelId = Number(payload.channelId);
+    const content = payload.content?.trim() || '';
+
+    if (!channelId || Number.isNaN(channelId)) {
+      return;
+    }
+
+    if (!content && !payload.attachmentUrl) {
       return;
     }
 
     const message = await prisma.message.create({
       data: {
-        content: content.trim(),
-        channelId: Number(channelId),
-        authorId: socket.user.userId
+        content,
+        channelId,
+        authorId: socket.user.userId,
+        attachmentUrl: payload.attachmentUrl || null,
+        attachmentType: payload.attachmentType || null,
+        attachmentName: payload.attachmentName || null
       },
       include: {
         author: {
