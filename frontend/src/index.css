@@ -18,7 +18,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   border: 1px solid color-mix(in srgb, var(--accent-color) 22%, #222);
   background: color-mix(in srgb, var(--panel-color) 88%, #000);
   color: var(--text-color);
@@ -48,9 +49,18 @@ button:hover {
   border-radius: 14px;
 }
 
-.row { display: flex; gap: 10px; }
-.row button { flex: 1; }
-.active { border-color: var(--accent-color); }
+.row {
+  display: flex;
+  gap: 10px;
+}
+
+.row button {
+  flex: 1;
+}
+
+.active {
+  border-color: var(--accent-color);
+}
 
 .chat-layout {
   min-height: 100vh;
@@ -65,6 +75,28 @@ button:hover {
   flex-direction: column;
   gap: 12px;
   background: color-mix(in srgb, var(--panel-color) 90%, #000);
+}
+
+.channels-card,
+.voice-controls,
+.settings-card {
+  border: 1px solid color-mix(in srgb, var(--accent-color) 20%, #111);
+  border-radius: 10px;
+  padding: 10px;
+  background: color-mix(in srgb, var(--panel-color) 88%, #000);
+}
+
+.channel-btn {
+  width: 100%;
+  text-align: left;
+  margin-bottom: 8px;
+}
+
+.channel-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
 }
 
 .chat-panel {
@@ -84,21 +116,50 @@ button:hover {
 }
 
 .message {
-  padding: 8px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 0;
   border-bottom: 1px solid color-mix(in srgb, var(--accent-color) 14%, #222);
 }
 
-.message:last-child { border-bottom: none; }
+.message:last-child {
+  border-bottom: none;
+}
 
-.message-form { display: flex; gap: 10px; }
-.message-form input { flex: 1; }
+.message-content {
+  white-space: pre-wrap;
+}
 
-.voice-controls,
-.settings-card {
-  border: 1px solid color-mix(in srgb, var(--accent-color) 20%, #111);
-  border-radius: 10px;
-  padding: 10px;
-  background: color-mix(in srgb, var(--panel-color) 88%, #000);
+.message-media {
+  max-width: 320px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--accent-color) 22%, #222);
+}
+
+.file-link {
+  color: var(--accent-color);
+}
+
+.message-form {
+  display: flex;
+  gap: 10px;
+  position: relative;
+}
+
+.message-form input[type='text'],
+.message-form input:not([type]) {
+  flex: 1;
+}
+
+.emoji-wrapper {
+  position: relative;
+}
+
+.emoji-popover {
+  position: absolute;
+  bottom: 48px;
+  z-index: 2;
 }
 
 .settings-card label,
@@ -110,8 +171,18 @@ button:hover {
   margin-bottom: 8px;
 }
 
-.volume-row input[type='range'] { flex: 1; }
+.volume-row input[type='range'] {
+  flex: 1;
+}
 
-.error { color: #ff8b8b; }
-.muted { color: color-mix(in srgb, var(--text-color) 65%, #666); }
-.danger { border-color: #773333; }
+.error {
+  color: #ff8b8b;
+}
+
+.muted {
+  color: color-mix(in srgb, var(--text-color) 65%, #666);
+}
+
+.danger {
+  border-color: #773333;
+}

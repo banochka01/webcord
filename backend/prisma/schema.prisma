@@ -7,6 +7,17 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum AttachmentType {
+  IMAGE
+  VIDEO
+  FILE
+}
+
+enum ChannelType {
+  TEXT
+  VOICE
+}
+
 model User {
   id       Int       @id @default(autoincrement())
   username String    @unique
@@ -21,19 +32,23 @@ model Guild {
 }
 
 model Channel {
-  id       Int       @id @default(autoincrement())
+  id       Int         @id @default(autoincrement())
   name     String
+  type     ChannelType @default(TEXT)
   guildId  Int
-  guild    Guild     @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  guild    Guild       @relation(fields: [guildId], references: [id], onDelete: Cascade)
   messages Message[]
 }
 
 model Message {
-  id        Int      @id @default(autoincrement())
-  content   String
-  channelId Int
-  authorId  Int
-  createdAt DateTime @default(now())
-  channel   Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
-  author    User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  id             Int             @id @default(autoincrement())
+  content        String
+  attachmentUrl  String?
+  attachmentType AttachmentType?
+  attachmentName String?
+  channelId      Int
+  authorId       Int
+  createdAt      DateTime        @default(now())
+  channel        Channel         @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  author         User            @relation(fields: [authorId], references: [id], onDelete: Cascade)
 }
