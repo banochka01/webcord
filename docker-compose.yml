@@ -17,7 +17,7 @@ services:
       PORT: 3000
       DATABASE_URL: postgresql://webcord:webcord@postgres:5432/webcord?schema=public
       JWT_SECRET: super-secret-change-me
-      CLIENT_URL: http://localhost:5173
+      CLIENT_URL: http://104.128.140.14:5173
     depends_on:
       - postgres
     ports:
@@ -27,7 +27,7 @@ services:
     build:
       context: ./frontend
     environment:
-      VITE_API_URL: http://localhost:3000
+      VITE_API_URL: http://104.128.140.14:3000
     depends_on:
       - backend
     ports:

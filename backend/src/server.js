@@ -17,11 +17,14 @@ import {
 } from './auth.js';
 
 const app = express();
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 const server = http.createServer(app);
 
 const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:5173';
 const PORT = Number(process.env.PORT || 3000);
 
+<<<<<<< Updated upstream
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const uploadDir = path.resolve(__dirname, '../uploads');
@@ -58,8 +61,14 @@ function getAttachmentType(mimeType = '') {
 app.use(cors({ origin: CLIENT_URL }));
 app.use(express.json());
 app.use('/uploads', express.static(uploadDir));
+=======
+app.use(cors({ origin: true, credentials: true }));
+>>>>>>> Stashed changes
 
 app.get('/health', (_req, res) => {
+  res.json({ ok: true });
+});
+app.get('/api/health', (_req, res) => {
   res.json({ ok: true });
 });
 
@@ -230,19 +239,20 @@ app.use((error, _req, res, next) => {
 const io = new Server(server, {
   cors: {
     origin: CLIENT_URL,
-    methods: ['GET', 'POST']
+    credentials: true
   }
 });
 
 io.use((socket, next) => {
   try {
     const token = socket.handshake.auth?.token;
-    if (!token) {
-      return next(new Error('Unauthorized'));
-    }
+    console.log("SOCKET AUTH origin=", socket.handshake.headers.origin, "token?", !!token);
+    if (!token) return next(new Error('Unauthorized'));
     socket.user = verifyToken(token);
+    console.log("SOCKET AUTH OK userId=", socket.user.userId);
     next();
-  } catch {
+  } catch (e) {
+    console.log("SOCKET AUTH FAIL", e?.message);
     next(new Error('Unauthorized'));
   }
 });
@@ -250,10 +260,14 @@ io.use((socket, next) => {
 const voiceParticipants = new Map();
 
 io.on('connection', (socket) => {
+  console.log("SOCKET connected", socket.id);
+
   socket.on('join-channel', ({ channelId }) => {
+    console.log("join-channel", socket.id, channelId);
     socket.join(`channel:${channelId}`);
   });
 
+<<<<<<< Updated upstream
   socket.on('send-message', async (payload = {}) => {
     const channelId = Number(payload.channelId);
     const content = payload.content?.trim() || '';
@@ -282,11 +296,28 @@ io.on('connection', (socket) => {
             username: true
           }
         }
-      }
-    });
+=======
+  socket.on('send-message', async ({ channelId, content }) => {
+  console.log("send-message", socket.id, channelId, (content || "").slice(0, 80));
+  if (!content?.trim() || !channelId) return;
 
-    io.to(`channel:${channelId}`).emit('new-message', message);
+  const message = await prisma.message.create({
+    data: {
+      content: content.trim(),
+      channelId: Number(channelId),
+      authorId: socket.user.userId
+    },
+    include: {
+      author: {
+        select: { id: true, username: true }
+>>>>>>> Stashed changes
+      }
+    }
   });
+
+  console.log("emit new-message to", `channel:${channelId}`);
+  io.to(`channel:${channelId}`).emit('new-message', message);
+});
 
   socket.on('voice-offer', ({ channelId, offer, targetSocketId }) => {
     const payload = {
