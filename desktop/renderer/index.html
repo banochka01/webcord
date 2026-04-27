@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' https://cdn.socket.io https://webcordes.ru; connect-src 'self' https://webcordes.ru wss://webcordes.ru; img-src 'self' data: https://webcordes.ru; style-src 'self' 'unsafe-inline'; script-src 'self' https://cdn.socket.io;" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Webcord Desktop</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div id="app">
+    <aside class="panel guilds"><h3>Servers</h3><div id="guildList"></div></aside>
+    <aside class="panel channels"><h3>Channels</h3><div id="channelList"></div></aside>
+    <main class="panel chat">
+      <header id="chatHeader">Выберите канал</header>
+      <section id="messageList"></section>
+      <form id="composer"><input id="messageInput" placeholder="Написать сообщение..." /><button>Send</button></form>
+    </main>
+    <aside class="panel right"><h3>DM / Friends</h3><div id="friendsList"></div></aside>
+  </div>
+
+  <dialog id="authModal" open>
+    <h2>Вход в Webcord</h2>
+    <input id="username" placeholder="username" />
+    <input id="password" type="password" placeholder="password" />
+    <div class="row"><button id="loginBtn">Login</button><button id="registerBtn">Register</button></div>
+    <p id="authError"></p>
+  </dialog>
+
+  <dialog id="quickSwitcher"><input id="quickInput" placeholder="Ctrl+K: switch server/channel" /><div id="quickResults"></div></dialog>
+  <dialog id="hotkeys"><h3>Hotkeys</h3><ul><li>Ctrl+K — quick switcher</li><li>Ctrl+/ — hotkeys</li><li>Esc — close modal</li></ul></dialog>
+
+  <script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
+  <script src="./renderer.js"></script>
+</body>
+</html>

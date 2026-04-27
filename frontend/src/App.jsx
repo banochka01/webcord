@@ -3,12 +3,8 @@ import Picker from '@emoji-mart/react';
 import data from '@emoji-mart/data';
 import { io } from 'socket.io-client';
 
-<<<<<<< Updated upstream
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+const API_URL = import.meta.env.VITE_API_URL || '/api';
 const SOCKET_URL = API_URL.startsWith('/') ? window.location.origin : API_URL;
-=======
-const API_URL = import.meta.env.VITE_API_URL || (window.location.origin.replace(/:\d+$/, ":3000"));
->>>>>>> Stashed changes
 const CHANNEL_ID_KEY = 'webcord_channel_id';
 const GUILD_ID_KEY = 'webcord_guild_id';
 const VOICE_CHANNEL_ID_KEY = 'webcord_voice_channel_id';
@@ -56,17 +52,12 @@ export default function App() {
     const raw = localStorage.getItem('webcord_user');
     return raw ? JSON.parse(raw) : null;
   });
-<<<<<<< Updated upstream
   const [guildId, setGuildId] = useState(() => localStorage.getItem(GUILD_ID_KEY) || '');
   const [channelId, setChannelId] = useState(() => localStorage.getItem(CHANNEL_ID_KEY) || '');
   const [voiceChannelId, setVoiceChannelId] = useState(() => localStorage.getItem(VOICE_CHANNEL_ID_KEY) || '');
   const [channels, setChannels] = useState([]);
   const [newChannelName, setNewChannelName] = useState('');
   const [newChannelType, setNewChannelType] = useState('TEXT');
-=======
-  const DEFAULT_CHANNEL_ID = "1";
-const [channelId, setChannelId] = useState(() => DEFAULT_CHANNEL_ID);
->>>>>>> Stashed changes
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
   const [error, setError] = useState('');

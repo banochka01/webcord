@@ -1,0 +1,20 @@
+{
+  "expo": {
+    "name": "Webcord Android",
+    "slug": "webcord-android",
+    "scheme": "webcord",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "android": {
+      "package": "ru.webcord.mobile",
+      "adaptiveIcon": {
+        "backgroundColor": "#0b0a12"
+      },
+      "edgeToEdgeEnabled": true
+    },
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "backgroundColor": "#0b0a12"
+    }
+  }
+}

@@ -1,119 +1,75 @@
 # WebCord
 
-Self-hosted Discord-like web app:
-- регистрация/логин (JWT)
-- серверы (guilds), текстовые и голосовые каналы
-- realtime чат через Socket.IO
-- voice комнаты через WebRTC signaling
-- вложения (изображения/видео/файлы до 25MB)
-- emoji picker
-- кастомизация цветов интерфейса (фон/панель/акцент/текст)
+Webcord ecosystem now includes:
+- Web client (existing `frontend/`)
+- Android native client (`mobile-android/`, React Native)
+- Windows desktop client (`desktop/`, Electron renderer with local UI, not website wrapper)
+- Shared backend (`backend/`) for all clients
 
-## Быстрый запуск одной командой (dev-like)
+## Architecture
 
-```bash
-./scripts/deploy.sh
-```
+- Backend API: `https://webcordes.ru/api`
+- Realtime Socket.IO: `https://webcordes.ru/socket.io`
+- Media uploads: `https://webcordes.ru/uploads/*`
+- Voice signaling: Socket.IO (`voice-*` events)
 
-Скрипт автоматически:
-1. проверяет Docker/Compose,
-2. собирает backend/frontend образы,
-3. поднимает `postgres + backend + frontend`,
-4. выводит статус сервисов.
+API contract is documented in `docs/api-contract.md`.
 
-После запуска:
-- Frontend: http://localhost:5173
-- Backend API: http://localhost:3000
+## Recommended stacks
 
----
+- **Android**: React Native (current implementation) or Kotlin + Jetpack Compose.
+- **Windows**: Electron (current implementation) or Tauri/React.
+- **Best shared-code strategy**: keep UI separate per platform, share data layer (`api client`, `socket client`, models, contract).
 
-## DEV запуск через `docker-compose.yml` (без изменений)
+## Run backend/web (Docker)
 
 ```bash
 docker compose up -d --build
 ```
 
-Остановить:
+- frontend: `http://localhost:5173`
+- backend: `http://localhost:3000`
+
+## Run Android client
 
 ```bash
-docker compose down
-```
-
-Остановить и удалить volume БД:
-
-```bash
-docker compose down -v
-```
-
----
-
-## PROD запуск через `docker-compose.prod.yml`
-
-Откройте порты:
-- `80/tcp` (обязательно)
-- `443/tcp` (когда включите TLS)
-
-1) Подготовьте env:
-
-```bash
-export JWT_SECRET='strong-secret'
-export CLIENT_URL='https://your-domain.example'
-```
-
-2) Запуск:
-
-```bash
-docker compose -f docker-compose.prod.yml up -d --build
-```
-
-3) Проверка:
-- фронт доступен на `http://<domain-or-ip>` (через nginx, без Vite dev server)
-- API проксируется через `/api/*`
-- Socket.IO работает через `/socket.io/*`
-
-4) Upload persistence:
-- вложения сохраняются в `./backend/uploads` на хосте
-
-5) Остановка:
-
-```bash
-docker compose -f docker-compose.prod.yml down
-```
-
----
-
-## Локальный запуск без Docker (опционально)
-
-### 1) Backend
-
-```bash
-cd backend
-cp .env.example .env
+cd mobile-android
 npm install
-npm run db:generate
-npm run db:push
+npm run android
+```
+
+Token storage: `expo-secure-store`.
+
+## Run Windows desktop client
+
+```bash
+cd desktop
+npm install
 npm run start
 ```
 
-### 2) Frontend
+Hotkeys:
+- `Ctrl+K` quick switcher
+- `Ctrl+/` hotkeys dialog
+- `Esc` close modals
 
-```bash
-cd frontend
-cp .env.example .env
-npm install
-npm run dev
-```
+Tray icon and native notifications are enabled.
 
----
+## Build artifacts (.exe / .msi / .apk)
 
-## Переменные окружения
+Binary files are **not committed** to Git (large + platform specific).
 
-Backend (`backend/.env.example` / `backend/.env.prod.example`):
-- `PORT=3000`
-- `DATABASE_URL=postgresql://webcord:webcord@postgres:5432/webcord?schema=public`
-- `JWT_SECRET=please_change_me`
-- `CLIENT_URL=http://localhost:5173` (dev) / `https://your-domain.example` (prod)
+How to build:
 
-Frontend (`frontend/.env.example` / `frontend/.env.prod.example`):
-- `VITE_API_URL=http://localhost:3000` (dev)
-- `VITE_API_URL=/api` (prod)
+- Windows `.exe/.msi`: add `electron-builder` config to `desktop/package.json` and run:
+  ```bash
+  npm i -D electron-builder
+  npx electron-builder --win nsis msi
+  ```
+
+- Android `.apk/.aab`:
+  ```bash
+  cd mobile-android
+  npx expo run:android --variant release
+  ```
+  or use EAS Build for CI distribution.

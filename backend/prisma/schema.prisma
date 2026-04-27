@@ -18,17 +18,47 @@ enum ChannelType {
   VOICE
 }
 
+enum FriendshipStatus {
+  PENDING
+  ACCEPTED
+  BLOCKED
+}
+
 model User {
-  id       Int       @id @default(autoincrement())
-  username String    @unique
-  password String
-  messages Message[]
+  id           Int               @id @default(autoincrement())
+  username     String            @unique
+  password     String
+  displayName  String?
+  avatarUrl    String?
+  statusText   String?
+  messages     Message[]
+  guildMembers GuildMember[]
+  ownedGuilds  Guild[]           @relation("GuildOwner")
+  sentRequests Friendship[]      @relation("FriendshipRequester")
+  recvRequests Friendship[]      @relation("FriendshipAddressee")
+  dmMembers    DMChannelMember[]
+  dmMessages   DMMessage[]
 }
 
 model Guild {
-  id       Int       @id @default(autoincrement())
-  name     String
-  channels Channel[]
+  id         Int          @id @default(autoincrement())
+  name       String
+  ownerId    Int
+  owner      User         @relation("GuildOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  channels   Channel[]
+  members    GuildMember[]
+  createdAt  DateTime     @default(now())
+}
+
+model GuildMember {
+  id       Int      @id @default(autoincrement())
+  guildId  Int
+  userId   Int
+  role     String   @default("MEMBER")
+  guild    Guild    @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([guildId, userId])
 }
 
 model Channel {
@@ -48,7 +78,53 @@ model Message {
   attachmentName String?
   channelId      Int
   authorId       Int
+  replyToId      Int?
+  editedAt       DateTime?
+  deletedAt      DateTime?
   createdAt      DateTime        @default(now())
   channel        Channel         @relation(fields: [channelId], references: [id], onDelete: Cascade)
   author         User            @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  replyTo        Message?        @relation("MessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies        Message[]       @relation("MessageReplies")
+}
+
+model Friendship {
+  id           Int              @id @default(autoincrement())
+  requesterId  Int
+  addresseeId  Int
+  status       FriendshipStatus @default(PENDING)
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  requester    User             @relation("FriendshipRequester", fields: [requesterId], references: [id], onDelete: Cascade)
+  addressee    User             @relation("FriendshipAddressee", fields: [addresseeId], references: [id], onDelete: Cascade)
+
+  @@unique([requesterId, addresseeId])
+}
+
+model DMChannel {
+  id        Int               @id @default(autoincrement())
+  createdAt DateTime          @default(now())
+  members   DMChannelMember[]
+  messages  DMMessage[]
+}
+
+model DMChannelMember {
+  id          Int       @id @default(autoincrement())
+  dmChannelId Int
+  userId      Int
+  dmChannel   DMChannel @relation(fields: [dmChannelId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([dmChannelId, userId])
+}
+
+model DMMessage {
+  id          Int       @id @default(autoincrement())
+  dmChannelId Int
+  authorId    Int
+  content     String
+  createdAt   DateTime  @default(now())
+  editedAt    DateTime?
+  dmChannel   DMChannel @relation(fields: [dmChannelId], references: [id], onDelete: Cascade)
+  author      User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
 }
