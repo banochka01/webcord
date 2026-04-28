@@ -30,6 +30,8 @@ model User {
   password     String
   displayName  String?
   avatarUrl    String?
+  bannerUrl    String?
+  bio          String?
   statusText   String?
   messages     Message[]
   guildMembers GuildMember[]

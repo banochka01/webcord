@@ -4,6 +4,7 @@ const { app, BrowserWindow, Tray, Menu, nativeImage, globalShortcut, ipcMain, No
 const icon = nativeImage.createFromDataURL('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8Xw8AAqMBgWlAbI8AAAAASUVORK5CYII=');
 let win;
 let tray;
+const WEBCORD_URL = process.env.WEBCORD_DESKTOP_URL || 'https://webcordes.ru';
 
 function createWindow() {
   win = new BrowserWindow({
@@ -12,7 +13,7 @@ function createWindow() {
     minWidth: 1100,
     minHeight: 700,
     title: 'Webcord Desktop',
-    backgroundColor: '#0b0a12',
+    backgroundColor: '#1e1f22',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -20,7 +21,13 @@ function createWindow() {
     }
   });
 
-  win.loadFile(path.join(__dirname, '../renderer/index.html'));
+  win.loadURL(WEBCORD_URL).catch(() => {
+    win.loadFile(path.join(__dirname, '../renderer/index.html'));
+  });
+
+  win.webContents.session.setPermissionRequestHandler((_webContents, permission, callback) => {
+    callback(['media', 'display-capture'].includes(permission));
+  });
 }
 
 function setupTray() {

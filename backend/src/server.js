@@ -44,6 +44,8 @@ function normalizeUser(u) {
     username: u.username,
     displayName: u.displayName || u.username,
     avatarUrl: u.avatarUrl || null,
+    bannerUrl: u.bannerUrl || null,
+    bio: u.bio || null,
     statusText: u.statusText || null
   };
 }
@@ -139,10 +141,10 @@ api.get('/me', authMiddleware, async (req, res) => {
 });
 
 api.patch('/me', authMiddleware, async (req, res) => {
-  const { displayName, avatarUrl, statusText } = req.body;
+  const { displayName, avatarUrl, bannerUrl, bio, statusText } = req.body;
   const user = await prisma.user.update({
     where: { id: req.user.userId },
-    data: { displayName, avatarUrl, statusText }
+    data: { displayName, avatarUrl, bannerUrl, bio, statusText }
   });
   return res.json(normalizeUser(user));
 });
@@ -224,7 +226,7 @@ api.get('/messages/:channelId', authMiddleware, async (req, res) => {
     where: { channelId, deletedAt: null },
     orderBy: { createdAt: 'asc' },
     include: {
-      author: { select: { id: true, username: true, displayName: true, avatarUrl: true } },
+      author: { select: { id: true, username: true, displayName: true, avatarUrl: true, bannerUrl: true, bio: true, statusText: true } },
       replyTo: { select: { id: true, content: true, author: { select: { username: true } } } }
     }
   });
@@ -253,7 +255,7 @@ api.post('/messages', authMiddleware, async (req, res) => {
       attachmentName: attachmentName || null,
       replyToId: replyToId ? Number(replyToId) : null
     },
-    include: { author: { select: { id: true, username: true, displayName: true, avatarUrl: true } } }
+    include: { author: { select: { id: true, username: true, displayName: true, avatarUrl: true, bannerUrl: true, bio: true, statusText: true } } }
   });
 
   io.to(`channel:${parsedChannelId}`).emit('new-message', message);
@@ -270,7 +272,7 @@ api.patch('/messages/:id', authMiddleware, async (req, res) => {
   const updated = await prisma.message.update({
     where: { id },
     data: { content: content?.trim() || message.content, editedAt: new Date() },
-    include: { author: { select: { id: true, username: true, displayName: true, avatarUrl: true } } }
+    include: { author: { select: { id: true, username: true, displayName: true, avatarUrl: true, bannerUrl: true, bio: true, statusText: true } } }
   });
 
   io.to(`channel:${message.channelId}`).emit('message-updated', updated);
@@ -293,8 +295,8 @@ api.get('/friends', authMiddleware, async (req, res) => {
   const friendships = await prisma.friendship.findMany({
     where: { OR: [{ requesterId: userId }, { addresseeId: userId }] },
     include: {
-      requester: { select: { id: true, username: true, displayName: true, avatarUrl: true } },
-      addressee: { select: { id: true, username: true, displayName: true, avatarUrl: true } }
+      requester: { select: { id: true, username: true, displayName: true, avatarUrl: true, bannerUrl: true, bio: true, statusText: true } },
+      addressee: { select: { id: true, username: true, displayName: true, avatarUrl: true, bannerUrl: true, bio: true, statusText: true } }
     }
   });
 
@@ -361,7 +363,7 @@ api.post('/dm/channels', authMiddleware, async (req, res) => {
       members: { create: [{ userId: req.user.userId }, { userId: otherUserId }] }
     },
     include: {
-      members: { include: { user: { select: { id: true, username: true, displayName: true, avatarUrl: true } } } }
+      members: { include: { user: { select: { id: true, username: true, displayName: true, avatarUrl: true, bannerUrl: true, bio: true, statusText: true } } } }
     }
   });
   return res.status(201).json(channel);
@@ -371,7 +373,7 @@ api.get('/dm/channels', authMiddleware, async (req, res) => {
   const channels = await prisma.dMChannel.findMany({
     where: { members: { some: { userId: req.user.userId } } },
     include: {
-      members: { include: { user: { select: { id: true, username: true, displayName: true, avatarUrl: true } } } },
+      members: { include: { user: { select: { id: true, username: true, displayName: true, avatarUrl: true, bannerUrl: true, bio: true, statusText: true } } } },
       messages: { orderBy: { createdAt: 'desc' }, take: 1 }
     }
   });
@@ -386,7 +388,7 @@ api.get('/dm/messages/:dmChannelId', authMiddleware, async (req, res) => {
   const messages = await prisma.dMMessage.findMany({
     where: { dmChannelId },
     orderBy: { createdAt: 'asc' },
-    include: { author: { select: { id: true, username: true, displayName: true, avatarUrl: true } } }
+    include: { author: { select: { id: true, username: true, displayName: true, avatarUrl: true, bannerUrl: true, bio: true, statusText: true } } }
   });
   return res.json(messages);
 });
@@ -401,7 +403,7 @@ api.post('/dm/messages', authMiddleware, async (req, res) => {
 
   const message = await prisma.dMMessage.create({
     data: { dmChannelId, content, authorId: req.user.userId },
-    include: { author: { select: { id: true, username: true, displayName: true, avatarUrl: true } } }
+    include: { author: { select: { id: true, username: true, displayName: true, avatarUrl: true, bannerUrl: true, bio: true, statusText: true } } }
   });
 
   io.to(`dm:${dmChannelId}`).emit('dm-new-message', message);
@@ -467,7 +469,7 @@ io.on('connection', (socket) => {
         attachmentName: payload.attachmentName || null,
         replyToId: payload.replyToId ? Number(payload.replyToId) : null
       },
-      include: { author: { select: { id: true, username: true, displayName: true, avatarUrl: true } } }
+      include: { author: { select: { id: true, username: true, displayName: true, avatarUrl: true, bannerUrl: true, bio: true, statusText: true } } }
     });
 
     io.to(`channel:${channelId}`).emit('new-message', message);
@@ -477,7 +479,7 @@ io.on('connection', (socket) => {
     if (!dmChannelId || !content?.trim()) return;
     const message = await prisma.dMMessage.create({
       data: { dmChannelId: Number(dmChannelId), authorId: userId, content: content.trim() },
-      include: { author: { select: { id: true, username: true, displayName: true, avatarUrl: true } } }
+      include: { author: { select: { id: true, username: true, displayName: true, avatarUrl: true, bannerUrl: true, bio: true, statusText: true } } }
     });
     io.to(`dm:${dmChannelId}`).emit('dm-new-message', message);
   });
