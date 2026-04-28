@@ -5,3 +5,7 @@ frontend/node_modules
 backend/.env
 frontend/.env
 dist
+desktop/dist
+mobile-android/android
+mobile-android/.expo
+*.keystore

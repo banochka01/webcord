@@ -56,7 +56,21 @@ function attachmentType(mime = '') {
 
 async function ensureDefaultGuildForUser(userId) {
   const existingMember = await prisma.guildMember.findFirst({ where: { userId }, include: { guild: true } });
-  if (existingMember) return existingMember.guild;
+  if (existingMember) {
+    await ensureDefaultChannels(existingMember.guild.id);
+    return existingMember.guild;
+  }
+
+  const existingGuild = await prisma.guild.findFirst({ orderBy: { id: 'asc' } });
+  if (existingGuild) {
+    await prisma.guildMember.upsert({
+      where: { guildId_userId: { guildId: existingGuild.id, userId } },
+      update: {},
+      create: { guildId: existingGuild.id, userId, role: existingGuild.ownerId === userId ? 'OWNER' : 'MEMBER' }
+    });
+    await ensureDefaultChannels(existingGuild.id);
+    return existingGuild;
+  }
 
   const guild = await prisma.guild.create({
     data: {
@@ -67,6 +81,16 @@ async function ensureDefaultGuildForUser(userId) {
     }
   });
   return guild;
+}
+
+async function ensureDefaultChannels(guildId) {
+  const channels = await prisma.channel.findMany({ where: { guildId } });
+  if (!channels.some((channel) => channel.type === 'TEXT')) {
+    await prisma.channel.create({ data: { guildId, name: 'general', type: 'TEXT' } });
+  }
+  if (!channels.some((channel) => channel.type === 'VOICE')) {
+    await prisma.channel.create({ data: { guildId, name: 'General Voice', type: 'VOICE' } });
+  }
 }
 
 app.get('/health', (_req, res) => res.json({ ok: true }));
@@ -124,11 +148,19 @@ api.patch('/me', authMiddleware, async (req, res) => {
 });
 
 api.get('/guilds', authMiddleware, async (req, res) => {
-  const memberships = await prisma.guildMember.findMany({
+  let memberships = await prisma.guildMember.findMany({
     where: { userId: req.user.userId },
     include: { guild: true },
     orderBy: { id: 'asc' }
   });
+  if (memberships.length === 0) {
+    await ensureDefaultGuildForUser(req.user.userId);
+    memberships = await prisma.guildMember.findMany({
+      where: { userId: req.user.userId },
+      include: { guild: true },
+      orderBy: { id: 'asc' }
+    });
+  }
   return res.json(memberships.map((m) => m.guild));
 });
 
@@ -182,6 +214,11 @@ api.post('/upload', authMiddleware, upload.single('file'), async (req, res) => {
 api.get('/messages/:channelId', authMiddleware, async (req, res) => {
   const channelId = Number(req.params.channelId);
   if (!channelId) return res.status(400).json({ error: 'Invalid channel id' });
+
+  const channel = await prisma.channel.findUnique({ where: { id: channelId } });
+  if (!channel) return res.status(404).json({ error: 'Channel not found' });
+  const membership = await prisma.guildMember.findFirst({ where: { guildId: channel.guildId, userId: req.user.userId } });
+  if (!membership) return res.status(403).json({ error: 'Not a member of guild' });
 
   const messages = await prisma.message.findMany({
     where: { channelId, deletedAt: null },
@@ -414,6 +451,11 @@ io.on('connection', (socket) => {
     const channelId = Number(payload.channelId);
     const content = payload.content?.trim() || '';
     if (!channelId || (!content && !payload.attachmentUrl)) return;
+
+    const channel = await prisma.channel.findUnique({ where: { id: channelId } });
+    if (!channel) return;
+    const membership = await prisma.guildMember.findFirst({ where: { guildId: channel.guildId, userId } });
+    if (!membership) return;
 
     const message = await prisma.message.create({
       data: {

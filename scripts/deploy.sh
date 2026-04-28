@@ -23,10 +23,11 @@ fi
 chmod +x "$0"
 
 echo "[WebCord] Building images and starting stack..."
-$COMPOSE_CMD up -d --build --remove-orphans
+COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.prod.yml}"
+$COMPOSE_CMD -f "$COMPOSE_FILE" up -d --build --remove-orphans
 
 echo "[WebCord] Done. Services status:"
-$COMPOSE_CMD ps
+$COMPOSE_CMD -f "$COMPOSE_FILE" ps
 
-echo "[WebCord] Frontend: http://localhost:5173"
-echo "[WebCord] Backend:  http://localhost:3000"
+echo "[WebCord] Frontend: http://127.0.0.1:8080"
+echo "[WebCord] Backend:  internal backend:3000"

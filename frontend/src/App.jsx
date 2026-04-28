@@ -4,17 +4,12 @@ import data from '@emoji-mart/data';
 import { io } from 'socket.io-client';
 
 const API_URL = import.meta.env.VITE_API_URL || '/api';
-const SOCKET_URL = API_URL.startsWith('/') ? window.location.origin : API_URL;
-const CHANNEL_ID_KEY = 'webcord_channel_id';
-const GUILD_ID_KEY = 'webcord_guild_id';
-const VOICE_CHANNEL_ID_KEY = 'webcord_voice_channel_id';
-const THEME_KEY = 'webcord_theme';
-const defaultTheme = {
-  bg: '#111217',
-  panel: '#171d29',
-  accent: '#5e7bff',
-  text: '#f4f6ff'
-};
+const SOCKET_URL = API_URL.startsWith('/') ? window.location.origin : API_URL.replace(/\/api$/, '');
+const TOKEN_KEY = 'webcord_token';
+const USER_KEY = 'webcord_user';
+const GUILD_KEY = 'webcord_guild_id';
+const CHANNEL_KEY = 'webcord_channel_id';
+const VOICE_KEY = 'webcord_voice_channel_id';
 
 async function apiFetch(path, options = {}, token) {
   const isFormData = options.body instanceof FormData;
@@ -26,668 +21,534 @@ async function apiFetch(path, options = {}, token) {
       ...(options.headers || {})
     }
   });
-  const data = await res.json();
-  if (!res.ok) {
-    throw new Error(data.error || 'Request failed');
-  }
-  return data;
+  if (res.status === 204) return null;
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || 'Request failed');
+  return body;
 }
 
-function getAttachmentUrl(path) {
-  if (!path) {
-    return '';
-  }
-  if (path.startsWith('http')) {
-    return path;
-  }
-  return `${API_URL}${path}`;
+function attachmentUrl(value) {
+  if (!value) return '';
+  if (value.startsWith('http')) return value;
+  return `${API_URL}${value}`;
+}
+
+function initials(name = 'W') {
+  return name.trim().slice(0, 2).toUpperCase() || 'W';
+}
+
+function timeLabel(value) {
+  if (!value) return '';
+  return new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function pickValidId(items, storedId, predicate = () => true) {
+  const stored = items.find((item) => String(item.id) === String(storedId) && predicate(item));
+  const first = items.find(predicate);
+  return stored?.id ?? first?.id ?? '';
 }
 
 export default function App() {
-  const [mode, setMode] = useState('login');
+  const [authMode, setAuthMode] = useState('login');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [token, setToken] = useState(localStorage.getItem('webcord_token') || '');
+  const [token, setToken] = useState(() => localStorage.getItem(TOKEN_KEY) || '');
   const [user, setUser] = useState(() => {
-    const raw = localStorage.getItem('webcord_user');
+    const raw = localStorage.getItem(USER_KEY);
     return raw ? JSON.parse(raw) : null;
   });
-  const [guildId, setGuildId] = useState(() => localStorage.getItem(GUILD_ID_KEY) || '');
-  const [channelId, setChannelId] = useState(() => localStorage.getItem(CHANNEL_ID_KEY) || '');
-  const [voiceChannelId, setVoiceChannelId] = useState(() => localStorage.getItem(VOICE_CHANNEL_ID_KEY) || '');
+  const [view, setView] = useState('chat');
+  const [guilds, setGuilds] = useState([]);
+  const [guildId, setGuildId] = useState(() => localStorage.getItem(GUILD_KEY) || '');
   const [channels, setChannels] = useState([]);
+  const [channelId, setChannelId] = useState(() => localStorage.getItem(CHANNEL_KEY) || '');
+  const [voiceChannelId, setVoiceChannelId] = useState(() => localStorage.getItem(VOICE_KEY) || '');
+  const [messages, setMessages] = useState([]);
+  const [friends, setFriends] = useState([]);
+  const [friendName, setFriendName] = useState('');
+  const [newGuildName, setNewGuildName] = useState('');
   const [newChannelName, setNewChannelName] = useState('');
   const [newChannelType, setNewChannelType] = useState('TEXT');
-  const [messages, setMessages] = useState([]);
-  const [newMessage, setNewMessage] = useState('');
-  const [error, setError] = useState('');
-  const [voiceJoined, setVoiceJoined] = useState(false);
-  const [theme, setTheme] = useState(() => {
-    const raw = localStorage.getItem(THEME_KEY);
-    return raw ? JSON.parse(raw) : defaultTheme;
-  });
-  const [participantVolumes, setParticipantVolumes] = useState({});
-  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [messageInput, setMessageInput] = useState('');
   const [pendingAttachment, setPendingAttachment] = useState(null);
   const [uploading, setUploading] = useState(false);
+  const [voiceJoined, setVoiceJoined] = useState(false);
+  const [showEmoji, setShowEmoji] = useState(false);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
 
   const socketRef = useRef(null);
-  const peersRef = useRef({});
-  const localStreamRef = useRef(null);
-  const remoteAudioRef = useRef({});
+  const channelIdRef = useRef(channelId);
+  const voiceStreamRef = useRef(null);
   const fileInputRef = useRef(null);
+  const messagesRef = useRef(null);
 
   const isAuthed = Boolean(token && user);
+  const activeGuild = guilds.find((guild) => String(guild.id) === String(guildId));
   const textChannels = channels.filter((channel) => channel.type === 'TEXT');
   const voiceChannels = channels.filter((channel) => channel.type === 'VOICE');
-
-  const activeTextChannel = textChannels.find((channel) => String(channel.id) === String(channelId));
+  const activeChannel = textChannels.find((channel) => String(channel.id) === String(channelId));
   const activeVoiceChannel = voiceChannels.find((channel) => String(channel.id) === String(voiceChannelId));
-
-  const peerConfig = useMemo(
-    () => ({
-      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
-    }),
-    []
-  );
+  const acceptedFriends = useMemo(() => friends.filter((friend) => friend.status === 'ACCEPTED'), [friends]);
+  const pendingFriends = useMemo(() => friends.filter((friend) => friend.status === 'PENDING'), [friends]);
 
   useEffect(() => {
-    const root = document.documentElement;
-    root.style.setProperty('--bg-color', theme.bg);
-    root.style.setProperty('--panel-color', theme.panel);
-    root.style.setProperty('--accent-color', theme.accent);
-    root.style.setProperty('--text-color', theme.text);
-    localStorage.setItem(THEME_KEY, JSON.stringify(theme));
-  }, [theme]);
+    channelIdRef.current = channelId;
+  }, [channelId]);
 
   useEffect(() => {
-    if (!isAuthed || !guildId) {
-      return;
-    }
+    messagesRef.current?.scrollTo({ top: messagesRef.current.scrollHeight, behavior: 'smooth' });
+  }, [messages.length]);
 
-    apiFetch(`/channels/${guildId}`, {}, token)
-      .then((data) => {
-        setChannels(data);
-        if (!channelId) {
-          const firstText = data.find((channel) => channel.type === 'TEXT');
-          if (firstText) {
-            setChannelId(String(firstText.id));
-            localStorage.setItem(CHANNEL_ID_KEY, String(firstText.id));
-          }
-        }
-        if (!voiceChannelId) {
-          const firstVoice = data.find((channel) => channel.type === 'VOICE');
-          if (firstVoice) {
-            setVoiceChannelId(String(firstVoice.id));
-            localStorage.setItem(VOICE_CHANNEL_ID_KEY, String(firstVoice.id));
-          }
-        }
-      })
-      .catch((e) => setError(e.message));
-  }, [token, isAuthed, guildId]);
+  useEffect(() => {
+    if (!isAuthed) return;
+    const socket = io(SOCKET_URL, { path: '/socket.io', auth: { token }, transports: ['websocket', 'polling'] });
+    socketRef.current = socket;
+
+    socket.on('connect_error', (err) => setError(err.message || 'Realtime connection failed'));
+    socket.on('new-message', (message) => {
+      if (String(message.channelId) === String(channelIdRef.current)) {
+        setMessages((prev) => (prev.some((item) => item.id === message.id) ? prev : [...prev, message]));
+      }
+    });
+    socket.on('message-updated', (message) => {
+      setMessages((prev) => prev.map((item) => (item.id === message.id ? message : item)));
+    });
+    socket.on('message-deleted', ({ id }) => {
+      setMessages((prev) => prev.filter((item) => item.id !== id));
+    });
+    socket.on('dm-new-message', () => loadFriends(token).catch(() => {}));
+
+    return () => {
+      socket.disconnect();
+      socketRef.current = null;
+      leaveVoice();
+    };
+  }, [isAuthed, token]);
+
+  useEffect(() => {
+    if (!isAuthed) return;
+    loadWorkspace(token).catch((err) => setError(err.message));
+  }, [isAuthed, token]);
+
+  useEffect(() => {
+    if (!isAuthed || !guildId) return;
+    loadChannels(guildId, token).catch((err) => setError(err.message));
+  }, [isAuthed, guildId, token]);
 
   useEffect(() => {
     if (!isAuthed || !channelId) {
       setMessages([]);
       return;
     }
-
+    socketRef.current?.emit('join-channel', { channelId: Number(channelId) });
     apiFetch(`/messages/${channelId}`, {}, token)
       .then(setMessages)
-      .catch((e) => setError(e.message));
-  }, [token, isAuthed, channelId]);
+      .catch((err) => setError(err.message));
+  }, [isAuthed, channelId, token]);
 
-  useEffect(() => {
-    if (!isAuthed) {
-      return;
-    }
-
-    const socket = io(SOCKET_URL, {
-      path: '/socket.io',
-      auth: { token }
-    });
-    socketRef.current = socket;
-
-    socket.on('connect_error', (err) => {
-      setError(err.message || 'Socket connection failed');
-    });
-
-    socket.on('new-message', (message) => {
-      if (String(message.channelId) !== String(channelId)) {
-        return;
-      }
-      setMessages((prev) => [...prev, message]);
-    });
-
-    socket.on('voice-participants', async (participants) => {
-      for (const participant of participants) {
-        await createPeerAndOffer(participant.socketId);
-      }
-    });
-
-    socket.on('voice-user-joined', async ({ socketId }) => {
-      setParticipantVolumes((prev) => (prev[socketId] ? prev : { ...prev, [socketId]: 100 }));
-      await createPeerAndOffer(socketId);
-    });
-
-    socket.on('voice-offer', async ({ offer, fromSocketId, targetSocketId }) => {
-      if (targetSocketId && targetSocketId !== socket.id) {
-        return;
-      }
-      const peer = await getOrCreatePeer(fromSocketId);
-      await peer.setRemoteDescription(new RTCSessionDescription(offer));
-      const answer = await peer.createAnswer();
-      await peer.setLocalDescription(answer);
-      socket.emit('voice-answer', {
-        channelId: Number(voiceChannelId),
-        answer,
-        targetSocketId: fromSocketId
-      });
-    });
-
-    socket.on('voice-answer', async ({ answer, fromSocketId, targetSocketId }) => {
-      if (targetSocketId && targetSocketId !== socket.id) {
-        return;
-      }
-      const peer = peersRef.current[fromSocketId];
-      if (peer) {
-        await peer.setRemoteDescription(new RTCSessionDescription(answer));
-      }
-    });
-
-    socket.on('voice-ice-candidate', async ({ candidate, fromSocketId, targetSocketId }) => {
-      if (targetSocketId && targetSocketId !== socket.id) {
-        return;
-      }
-      const peer = await getOrCreatePeer(fromSocketId);
-      if (candidate) {
-        await peer.addIceCandidate(new RTCIceCandidate(candidate));
-      }
-    });
-
-    socket.on('voice-user-left', ({ socketId }) => {
-      closePeer(socketId);
-    });
-
-    return () => {
-      socket.disconnect();
-      socketRef.current = null;
-      cleanupVoice();
-    };
-  }, [isAuthed, token, channelId, voiceChannelId, peerConfig]);
-
-  useEffect(() => {
-    if (socketRef.current && channelId) {
-      socketRef.current.emit('join-channel', { channelId: Number(channelId) });
-    }
-  }, [channelId]);
-
-  async function ensureDefaultGuildAndChannel(authToken) {
-    let currentGuild = localStorage.getItem(GUILD_ID_KEY);
-
-    if (!currentGuild) {
-      const createdGuild = await apiFetch(
-        '/guilds',
-        {
+  async function loadWorkspace(authToken) {
+    setBusy(true);
+    try {
+      const [me, loadedGuilds, loadedFriends] = await Promise.all([
+        apiFetch('/me', {}, authToken),
+        apiFetch('/guilds', {}, authToken),
+        apiFetch('/friends', {}, authToken)
+      ]);
+      setUser(me);
+      localStorage.setItem(USER_KEY, JSON.stringify(me));
+      setFriends(loadedFriends);
+      let nextGuilds = loadedGuilds;
+      if (nextGuilds.length === 0) {
+        const created = await apiFetch('/guilds', {
           method: 'POST',
-          body: JSON.stringify({ name: 'Global Guild' })
-        },
-        authToken
-      );
-      currentGuild = String(createdGuild.id);
-      localStorage.setItem(GUILD_ID_KEY, currentGuild);
+          body: JSON.stringify({ name: 'WebCord' })
+        }, authToken);
+        nextGuilds = [created];
+      }
+      setGuilds(nextGuilds);
+      const nextGuildId = pickValidId(nextGuilds, localStorage.getItem(GUILD_KEY));
+      if (nextGuildId) {
+        setGuildId(String(nextGuildId));
+        localStorage.setItem(GUILD_KEY, String(nextGuildId));
+      }
+    } finally {
+      setBusy(false);
     }
-
-    const guildChannels = await apiFetch(`/channels/${currentGuild}`, {}, authToken);
-    let defaultTextChannel = guildChannels.find((channel) => channel.type === 'TEXT');
-    let defaultVoiceChannel = guildChannels.find((channel) => channel.type === 'VOICE');
-
-    if (!defaultTextChannel) {
-      defaultTextChannel = await apiFetch(
-        '/channels',
-        {
-          method: 'POST',
-          body: JSON.stringify({ name: 'general', guildId: Number(currentGuild), type: 'TEXT' })
-        },
-        authToken
-      );
-    }
-
-    if (!defaultVoiceChannel) {
-      defaultVoiceChannel = await apiFetch(
-        '/channels',
-        {
-          method: 'POST',
-          body: JSON.stringify({ name: 'General Voice', guildId: Number(currentGuild), type: 'VOICE' })
-        },
-        authToken
-      );
-    }
-
-    setGuildId(currentGuild);
-    setChannelId(String(defaultTextChannel.id));
-    setVoiceChannelId(String(defaultVoiceChannel.id));
-    localStorage.setItem(CHANNEL_ID_KEY, String(defaultTextChannel.id));
-    localStorage.setItem(VOICE_CHANNEL_ID_KEY, String(defaultVoiceChannel.id));
   }
 
-  async function handleAuthSubmit(e) {
-    e.preventDefault();
+  async function loadChannels(nextGuildId, authToken) {
+    const loadedChannels = await apiFetch(`/channels/${nextGuildId}`, {}, authToken);
+    setChannels(loadedChannels);
+
+    const nextTextId = pickValidId(loadedChannels, localStorage.getItem(CHANNEL_KEY), (item) => item.type === 'TEXT');
+    const nextVoiceId = pickValidId(loadedChannels, localStorage.getItem(VOICE_KEY), (item) => item.type === 'VOICE');
+
+    setChannelId(nextTextId ? String(nextTextId) : '');
+    setVoiceChannelId(nextVoiceId ? String(nextVoiceId) : '');
+    if (nextTextId) localStorage.setItem(CHANNEL_KEY, String(nextTextId));
+    else localStorage.removeItem(CHANNEL_KEY);
+    if (nextVoiceId) localStorage.setItem(VOICE_KEY, String(nextVoiceId));
+    else localStorage.removeItem(VOICE_KEY);
+  }
+
+  async function loadFriends(authToken = token) {
+    const loadedFriends = await apiFetch('/friends', {}, authToken);
+    setFriends(loadedFriends);
+  }
+
+  async function handleAuth(event) {
+    event.preventDefault();
     setError('');
-
+    setBusy(true);
     try {
-      const data = await apiFetch(`/${mode}`, {
+      const payload = await apiFetch(`/${authMode}`, {
         method: 'POST',
-        body: JSON.stringify({ username, password })
+        body: JSON.stringify({ username: username.trim(), password })
       });
-
-      setToken(data.token);
-      setUser(data.user);
-      localStorage.setItem('webcord_token', data.token);
-      localStorage.setItem('webcord_user', JSON.stringify(data.user));
-      await ensureDefaultGuildAndChannel(data.token);
+      setToken(payload.token);
+      setUser(payload.user);
+      localStorage.setItem(TOKEN_KEY, payload.token);
+      localStorage.setItem(USER_KEY, JSON.stringify(payload.user));
       setUsername('');
       setPassword('');
-    } catch (e) {
-      setError(e.message);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
     }
   }
 
-  function handleLogout() {
-    cleanupVoice();
-    setVoiceJoined(false);
-    setMessages([]);
+  function logout() {
+    leaveVoice();
     setToken('');
     setUser(null);
-    localStorage.removeItem('webcord_token');
-    localStorage.removeItem('webcord_user');
+    setGuilds([]);
+    setChannels([]);
+    setMessages([]);
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(USER_KEY);
   }
 
-  async function handleFileSelect(e) {
-    const file = e.target.files?.[0];
-    if (!file || !token) {
-      return;
-    }
+  async function createGuild(event) {
+    event.preventDefault();
+    if (!newGuildName.trim()) return;
+    const created = await apiFetch('/guilds', {
+      method: 'POST',
+      body: JSON.stringify({ name: newGuildName.trim() })
+    }, token);
+    setGuilds((prev) => [...prev, created]);
+    setGuildId(String(created.id));
+    localStorage.setItem(GUILD_KEY, String(created.id));
+    setNewGuildName('');
+  }
 
+  async function createChannel(event) {
+    event.preventDefault();
+    if (!newChannelName.trim() || !guildId) return;
+    const created = await apiFetch('/channels', {
+      method: 'POST',
+      body: JSON.stringify({ guildId: Number(guildId), name: newChannelName.trim(), type: newChannelType })
+    }, token);
+    setChannels((prev) => [...prev, created]);
+    if (created.type === 'TEXT') {
+      setChannelId(String(created.id));
+      localStorage.setItem(CHANNEL_KEY, String(created.id));
+    } else {
+      setVoiceChannelId(String(created.id));
+      localStorage.setItem(VOICE_KEY, String(created.id));
+    }
+    setNewChannelName('');
+  }
+
+  async function requestFriend(event) {
+    event.preventDefault();
+    if (!friendName.trim()) return;
+    await apiFetch('/friends/request', {
+      method: 'POST',
+      body: JSON.stringify({ username: friendName.trim() })
+    }, token);
+    setFriendName('');
+    await loadFriends();
+  }
+
+  async function acceptFriend(friendshipId) {
+    await apiFetch(`/friends/${friendshipId}/accept`, { method: 'POST' }, token);
+    await loadFriends();
+  }
+
+  async function selectGuild(nextGuildId) {
+    setGuildId(String(nextGuildId));
+    localStorage.setItem(GUILD_KEY, String(nextGuildId));
+    setView('chat');
+  }
+
+  function selectTextChannel(nextChannelId) {
+    setChannelId(String(nextChannelId));
+    localStorage.setItem(CHANNEL_KEY, String(nextChannelId));
+    setView('chat');
+  }
+
+  function selectVoiceChannel(nextChannelId) {
+    setVoiceChannelId(String(nextChannelId));
+    localStorage.setItem(VOICE_KEY, String(nextChannelId));
+  }
+
+  async function uploadFile(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const formData = new FormData();
+    formData.append('file', file);
+    setUploading(true);
+    setError('');
     try {
-      setUploading(true);
-      setError('');
-      const formData = new FormData();
-      formData.append('file', file);
       const uploaded = await apiFetch('/upload', { method: 'POST', body: formData }, token);
       setPendingAttachment(uploaded);
-    } catch (uploadError) {
-      setError(uploadError.message);
-      setPendingAttachment(null);
+    } catch (err) {
+      setError(err.message);
     } finally {
       setUploading(false);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-      }
+      if (fileInputRef.current) fileInputRef.current.value = '';
     }
   }
 
-  async function sendMessage(e) {
-    e.preventDefault();
-    const content = newMessage.trim();
-
-    if ((!content && !pendingAttachment) || !socketRef.current || !channelId) {
-      return;
-    }
-
-    socketRef.current.emit('send-message', {
+  async function sendMessage(event) {
+    event.preventDefault();
+    const content = messageInput.trim();
+    if ((!content && !pendingAttachment) || !channelId) return;
+    const payload = {
       channelId: Number(channelId),
       content,
       attachmentUrl: pendingAttachment?.url,
       attachmentType: pendingAttachment?.type,
       attachmentName: pendingAttachment?.name
-    });
-    setNewMessage('');
+    };
+
+    if (socketRef.current?.connected) {
+      socketRef.current.emit('send-message', payload);
+    } else {
+      const created = await apiFetch('/messages', {
+        method: 'POST',
+        body: JSON.stringify(payload)
+      }, token);
+      setMessages((prev) => [...prev, created]);
+    }
+
+    setMessageInput('');
     setPendingAttachment(null);
-    setShowEmojiPicker(false);
+    setShowEmoji(false);
   }
 
-  async function handleCreateChannel(e) {
-    e.preventDefault();
-    if (!newChannelName.trim() || !guildId) {
-      return;
-    }
-
-    try {
-      const createdChannel = await apiFetch(
-        '/channels',
-        {
-          method: 'POST',
-          body: JSON.stringify({
-            name: newChannelName.trim(),
-            guildId: Number(guildId),
-            type: newChannelType
-          })
-        },
-        token
-      );
-      setChannels((prev) => [...prev, createdChannel]);
-      if (createdChannel.type === 'TEXT') {
-        setChannelId(String(createdChannel.id));
-        localStorage.setItem(CHANNEL_ID_KEY, String(createdChannel.id));
-      } else {
-        setVoiceChannelId(String(createdChannel.id));
-        localStorage.setItem(VOICE_CHANNEL_ID_KEY, String(createdChannel.id));
-      }
-      setNewChannelName('');
-      setNewChannelType('TEXT');
-    } catch (channelError) {
-      setError(channelError.message);
-    }
-  }
-
-  function selectTextChannel(nextChannelId) {
-    setChannelId(String(nextChannelId));
-    localStorage.setItem(CHANNEL_ID_KEY, String(nextChannelId));
-  }
-
-  function selectVoiceChannel(nextChannelId) {
+  async function toggleVoice() {
     if (voiceJoined) {
-      cleanupVoice();
+      leaveVoice();
       setVoiceJoined(false);
-    }
-    setVoiceChannelId(String(nextChannelId));
-    localStorage.setItem(VOICE_CHANNEL_ID_KEY, String(nextChannelId));
-  }
-
-  async function getOrCreatePeer(remoteSocketId) {
-    if (peersRef.current[remoteSocketId]) {
-      return peersRef.current[remoteSocketId];
-    }
-
-    const peer = new RTCPeerConnection(peerConfig);
-    peersRef.current[remoteSocketId] = peer;
-    setParticipantVolumes((prev) => (prev[remoteSocketId] ? prev : { ...prev, [remoteSocketId]: 100 }));
-
-    if (localStreamRef.current) {
-      localStreamRef.current.getTracks().forEach((track) => {
-        peer.addTrack(track, localStreamRef.current);
-      });
-    }
-
-    peer.onicecandidate = (event) => {
-      if (event.candidate && socketRef.current) {
-        socketRef.current.emit('voice-ice-candidate', {
-          channelId: Number(voiceChannelId),
-          candidate: event.candidate,
-          targetSocketId: remoteSocketId
-        });
-      }
-    };
-
-    peer.ontrack = (event) => {
-      let audio = remoteAudioRef.current[remoteSocketId];
-      if (!audio) {
-        audio = document.createElement('audio');
-        audio.autoplay = true;
-        remoteAudioRef.current[remoteSocketId] = audio;
-      }
-      audio.srcObject = event.streams[0];
-      audio.volume = (participantVolumes[remoteSocketId] ?? 100) / 100;
-    };
-
-    return peer;
-  }
-
-  async function createPeerAndOffer(remoteSocketId) {
-    if (!voiceJoined || !localStreamRef.current || !socketRef.current || !remoteSocketId || !voiceChannelId) {
       return;
     }
-    const peer = await getOrCreatePeer(remoteSocketId);
-    const offer = await peer.createOffer();
-    await peer.setLocalDescription(offer);
-    socketRef.current.emit('voice-offer', {
-      channelId: Number(voiceChannelId),
-      offer,
-      targetSocketId: remoteSocketId
-    });
-  }
-
-  function closePeer(remoteSocketId) {
-    if (peersRef.current[remoteSocketId]) {
-      peersRef.current[remoteSocketId].close();
-      delete peersRef.current[remoteSocketId];
-    }
-
-    if (remoteAudioRef.current[remoteSocketId]) {
-      remoteAudioRef.current[remoteSocketId].srcObject = null;
-      delete remoteAudioRef.current[remoteSocketId];
-    }
-
-    setParticipantVolumes((prev) => {
-      const clone = { ...prev };
-      delete clone[remoteSocketId];
-      return clone;
-    });
-  }
-
-  function cleanupVoice() {
-    if (socketRef.current) {
-      socketRef.current.emit('leave-voice');
-    }
-
-    Object.keys(peersRef.current).forEach(closePeer);
-
-    if (localStreamRef.current) {
-      localStreamRef.current.getTracks().forEach((track) => track.stop());
-      localStreamRef.current = null;
-    }
-  }
-
-  async function handleJoinVoice() {
     if (!voiceChannelId) {
       setError('Select a voice channel first');
       return;
     }
-
     try {
-      if (voiceJoined) {
-        cleanupVoice();
-        setVoiceJoined(false);
-        return;
-      }
-
-      localStreamRef.current = await navigator.mediaDevices.getUserMedia({ audio: true });
-      setVoiceJoined(true);
+      voiceStreamRef.current = await navigator.mediaDevices.getUserMedia({ audio: true });
       socketRef.current?.emit('join-voice', { channelId: Number(voiceChannelId) });
+      setVoiceJoined(true);
     } catch {
-      setError('Could not access microphone');
+      setError('Microphone access was blocked');
     }
   }
 
-  function handleThemeChange(key, value) {
-    setTheme((prev) => ({ ...prev, [key]: value }));
-  }
-
-  function resetTheme() {
-    setTheme(defaultTheme);
-  }
-
-  function handleVolumeChange(socketId, value) {
-    setParticipantVolumes((prev) => ({ ...prev, [socketId]: value }));
-    const audio = remoteAudioRef.current[socketId];
-    if (audio) {
-      audio.volume = value / 100;
-    }
+  function leaveVoice() {
+    socketRef.current?.emit('leave-voice');
+    voiceStreamRef.current?.getTracks().forEach((track) => track.stop());
+    voiceStreamRef.current = null;
   }
 
   if (!isAuthed) {
     return (
-      <main className="auth-wrapper">
-        <form className="card" onSubmit={handleAuthSubmit}>
+      <main className="auth-screen">
+        <section className="auth-card">
+          <div className="brand-mark">WC</div>
           <h1>WebCord</h1>
-          <p className="muted">Self-hosted Discord-like chat</p>
-          <div className="row">
-            <button type="button" className={mode === 'login' ? 'active' : ''} onClick={() => setMode('login')}>
-              Login
+          <p>Fast voice and chat for your private community.</p>
+          <form onSubmit={handleAuth}>
+            <div className="segmented">
+              <button type="button" className={authMode === 'login' ? 'selected' : ''} onClick={() => setAuthMode('login')}>
+                Sign in
+              </button>
+              <button type="button" className={authMode === 'register' ? 'selected' : ''} onClick={() => setAuthMode('register')}>
+                Register
+              </button>
+            </div>
+            <input value={username} onChange={(event) => setUsername(event.target.value)} placeholder="Username" autoComplete="username" required />
+            <input value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Password" type="password" autoComplete="current-password" required />
+            {error ? <p className="error">{error}</p> : null}
+            <button className="primary-action" type="submit" disabled={busy}>
+              {busy ? 'Please wait...' : authMode === 'login' ? 'Enter WebCord' : 'Create account'}
             </button>
-            <button
-              type="button"
-              className={mode === 'register' ? 'active' : ''}
-              onClick={() => setMode('register')}
-            >
-              Register
-            </button>
-          </div>
-          <input placeholder="Username" value={username} onChange={(e) => setUsername(e.target.value)} required />
-          <input
-            placeholder="Password"
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-          />
-          {error ? <p className="error">{error}</p> : null}
-          <button type="submit">{mode === 'login' ? 'Login' : 'Create account'}</button>
-        </form>
+          </form>
+        </section>
       </main>
     );
   }
 
   return (
-    <main className="chat-layout">
-      <aside className="sidebar">
-        <h2>WebCord</h2>
-        <p>{user?.username}</p>
-
-        <div className="channels-card">
-          <h3>Text Channels</h3>
-          {textChannels.map((channel) => (
-            <button
-              key={channel.id}
-              className={String(channel.id) === String(channelId) ? 'channel-btn active' : 'channel-btn'}
-              onClick={() => selectTextChannel(channel.id)}
-            >
-              # {channel.name}
-            </button>
-          ))}
-
-          <h3>Voice Channels</h3>
-          {voiceChannels.map((channel) => (
-            <button
-              key={channel.id}
-              className={String(channel.id) === String(voiceChannelId) ? 'channel-btn active' : 'channel-btn'}
-              onClick={() => selectVoiceChannel(channel.id)}
-            >
-              🔊 {channel.name}
-            </button>
-          ))}
-
-          <form className="channel-form" onSubmit={handleCreateChannel}>
-            <input
-              value={newChannelName}
-              onChange={(e) => setNewChannelName(e.target.value)}
-              placeholder="New channel"
-            />
-            <select value={newChannelType} onChange={(e) => setNewChannelType(e.target.value)}>
-              <option value="TEXT">TEXT</option>
-              <option value="VOICE">VOICE</option>
-            </select>
-            <button type="submit">+ Create</button>
-          </form>
-        </div>
-
-        <button onClick={handleJoinVoice}>{voiceJoined ? 'Leave Voice' : `Join Voice${activeVoiceChannel ? `: ${activeVoiceChannel.name}` : ''}`}</button>
-        <button onClick={handleLogout} className="danger">
-          Logout
+    <main className="discord-shell">
+      <aside className="guild-rail">
+        <button className={view === 'friends' ? 'rail-button active' : 'rail-button'} onClick={() => setView('friends')} title="Friends">
+          @
         </button>
-
-        <div className="settings-card">
-          <h3>Theme</h3>
-          <label>
-            Background <input type="color" value={theme.bg} onChange={(e) => handleThemeChange('bg', e.target.value)} />
-          </label>
-          <label>
-            Panel <input type="color" value={theme.panel} onChange={(e) => handleThemeChange('panel', e.target.value)} />
-          </label>
-          <label>
-            Accent <input type="color" value={theme.accent} onChange={(e) => handleThemeChange('accent', e.target.value)} />
-          </label>
-          <label>
-            Text <input type="color" value={theme.text} onChange={(e) => handleThemeChange('text', e.target.value)} />
-          </label>
-          <button onClick={resetTheme}>Reset Theme</button>
-        </div>
-      </aside>
-      <section className="chat-panel">
-        <header>{activeTextChannel ? `# ${activeTextChannel.name}` : 'No text channel selected'}</header>
-        {voiceJoined && (
-          <div className="voice-controls">
-            <h3>Voice Users Volume</h3>
-            {Object.keys(participantVolumes).length === 0 ? (
-              <p className="muted">No remote users yet</p>
-            ) : (
-              Object.entries(participantVolumes).map(([socketId, volume]) => (
-                <label key={socketId} className="volume-row">
-                  <span>{socketId.slice(0, 8)}</span>
-                  <input
-                    type="range"
-                    min="0"
-                    max="200"
-                    value={volume}
-                    onChange={(e) => handleVolumeChange(socketId, Number(e.target.value))}
-                  />
-                  <span>{volume}%</span>
-                </label>
-              ))
-            )}
-          </div>
-        )}
-        <div className="messages">
-          {messages.map((message) => (
-            <div key={message.id} className="message">
-              <strong>{message.author?.username || 'unknown'}:</strong>
-              {message.content ? <span className="message-content"> {message.content}</span> : null}
-              {message.attachmentType === 'IMAGE' ? (
-                <img className="message-media" src={getAttachmentUrl(message.attachmentUrl)} alt={message.attachmentName || 'image'} />
-              ) : null}
-              {message.attachmentType === 'VIDEO' ? (
-                <video className="message-media" controls src={getAttachmentUrl(message.attachmentUrl)} />
-              ) : null}
-              {message.attachmentType === 'FILE' ? (
-                <a href={getAttachmentUrl(message.attachmentUrl)} download className="file-link">
-                  {message.attachmentName || 'file'}
-                </a>
-              ) : null}
-            </div>
-          ))}
-        </div>
-        <form className="message-form" onSubmit={sendMessage}>
-          <input ref={fileInputRef} type="file" onChange={handleFileSelect} hidden />
-          <button type="button" onClick={() => fileInputRef.current?.click()} title="Attach file">
-            📎
+        <div className="rail-divider" />
+        {guilds.map((guild) => (
+          <button
+            key={guild.id}
+            className={String(guild.id) === String(guildId) && view === 'chat' ? 'rail-button active' : 'rail-button'}
+            onClick={() => selectGuild(guild.id)}
+            title={guild.name}
+          >
+            {initials(guild.name)}
           </button>
-          <div className="emoji-wrapper">
-            <button type="button" onClick={() => setShowEmojiPicker((prev) => !prev)} title="Emoji picker">
-              😀
-            </button>
-            {showEmojiPicker ? (
-              <div className="emoji-popover">
-                <Picker
-                  data={data}
-                  theme="dark"
-                  onEmojiSelect={(emoji) => {
-                    setNewMessage((prev) => `${prev}${emoji.native}`);
-                    setShowEmojiPicker(false);
-                  }}
-                />
-              </div>
-            ) : null}
-          </div>
-          <input value={newMessage} onChange={(e) => setNewMessage(e.target.value)} placeholder="Type a message" />
-          <button type="submit" disabled={uploading || (!newMessage.trim() && !pendingAttachment)}>
-            Send
-          </button>
+        ))}
+        <form className="mini-form" onSubmit={createGuild}>
+          <input value={newGuildName} onChange={(event) => setNewGuildName(event.target.value)} placeholder="New server" />
+          <button title="Create server">+</button>
         </form>
-        {pendingAttachment ? <p className="muted">Attached: {pendingAttachment.name}</p> : null}
-        {uploading ? <p className="muted">Uploading...</p> : null}
-        {error ? <p className="error">{error}</p> : null}
+      </aside>
+
+      <aside className="channel-sidebar">
+        <header className="server-header">
+          <div>
+            <strong>{activeGuild?.name || 'WebCord'}</strong>
+            <span>{user?.displayName || user?.username}</span>
+          </div>
+          <button onClick={logout} title="Logout">Exit</button>
+        </header>
+
+        <section className="channel-section">
+          <div className="section-title">Text Channels</div>
+          {textChannels.map((channel) => (
+            <button key={channel.id} className={String(channel.id) === String(channelId) ? 'channel-row active' : 'channel-row'} onClick={() => selectTextChannel(channel.id)}>
+              <span>#</span>
+              {channel.name}
+            </button>
+          ))}
+        </section>
+
+        <section className="channel-section">
+          <div className="section-title">Voice Channels</div>
+          {voiceChannels.map((channel) => (
+            <button key={channel.id} className={String(channel.id) === String(voiceChannelId) ? 'channel-row active' : 'channel-row'} onClick={() => selectVoiceChannel(channel.id)}>
+              <span>VC</span>
+              {channel.name}
+            </button>
+          ))}
+          <button className={voiceJoined ? 'voice-button connected' : 'voice-button'} onClick={toggleVoice}>
+            {voiceJoined ? 'Connected' : `Join ${activeVoiceChannel?.name || 'voice'}`}
+          </button>
+        </section>
+
+        <form className="create-channel" onSubmit={createChannel}>
+          <input value={newChannelName} onChange={(event) => setNewChannelName(event.target.value)} placeholder="Create channel" />
+          <select value={newChannelType} onChange={(event) => setNewChannelType(event.target.value)}>
+            <option value="TEXT">Text</option>
+            <option value="VOICE">Voice</option>
+          </select>
+          <button>Create</button>
+        </form>
+      </aside>
+
+      <section className={view === 'friends' ? 'content friends-view' : 'content'}>
+        {view === 'friends' ? (
+          <>
+            <header className="topbar">
+              <h2>Friends</h2>
+              <form className="friend-form" onSubmit={requestFriend}>
+                <input value={friendName} onChange={(event) => setFriendName(event.target.value)} placeholder="Add by username" />
+                <button>Add Friend</button>
+              </form>
+            </header>
+            <div className="friends-list">
+              {[...pendingFriends, ...acceptedFriends].map((friend) => (
+                <article className="friend-card" key={friend.id}>
+                  <div className="avatar">{initials(friend.user.displayName || friend.user.username)}</div>
+                  <div>
+                    <strong>{friend.user.displayName || friend.user.username}</strong>
+                    <span>{friend.status === 'PENDING' ? (friend.isOutgoingRequest ? 'Request sent' : 'Incoming request') : 'Online recently'}</span>
+                  </div>
+                  {friend.status === 'PENDING' && !friend.isOutgoingRequest ? (
+                    <button onClick={() => acceptFriend(friend.id)}>Accept</button>
+                  ) : null}
+                </article>
+              ))}
+              {friends.length === 0 ? <p className="empty-state">Add a friend to start direct conversations.</p> : null}
+            </div>
+          </>
+        ) : (
+          <>
+            <header className="topbar">
+              <div>
+                <h2>{activeChannel ? `# ${activeChannel.name}` : 'Select a channel'}</h2>
+                <span>{messages.length} messages in this channel</span>
+              </div>
+              <button onClick={() => loadWorkspace(token)}>Refresh</button>
+            </header>
+
+            <div className="message-list" ref={messagesRef}>
+              {messages.map((message) => (
+                <article className="message-card" key={message.id}>
+                  <div className="avatar">{initials(message.author?.displayName || message.author?.username || 'U')}</div>
+                  <div className="message-body">
+                    <div className="message-meta">
+                      <strong>{message.author?.displayName || message.author?.username || 'Unknown'}</strong>
+                      <span>{timeLabel(message.createdAt)}</span>
+                    </div>
+                    {message.content ? <p>{message.content}</p> : null}
+                    {message.attachmentType === 'IMAGE' ? <img src={attachmentUrl(message.attachmentUrl)} alt={message.attachmentName || 'image'} /> : null}
+                    {message.attachmentType === 'VIDEO' ? <video src={attachmentUrl(message.attachmentUrl)} controls /> : null}
+                    {message.attachmentType === 'FILE' ? <a href={attachmentUrl(message.attachmentUrl)} download>{message.attachmentName || 'Download file'}</a> : null}
+                  </div>
+                </article>
+              ))}
+              {activeChannel && messages.length === 0 ? <p className="empty-state">No messages yet. Start the conversation.</p> : null}
+            </div>
+
+            <form className="composer" onSubmit={sendMessage}>
+              <input ref={fileInputRef} type="file" hidden onChange={uploadFile} />
+              <button type="button" onClick={() => fileInputRef.current?.click()} title="Attach file">+</button>
+              <button type="button" onClick={() => setShowEmoji((value) => !value)} title="Emoji">:-)</button>
+              {showEmoji ? (
+                <div className="emoji-popover">
+                  <Picker data={data} theme="dark" onEmojiSelect={(emoji) => setMessageInput((value) => `${value}${emoji.native}`)} />
+                </div>
+              ) : null}
+              <input value={messageInput} onChange={(event) => setMessageInput(event.target.value)} placeholder={activeChannel ? `Message #${activeChannel.name}` : 'Select a channel'} disabled={!activeChannel} />
+              <button className="send-button" type="submit" disabled={!activeChannel || uploading || (!messageInput.trim() && !pendingAttachment)}>
+                Send
+              </button>
+            </form>
+            {pendingAttachment ? <p className="attachment-pill">Attached: {pendingAttachment.name}</p> : null}
+          </>
+        )}
+        {error ? <div className="toast" onClick={() => setError('')}>{error}</div> : null}
       </section>
+
+      <aside className="member-sidebar">
+        <h3>Active Now</h3>
+        <article className="activity-card">
+          <div className="avatar online">{initials(user?.displayName || user?.username)}</div>
+          <div>
+            <strong>{user?.displayName || user?.username}</strong>
+            <span>{voiceJoined ? `In ${activeVoiceChannel?.name || 'voice'}` : 'Browsing WebCord'}</span>
+          </div>
+        </article>
+        <h3>Friends</h3>
+        {acceptedFriends.slice(0, 8).map((friend) => (
+          <article className="member-row" key={friend.id}>
+            <div className="avatar small">{initials(friend.user.displayName || friend.user.username)}</div>
+            <span>{friend.user.displayName || friend.user.username}</span>
+          </article>
+        ))}
+      </aside>
     </main>
   );
 }

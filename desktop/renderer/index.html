@@ -1,35 +1,110 @@
 <!doctype html>
-<html lang="ru">
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self' https://cdn.socket.io https://webcordes.ru; connect-src 'self' https://webcordes.ru wss://webcordes.ru; img-src 'self' data: https://webcordes.ru; style-src 'self' 'unsafe-inline'; script-src 'self' https://cdn.socket.io;" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' https://cdn.socket.io https://webcordes.ru; connect-src 'self' https://webcordes.ru wss://webcordes.ru; img-src 'self' data: https://webcordes.ru; media-src 'self' https://webcordes.ru; style-src 'self' 'unsafe-inline'; script-src 'self' https://cdn.socket.io;" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Webcord Desktop</title>
+  <title>WebCord Desktop</title>
   <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
-  <div id="app">
-    <aside class="panel guilds"><h3>Servers</h3><div id="guildList"></div></aside>
-    <aside class="panel channels"><h3>Channels</h3><div id="channelList"></div></aside>
-    <main class="panel chat">
-      <header id="chatHeader">Выберите канал</header>
-      <section id="messageList"></section>
-      <form id="composer"><input id="messageInput" placeholder="Написать сообщение..." /><button>Send</button></form>
+  <div id="app" class="desktop-shell">
+    <aside class="guild-rail">
+      <button id="friendsHome" class="rail-button active" title="Friends">@</button>
+      <div class="rail-divider"></div>
+      <div id="guildList" class="rail-list"></div>
+    </aside>
+
+    <aside class="sidebar">
+      <header class="server-header">
+        <div>
+          <strong id="serverName">WebCord</strong>
+          <span id="accountName">Offline</span>
+        </div>
+        <button id="logoutBtn">Exit</button>
+      </header>
+
+      <section class="nav-section">
+        <button id="friendsBtn" class="nav-row active"><span>@</span> Friends</button>
+      </section>
+
+      <section class="nav-section">
+        <div class="section-title">Text Channels</div>
+        <div id="textChannelList"></div>
+      </section>
+
+      <section class="nav-section">
+        <div class="section-title">Voice Channels</div>
+        <div id="voiceChannelList"></div>
+      </section>
+
+      <form id="channelForm" class="channel-form">
+        <input id="newChannelName" placeholder="New channel" />
+        <select id="newChannelType">
+          <option value="TEXT">Text</option>
+          <option value="VOICE">Voice</option>
+        </select>
+        <button>Create</button>
+      </form>
+    </aside>
+
+    <main class="content">
+      <header class="topbar">
+        <div>
+          <h1 id="viewTitle">Friends</h1>
+          <span id="viewSubtitle">Ready</span>
+        </div>
+        <button id="refreshBtn">Refresh</button>
+      </header>
+
+      <section id="friendsView" class="friends-view">
+        <form id="friendForm" class="friend-form">
+          <input id="friendName" placeholder="Add friend by username" />
+          <button>Add Friend</button>
+        </form>
+        <div id="friendsList" class="friends-list"></div>
+      </section>
+
+      <section id="chatView" class="chat-view hidden">
+        <div id="messageList" class="message-list"></div>
+        <form id="composer" class="composer">
+          <input id="messageInput" placeholder="Message" />
+          <button>Send</button>
+        </form>
+      </section>
     </main>
-    <aside class="panel right"><h3>DM / Friends</h3><div id="friendsList"></div></aside>
+
+    <aside class="rightbar">
+      <h2>Active Now</h2>
+      <div id="activityList"></div>
+    </aside>
   </div>
 
-  <dialog id="authModal" open>
-    <h2>Вход в Webcord</h2>
-    <input id="username" placeholder="username" />
-    <input id="password" type="password" placeholder="password" />
-    <div class="row"><button id="loginBtn">Login</button><button id="registerBtn">Register</button></div>
-    <p id="authError"></p>
+  <dialog id="authModal" class="auth-modal">
+    <div class="brand-mark">WC</div>
+    <h2>WebCord</h2>
+    <p>Sign in to your private chat.</p>
+    <input id="username" placeholder="Username" autocomplete="username" />
+    <input id="password" type="password" placeholder="Password" autocomplete="current-password" />
+    <div class="auth-actions">
+      <button id="loginBtn">Sign in</button>
+      <button id="registerBtn">Register</button>
+    </div>
+    <p id="authError" class="error"></p>
   </dialog>
 
-  <dialog id="quickSwitcher"><input id="quickInput" placeholder="Ctrl+K: switch server/channel" /><div id="quickResults"></div></dialog>
-  <dialog id="hotkeys"><h3>Hotkeys</h3><ul><li>Ctrl+K — quick switcher</li><li>Ctrl+/ — hotkeys</li><li>Esc — close modal</li></ul></dialog>
+  <dialog id="quickSwitcher" class="quick-modal">
+    <input id="quickInput" placeholder="Jump to server or channel" />
+    <div id="quickResults"></div>
+  </dialog>
 
+  <dialog id="hotkeys" class="quick-modal">
+    <h3>Hotkeys</h3>
+    <p>Ctrl+K opens quick switcher.</p>
+    <p>Ctrl+/ opens this help.</p>
+  </dialog>
+
+  <div id="toast" class="toast hidden"></div>
   <script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
   <script src="./renderer.js"></script>
 </body>
