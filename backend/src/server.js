@@ -19,6 +19,14 @@ const CLIENT_ORIGINS = String(process.env.CLIENT_URL || '')
   .split(',')
   .map((origin) => origin.trim())
   .filter(Boolean);
+const NATIVE_CLIENT_ORIGINS = [
+  'capacitor://localhost',
+  'ionic://localhost',
+  'app://localhost',
+  'file://',
+  'http://localhost',
+  'https://localhost'
+];
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -259,9 +267,16 @@ async function createDirectConversationMessage({ conversationId, userId, content
 
 function isAllowedCorsOrigin(origin, callback) {
   const isLocalDevOrigin =
-    process.env.NODE_ENV !== 'production' && /^https?:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin || '');
+    /^https?:\/\/(localhost|127\.0\.0\.1|10\.0\.2\.2)(:\d+)?$/.test(origin || '');
 
-  if (!origin || isLocalDevOrigin || CLIENT_ORIGINS.length === 0 || CLIENT_ORIGINS.includes('*') || CLIENT_ORIGINS.includes(origin)) {
+  if (
+    !origin ||
+    isLocalDevOrigin ||
+    NATIVE_CLIENT_ORIGINS.includes(origin) ||
+    CLIENT_ORIGINS.length === 0 ||
+    CLIENT_ORIGINS.includes('*') ||
+    CLIENT_ORIGINS.includes(origin)
+  ) {
     callback(null, true);
     return;
   }

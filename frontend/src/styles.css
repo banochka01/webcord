@@ -1609,3 +1609,43 @@ p {
     grid-template-columns: 1fr;
   }
 }
+
+.native-client body {
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+}
+
+.native-client button,
+.native-client input,
+.native-client select,
+.native-client textarea {
+  font-size: 16px;
+}
+
+@media (hover: none), (pointer: coarse) {
+  button,
+  .channel-btn,
+  .settings-nav-item,
+  .activity-card,
+  .friend-row button {
+    min-height: 44px;
+  }
+
+  .composer-btn,
+  .icon-btn {
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+  }
+
+  button:hover {
+    background: var(--soft-bg);
+  }
+
+  button:active,
+  .channel-btn:active,
+  .activity-card:active {
+    background: var(--surface-3);
+  }
+}

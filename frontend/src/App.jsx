@@ -1,8 +1,17 @@
 import React, { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
 import { io } from 'socket.io-client';
 
-const API_URL = import.meta.env.VITE_API_URL || '/api';
-const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || window.location.origin;
+const REMOTE_ORIGIN = import.meta.env.VITE_REMOTE_ORIGIN || 'https://webcordes.ru';
+const IS_NATIVE_CLIENT = Boolean(
+  window.webcordDesktop ||
+  window.webcordWindow ||
+  window.electronAPI ||
+  window.Capacitor?.isNativePlatform?.() ||
+  /\b(WebCordDesktop|WebCordAndroid|Electron)\b/i.test(navigator.userAgent)
+);
+const API_URL = import.meta.env.VITE_API_URL || (IS_NATIVE_CLIENT ? `${REMOTE_ORIGIN}/api` : '/api');
+const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || (API_URL.startsWith('http') ? new URL(API_URL).origin : window.location.origin);
+const SOCKET_TRANSPORTS = IS_NATIVE_CLIENT ? ['websocket'] : ['websocket', 'polling'];
 const MESSAGE_POLL_INTERVAL_MS = 6000;
 const KEYS = {
   text: 'webcord_last_text_channel_id',
@@ -88,6 +97,20 @@ function getAttachmentUrl(value) {
   if (/^(https?:|blob:|data:)/i.test(value)) return value;
   if (value.startsWith('/uploads/')) return `${getApiOrigin()}${value}`;
   return value;
+}
+
+function showClientNotification(title, body) {
+  if (!IS_NATIVE_CLIENT || !document.hidden) return;
+  const bridge = window.webcordDesktop || window.webcordWindow || window.electronAPI;
+  if (typeof bridge?.notify === 'function') {
+    bridge.notify({ title, body });
+    return;
+  }
+  if ('Notification' in window && Notification.permission === 'granted') {
+    new Notification(title, { body });
+  } else if ('Notification' in window && Notification.permission === 'default') {
+    Notification.requestPermission().catch(() => {});
+  }
 }
 
 function sortMessages(list) {
@@ -775,8 +798,13 @@ export default function App() {
     const socket = io(SOCKET_URL, {
       path: '/socket.io',
       auth: { token },
-      upgrade: true,
-      rememberUpgrade: true
+      transports: SOCKET_TRANSPORTS,
+      upgrade: !IS_NATIVE_CLIENT,
+      rememberUpgrade: true,
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 800,
+      reconnectionDelayMax: 5000
     });
     socketRef.current = socket;
 
@@ -797,12 +825,18 @@ export default function App() {
       const scope = scopeRef.current;
       if (scope.type === 'channel' && String(message.channelId) === scope.id) {
         setMessages((prev) => mergeMessage(prev, message));
+        if (String(message.author?.id) !== String(user?.id)) {
+          showClientNotification(message.author?.username || 'WebCord', message.content || message.attachmentName || 'New message');
+        }
       }
     });
     socket.on('direct-message:new', (message) => {
       const scope = scopeRef.current;
       if (scope.type === 'dm' && String(message.conversationId) === scope.id) {
         setMessages((prev) => mergeMessage(prev, message));
+        if (String(message.author?.id) !== String(user?.id)) {
+          showClientNotification(message.author?.username || 'Direct message', message.content || message.attachmentName || 'New direct message');
+        }
       }
     });
     socket.on('channel-created', (channel) => {
@@ -1236,6 +1270,7 @@ export default function App() {
         setMessages((prev) => mergeMessage(prev, createdMessage));
       }
 
+      setError('');
       setNewMessage('');
       setPendingAttachment(null);
       setShowEmojiPicker(false);

@@ -21,3 +21,9 @@ Thumbs.db
 .vite/
 .cache/
 coverage/
+
+android/.gradle/
+android/app/build/
+android/build/
+desktop/dist/
+desktop/out/

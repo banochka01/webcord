@@ -1,0 +1,43 @@
+{
+  "name": "webcord-desktop",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Desktop shell for WebCord",
+  "main": "main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "dev": "set WEBCORD_DESKTOP_URL=http://127.0.0.1:5173&& electron .",
+    "pack": "npm --prefix ../frontend run build && electron-builder --dir",
+    "build": "npm --prefix ../frontend run build && electron-builder --win nsis portable --publish never"
+  },
+  "devDependencies": {
+    "electron": "^39.2.7",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "com.webcord.desktop",
+    "productName": "WebCord",
+    "asar": true,
+    "files": [
+      "main.cjs",
+      "preload.cjs",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../frontend/dist",
+        "to": "frontend"
+      }
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}

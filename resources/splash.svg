@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2732" height="2732" viewBox="0 0 2732 2732">
+  <rect width="2732" height="2732" fill="#111318"/>
+  <rect x="1110" y="1046" width="512" height="512" rx="116" fill="#5865f2"/>
+  <path d="M1251 1218c61-41 169-41 230 0 23 65 23 116 0 169-49 26-181 26-230 0-23-53-23-104 0-169Z" fill="#fff"/>
+  <circle cx="1315" cy="1306" r="23" fill="#5865f2"/>
+  <circle cx="1417" cy="1306" r="23" fill="#5865f2"/>
+  <text x="1366" y="1685" text-anchor="middle" fill="#f4f6fb" font-family="Inter, Arial, sans-serif" font-size="96" font-weight="800">WebCord</text>
+</svg>

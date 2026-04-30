@@ -64,6 +64,39 @@ The included Docker Compose setup starts PostgreSQL, backend, and frontend nginx
 
 For an external nginx reverse proxy, forward traffic to the frontend container port and keep `client_max_body_size 25m` so uploads match the backend limit.
 
+## Desktop Client
+
+```bash
+cd desktop
+npm install
+npm run start
+```
+
+Build Windows packages:
+
+```bash
+cd desktop
+npm run build
+```
+
+The Electron shell is frameless, uses the React titlebar, exposes safe window controls through preload IPC, supports notifications, and includes a tray entry.
+
+## Android Client
+
+```bash
+npm install
+npm run android:sync
+npm run android:open
+```
+
+Build a debug APK:
+
+```bash
+npm run android:build
+```
+
+The Android client uses Capacitor, bundles `frontend/dist`, keeps the mobile safe-area viewport, disables WebView text zoom, and uses the production API origin by default for native builds.
+
 ## Security Notes
 
 Do not commit real `.env` files. Only `.env.example` files are intended to be public. Replace all placeholder secrets before deploying.
