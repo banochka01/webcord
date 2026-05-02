@@ -2,6 +2,8 @@
 
 WebCord is a Discord-like web chat with channels, direct messages, friends, file uploads, voice rooms, screen sharing support, and a dark responsive client UI.
 
+The canonical project logo is `webcord.png` in the repository root. The web favicon/PWA icons, Electron icon, Android launcher icon, and Android splash assets are generated from that source image.
+
 ## Stack
 
 - Frontend: React, Vite, PWA service worker.
@@ -72,6 +74,8 @@ BRANCH=codex/webcord-ui-redesign ./scripts/deploy.sh
 ```
 
 The deploy script refuses dirty tracked files by default, writes a pre-deploy patch to `/opt/webcord_backups`, rebuilds containers, and waits for `/api/health`.
+
+See `docs/production-runbook.md` for the deployment checklist and rollback notes.
 
 ## Desktop Client
 

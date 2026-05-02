@@ -106,6 +106,15 @@ function getAttachmentUrl(value) {
   return value;
 }
 
+function getPublicAssetUrl(value) {
+  if (!value) return '';
+  if (/^(https?:|file:|blob:|data:)/i.test(value)) return value;
+  if (window.location.protocol === 'file:') {
+    return new URL(value.replace(/^\//, ''), window.location.href).href;
+  }
+  return value;
+}
+
 function showClientNotification(title, body) {
   if (!IS_NATIVE_CLIENT || !document.hidden) return;
   const bridge = window.webcordDesktop || window.webcordWindow || window.electronAPI;
@@ -235,6 +244,10 @@ function ThemeModal({ open, theme, onClose, onThemeChange, onReset }) {
       </div>
     </div>
   );
+}
+
+function BrandLogo({ className = '' }) {
+  return <img className={className ? `brand-logo ${className}` : 'brand-logo'} src={getPublicAssetUrl('/icons/webcord.png')} alt="" aria-hidden="true" />;
 }
 
 function MessageItem({ message, currentUserId, onAvatarClick }) {
@@ -444,7 +457,7 @@ function DesktopTitleBar({ user, onOpenSettings, onWindowAction }) {
   return (
     <div className="desktop-titlebar">
       <div className="titlebar-drag">
-        <span className="titlebar-mark">W</span>
+        <span className="titlebar-mark"><BrandLogo /></span>
         <span className="titlebar-name">WebCord</span>
         <span className="titlebar-channel">{user?.username ? `@${user.username}` : 'Desktop'}</span>
       </div>
@@ -1646,7 +1659,7 @@ export default function App() {
     return (
       <main className="auth-wrapper">
         <form className="auth-card" onSubmit={handleAuthSubmit}>
-          <span className="hero-badge">WebCord</span>
+          <span className="hero-badge brand-badge"><BrandLogo /> WebCord</span>
           <h1>Discord-style chat for the web.</h1>
           <p className="muted">Login to test live channels, DMs, friends, and voice.</p>
           <div className="auth-switch">
@@ -1688,7 +1701,7 @@ export default function App() {
                 if (isMobile) setMobileChatOpen(false);
               }}
             >
-              <span>{icon}</span>
+              <span>{item === 'server' ? <BrandLogo className="rail-logo" /> : icon}</span>
             </button>
           ))}
         </aside>
@@ -1700,7 +1713,7 @@ export default function App() {
                 {user?.avatarUrl ? <img src={getAttachmentUrl(user.avatarUrl)} alt={user?.username || 'user'} /> : (user?.username || '?').slice(0, 1).toUpperCase()}
               </span>
               <div>
-                <strong>WebCord</strong>
+                <strong><BrandLogo className="inline-brand-logo" /> WebCord</strong>
                 <p className="muted">{workspace === 'server' ? 'Chats' : workspace === 'friends' ? 'Friends' : 'Direct messages'}</p>
               </div>
             </div>
@@ -1722,7 +1735,7 @@ export default function App() {
 
           <div className="sidebar-top">
             <div>
-              <span className="hero-badge">Live Workspace</span>
+              <span className="hero-badge brand-badge"><BrandLogo /> Live Workspace</span>
               <h2>WebCord</h2>
               <p className="muted">{guild?.name || 'Workspace'} - {user?.username}</p>
             </div>

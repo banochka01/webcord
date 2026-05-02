@@ -1,8 +1,9 @@
 const { app, BrowserWindow, Menu, Notification, Tray, nativeImage, ipcMain, shell } = require('electron');
+const fs = require('node:fs');
 const path = require('node:path');
 
 const isDevUrl = Boolean(process.env.WEBCORD_DESKTOP_URL);
-const trayIcon = nativeImage.createFromDataURL(
+const fallbackIcon = nativeImage.createFromDataURL(
   'data:image/svg+xml;charset=utf-8,' +
     encodeURIComponent(`
       <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
@@ -13,6 +14,9 @@ const trayIcon = nativeImage.createFromDataURL(
       </svg>
     `)
 );
+const iconPath = path.join(__dirname, 'build', 'icon.png');
+const appIcon = fs.existsSync(iconPath) ? nativeImage.createFromPath(iconPath) : fallbackIcon;
+const trayIcon = appIcon.isEmpty() ? fallbackIcon : appIcon;
 
 let mainWindow;
 let tray;

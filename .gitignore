@@ -5,6 +5,9 @@
 node_modules/
 dist/
 build/
+!desktop/build/
+!desktop/build/icon.ico
+!desktop/build/icon.png
 
 backend/uploads/
 uploads/

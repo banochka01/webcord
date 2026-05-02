@@ -23,6 +23,8 @@
     "files": [
       "main.cjs",
       "preload.cjs",
+      "build/icon.ico",
+      "build/icon.png",
       "package.json"
     ],
     "extraResources": [
@@ -32,6 +34,7 @@
       }
     ],
     "win": {
+      "icon": "build/icon.ico",
       "target": [
         "nsis",
         "portable"
