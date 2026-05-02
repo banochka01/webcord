@@ -4,7 +4,13 @@ set -eu
 APP_DIR=${APP_DIR:-$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)}
 REMOTE=${REMOTE:-origin}
 BRANCH=${BRANCH:-$(git -C "$APP_DIR" rev-parse --abbrev-ref HEAD)}
-COMPOSE_FILE=${COMPOSE_FILE:-docker-compose.yml}
+if [ -z "${COMPOSE_FILE:-}" ]; then
+  if [ -f "$APP_DIR/docker-compose.prod.yml" ]; then
+    COMPOSE_FILE=docker-compose.prod.yml
+  else
+    COMPOSE_FILE=docker-compose.yml
+  fi
+fi
 HEALTH_URL=${HEALTH_URL:-http://127.0.0.1:8080/api/health}
 BACKUP_DIR=${BACKUP_DIR:-/opt/webcord_backups}
 ALLOW_DIRTY=${ALLOW_DIRTY:-0}
