@@ -831,7 +831,10 @@ app.post('/api/dms/:conversationId/messages', authMiddleware, async (req, res) =
     });
     emitSocialRefresh([conversation.userOneId, conversation.userTwoId]);
 
-    return res.status(201).json(message);
+    return res.status(201).json({
+      ...message,
+      conversationId
+    });
   } catch (error) {
     console.error(error);
     return res.status(500).json({ error: 'Failed to send direct message' });

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, Notification, Tray, nativeImage, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, Menu, Notification, Tray, nativeImage, ipcMain, shell, desktopCapturer } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -73,9 +73,25 @@ function createWindow() {
     return { action: 'deny' };
   });
 
-  mainWindow.webContents.session.setPermissionRequestHandler((_webContents, permission, callback) => {
+  const webSession = mainWindow.webContents.session;
+  webSession.setPermissionRequestHandler((_webContents, permission, callback) => {
     callback(['notifications', 'media', 'display-capture'].includes(permission));
   });
+
+  if (typeof webSession.setDisplayMediaRequestHandler === 'function') {
+    webSession.setDisplayMediaRequestHandler(async (_request, callback) => {
+      try {
+        const sources = await desktopCapturer.getSources({
+          types: ['screen', 'window'],
+          thumbnailSize: { width: 320, height: 180 }
+        });
+        const source = sources.find((item) => item.id.startsWith('screen:')) || sources[0];
+        callback(source ? { video: source } : {});
+      } catch {
+        callback({});
+      }
+    }, { useSystemPicker: true });
+  }
 }
 
 function createTray() {

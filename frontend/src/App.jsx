@@ -11,7 +11,7 @@ const IS_NATIVE_CLIENT = Boolean(
 );
 const API_URL = import.meta.env.VITE_API_URL || (IS_NATIVE_CLIENT ? `${REMOTE_ORIGIN}/api` : '/api');
 const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || (API_URL.startsWith('http') ? new URL(API_URL).origin : window.location.origin);
-const SOCKET_TRANSPORTS = IS_NATIVE_CLIENT ? ['websocket'] : ['websocket', 'polling'];
+const SOCKET_TRANSPORTS = IS_NATIVE_CLIENT ? ['polling', 'websocket'] : ['websocket', 'polling'];
 const MESSAGE_POLL_INTERVAL_MS = 6000;
 const SOCKET_STATUS_LABELS = {
   connecting: 'Connecting',
@@ -140,6 +140,32 @@ function mergeMessage(list, item) {
   if (!item?.id) return list;
   if (list.some((entry) => String(entry.id) === String(item.id))) return list;
   return sortMessages([...list, item]);
+}
+
+function areMessageListsEqual(left = [], right = []) {
+  if (left.length !== right.length) return false;
+  return left.every((item, index) => {
+    const other = right[index];
+    return (
+      String(item?.id) === String(other?.id) &&
+      String(item?.content || '') === String(other?.content || '') &&
+      String(item?.attachmentUrl || '') === String(other?.attachmentUrl || '') &&
+      String(item?.updatedAt || item?.createdAt || '') === String(other?.updatedAt || other?.createdAt || '')
+    );
+  });
+}
+
+function getMediaErrorMessage(error, fallback) {
+  if (error?.name === 'NotAllowedError' || error?.name === 'PermissionDeniedError') {
+    return 'Permission was denied or cancelled';
+  }
+  if (error?.name === 'NotFoundError' || error?.name === 'DevicesNotFoundError') {
+    return 'No matching media device was found';
+  }
+  if (error?.name === 'NotReadableError') {
+    return 'The media device is already in use';
+  }
+  return fallback;
 }
 
 function tuneOpusDescription(description) {
@@ -383,12 +409,17 @@ function VoiceParticipantTile({ participant, compact = false }) {
 function VoiceStage({
   activeVoiceChannel,
   localScreenStream,
+  localCameraStream,
   noiseSuppressionEnabled,
   onLeave,
   onToggleMic,
   onToggleScreen,
+  onToggleCamera,
+  onToggleExpanded,
   micMuted,
   screenSharing,
+  cameraEnabled,
+  expanded,
   participants,
   remoteStreams,
   voiceParticipants,
@@ -399,17 +430,19 @@ function VoiceStage({
     .map(([socketId, stream]) => ({
       socketId,
       stream,
-      username: voiceParticipants[socketId]?.username || 'Screen share'
+      username: voiceParticipants[socketId]?.username || 'Participant video',
+      label: 'Video stream'
     }));
 
-  const screenEntries = [
-    ...(localScreenStream ? [{ socketId: 'local-screen', stream: localScreenStream, username: 'Your screen' }] : []),
+  const videoEntries = [
+    ...(localScreenStream ? [{ socketId: 'local-screen', stream: localScreenStream, username: 'Your screen', label: 'Screen sharing' }] : []),
+    ...(localCameraStream ? [{ socketId: 'local-camera', stream: localCameraStream, username: 'Your camera', label: 'Camera on' }] : []),
     ...remoteVideoEntries
   ];
-  const spotlight = screenEntries[0] || null;
+  const spotlight = videoEntries[0] || null;
 
   return (
-    <section className={spotlight ? 'voice-stage has-share' : 'voice-stage'}>
+    <section className={`${spotlight ? 'voice-stage has-share' : 'voice-stage'}${expanded ? ' expanded' : ''}`}>
       <div className="voice-stage-top">
         <div>
           <span className="eyebrow">Voice channel</span>
@@ -420,6 +453,8 @@ function VoiceStage({
           <span className="live-pill">Noise {noiseSuppressionEnabled ? 'on' : 'off'}</span>
           <button type="button" onClick={onToggleMic}>{micMuted ? 'Unmute' : 'Mute'}</button>
           <button type="button" onClick={onToggleScreen}>{screenSharing ? 'Stop share' : 'Share'}</button>
+          <button type="button" onClick={onToggleCamera}>{cameraEnabled ? 'Camera off' : 'Camera'}</button>
+          <button type="button" onClick={onToggleExpanded}>{expanded ? 'Compact' : 'Expand'}</button>
           <button className="danger" type="button" onClick={onLeave}>Leave</button>
         </div>
       </div>
@@ -430,18 +465,31 @@ function VoiceStage({
             <video
               autoPlay
               playsInline
-              muted={spotlight.socketId === 'local-screen'}
+              muted={spotlight.socketId.startsWith('local-')}
               ref={(node) => {
                 if (node && node.srcObject !== spotlight.stream) node.srcObject = spotlight.stream;
               }}
             />
             <div className="share-caption">
               <strong>{spotlight.username}</strong>
-              <span>Screen sharing</span>
+              <span>{spotlight.label}</span>
             </div>
           </div>
           <div className="voice-filmstrip">
             {participants.map((participant) => <VoiceParticipantTile key={participant.socketId} participant={participant} compact />)}
+            {videoEntries.slice(1).map((entry) => (
+              <div className="voice-mini-video" key={entry.socketId}>
+                <video
+                  autoPlay
+                  playsInline
+                  muted={entry.socketId.startsWith('local-')}
+                  ref={(node) => {
+                    if (node && node.srcObject !== entry.stream) node.srcObject = entry.stream;
+                  }}
+                />
+                <span>{entry.username}</span>
+              </div>
+            ))}
           </div>
         </div>
       ) : (
@@ -480,6 +528,7 @@ function SettingsModal({
   inputVolume,
   outputVolume,
   micMuted,
+  cameraEnabled,
   cameraTesting,
   noiseSuppressionEnabled,
   avatarUploading,
@@ -495,6 +544,7 @@ function SettingsModal({
   onInputVolumeChange,
   onOutputVolumeChange,
   onToggleMic,
+  onToggleCamera,
   onTestCamera,
   onToggleNoiseSuppression,
   onLogout
@@ -585,6 +635,7 @@ function SettingsModal({
               <label className="settings-slider">Output Volume<span>{outputVolume}%</span><input type="range" min="0" max="200" value={outputVolume} onChange={(e) => onOutputVolumeChange(Number(e.target.value))} /></label>
               <div className="settings-actions-row">
                 <button type="button" onClick={onToggleMic}>{micMuted ? 'Unmute Microphone' : 'Mute Microphone'}</button>
+                <button type="button" onClick={onToggleCamera}>{cameraEnabled ? 'Turn Camera Off' : 'Turn Camera On'}</button>
                 <button type="button" onClick={onTestCamera}>{cameraTesting ? 'Testing Camera...' : 'Test Camera'}</button>
                 <button className="ghost-btn" type="button" onClick={onToggleNoiseSuppression}>Noise Suppression: {noiseSuppressionEnabled ? 'On' : 'Off'}</button>
               </div>
@@ -664,6 +715,8 @@ export default function App() {
   const [voiceJoined, setVoiceJoined] = useState(false);
   const [micMuted, setMicMuted] = useState(false);
   const [screenSharing, setScreenSharing] = useState(false);
+  const [cameraEnabled, setCameraEnabled] = useState(false);
+  const [voiceExpanded, setVoiceExpanded] = useState(false);
   const [voiceStatus, setVoiceStatus] = useState('Voice idle');
   const [noiseSuppressionEnabled, setNoiseSuppressionEnabled] = useState(true);
   const [inputVolume, setInputVolume] = useState(100);
@@ -688,10 +741,13 @@ export default function App() {
   const localStreamRef = useRef(null);
   const rawLocalStreamRef = useRef(null);
   const screenStreamRef = useRef(null);
+  const cameraStreamRef = useRef(null);
   const voiceAudioContextRef = useRef(null);
   const remoteAudioRef = useRef({});
   const remoteStreamsRef = useRef({});
   const pendingIceCandidatesRef = useRef({});
+  const messagesRef = useRef(null);
+  const shouldStickToBottomRef = useRef(true);
   const endRef = useRef(null);
   const scopeRef = useRef({ type: 'channel', id: '' });
   const guildIdRef = useRef(null);
@@ -750,7 +806,13 @@ export default function App() {
   useEffect(() => { volumeRef.current = participantVolumes; }, [participantVolumes]);
   useEffect(() => { remoteStreamsRef.current = remoteStreams; }, [remoteStreams]);
   useEffect(() => { scopeRef.current = workspace === 'dm' ? { type: 'dm', id: String(dmConversationId || '') } : { type: 'channel', id: String(channelId || '') }; }, [workspace, channelId, dmConversationId]);
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
+  useEffect(() => { shouldStickToBottomRef.current = true; }, [workspace, channelId, dmConversationId]);
+  useEffect(() => {
+    if (!shouldStickToBottomRef.current) return;
+    window.requestAnimationFrame(() => {
+      endRef.current?.scrollIntoView({ block: 'end', behavior: 'smooth' });
+    });
+  }, [messages.length, workspace, channelId, dmConversationId]);
   useEffect(() => {
     const scopeKey = workspace === 'dm' ? getScopeKey('dm', dmConversationId) : getScopeKey('channel', channelId);
     if (isAuthed && messages.length > 0 && ((workspace === 'dm' && dmConversationId) || (workspace === 'server' && channelId))) {
@@ -839,7 +901,7 @@ export default function App() {
       path: '/socket.io',
       auth: { token },
       transports: SOCKET_TRANSPORTS,
-      upgrade: !IS_NATIVE_CLIENT,
+      upgrade: true,
       rememberUpgrade: true,
       reconnection: true,
       reconnectionAttempts: Infinity,
@@ -879,7 +941,8 @@ export default function App() {
     });
     socket.on('connect_error', (err) => {
       setSocketStatus(networkOnline ? 'reconnecting' : 'offline');
-      setError(err.message || 'Socket connection failed');
+      const rawMessage = err.message || 'Socket connection failed';
+      setError(IS_NATIVE_CLIENT && /websocket|xhr|poll|transport/i.test(rawMessage) ? 'Realtime is reconnecting. Messages are kept in sync by fallback polling.' : rawMessage);
     });
     socket.on('socket-error', (payload) => setError(payload?.error || 'Socket error'));
     socket.on('new-message', (message) => {
@@ -1020,13 +1083,20 @@ export default function App() {
     return '';
   }
 
+  function handleMessagesScroll() {
+    const node = messagesRef.current;
+    if (!node) return;
+    shouldStickToBottomRef.current = node.scrollHeight - node.scrollTop - node.clientHeight < 120;
+  }
+
   async function refreshCurrentMessages({ silent = false } = {}) {
     const path = getCurrentMessagePath();
     if (!isAuthed || !path) return;
 
     try {
       const nextMessages = await apiFetch(path, {}, token);
-      setMessages(sortMessages(nextMessages));
+      const sortedMessages = sortMessages(nextMessages);
+      setMessages((prev) => (areMessageListsEqual(prev, sortedMessages) ? prev : sortedMessages));
       setLastRealtimeSync(new Date().toISOString());
     } catch (err) {
       if (!silent) setError(err.message);
@@ -1307,6 +1377,7 @@ export default function App() {
     }
 
     try {
+      shouldStickToBottomRef.current = true;
       let createdMessage = null;
 
       if (workspace === 'server' && channelId) {
@@ -1355,6 +1426,28 @@ export default function App() {
     }
   }
 
+  function addStreamTracksToPeer(peer, stream) {
+    if (!peer || !stream) return;
+    const senderTrackIds = new Set(peer.getSenders().map((sender) => sender.track?.id).filter(Boolean));
+    stream.getTracks().forEach((track) => {
+      if (!senderTrackIds.has(track.id)) {
+        peer.addTrack(track, stream);
+      }
+    });
+  }
+
+  function removeStreamTracksFromPeers(stream) {
+    if (!stream) return;
+    const trackIds = new Set(stream.getTracks().map((track) => track.id));
+    Object.values(peersRef.current).forEach((peer) => {
+      peer.getSenders().forEach((sender) => {
+        if (sender.track && trackIds.has(sender.track.id)) {
+          peer.removeTrack(sender);
+        }
+      });
+    });
+  }
+
   async function getOrCreatePeer(remoteSocketId) {
     if (peersRef.current[remoteSocketId]) return peersRef.current[remoteSocketId];
 
@@ -1362,12 +1455,9 @@ export default function App() {
     peersRef.current[remoteSocketId] = peer;
     setParticipantVolumes((prev) => (prev[remoteSocketId] ? prev : { ...prev, [remoteSocketId]: 100 }));
 
-    if (localStreamRef.current) {
-      localStreamRef.current.getTracks().forEach((track) => peer.addTrack(track, localStreamRef.current));
-    }
-    if (screenStreamRef.current) {
-      screenStreamRef.current.getTracks().forEach((track) => peer.addTrack(track, screenStreamRef.current));
-    }
+    addStreamTracksToPeer(peer, localStreamRef.current);
+    addStreamTracksToPeer(peer, screenStreamRef.current);
+    addStreamTracksToPeer(peer, cameraStreamRef.current);
 
     peer.onicecandidate = (event) => {
       if (event.candidate && socketRef.current) {
@@ -1483,45 +1573,121 @@ export default function App() {
   }
 
   async function startScreenShare() {
+    if (!voiceJoinedRef.current || !localStreamRef.current) {
+      setError('Join a voice channel before sharing your screen');
+      return;
+    }
+    if (screenStreamRef.current) return;
+    if (!navigator.mediaDevices?.getDisplayMedia) {
+      setError(IS_NATIVE_CLIENT ? 'Screen sharing is not supported in this mobile WebView. Use the desktop app or browser.' : 'Screen sharing is not supported in this browser');
+      return;
+    }
+    if (!window.isSecureContext && window.location.protocol !== 'file:' && !IS_NATIVE_CLIENT && !['localhost', '127.0.0.1'].includes(window.location.hostname)) {
+      setError('Screen sharing requires a secure HTTPS connection');
+      return;
+    }
+
     try {
+      setError('');
+      setVoiceStatus('Requesting screen share...');
       const displayStream = await navigator.mediaDevices.getDisplayMedia({
         video: { frameRate: 30, width: { ideal: 1920 }, height: { ideal: 1080 } },
         audio: false
       });
       screenStreamRef.current = displayStream;
       const [videoTrack] = displayStream.getVideoTracks();
-      if (videoTrack) videoTrack.onended = () => stopScreenShare();
-      Object.values(peersRef.current).forEach((peer) => {
-        displayStream.getTracks().forEach((track) => peer.addTrack(track, displayStream));
-      });
+      if (videoTrack) videoTrack.onended = () => stopScreenShare().catch(() => {});
+      Object.values(peersRef.current).forEach((peer) => addStreamTracksToPeer(peer, displayStream));
       setScreenSharing(true);
+      setVoiceStatus('Screen sharing');
       await renegotiatePeers();
-    } catch {
-      setError('Could not start screen sharing');
+    } catch (err) {
+      screenStreamRef.current = null;
+      setScreenSharing(false);
+      setError(getMediaErrorMessage(err, 'Could not start screen sharing'));
+      setVoiceStatus(voiceJoinedRef.current ? 'Voice connected' : 'Voice idle');
     }
   }
 
   async function stopScreenShare() {
     const stream = screenStreamRef.current;
     if (!stream) return;
-    Object.values(peersRef.current).forEach((peer) => {
-      peer.getSenders().forEach((sender) => {
-        if (sender.track && stream.getTracks().some((track) => track.id === sender.track.id)) {
-          peer.removeTrack(sender);
-        }
-      });
-    });
+    removeStreamTracksFromPeers(stream);
     stream.getTracks().forEach((track) => track.stop());
     screenStreamRef.current = null;
     setScreenSharing(false);
+    setVoiceStatus('Screen sharing stopped');
     await renegotiatePeers();
+  }
+
+  async function startCamera() {
+    if (!voiceJoinedRef.current || !localStreamRef.current) {
+      setError('Join a voice channel before turning on the camera');
+      return;
+    }
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setError('Camera is not supported in this browser');
+      return;
+    }
+    if (cameraStreamRef.current) return;
+
+    try {
+      setError('');
+      setVoiceStatus('Requesting camera...');
+      const cameraStream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          frameRate: { ideal: 30 }
+        },
+        audio: false
+      });
+      cameraStreamRef.current = cameraStream;
+      const [videoTrack] = cameraStream.getVideoTracks();
+      if (videoTrack) videoTrack.onended = () => stopCamera().catch(() => {});
+      Object.values(peersRef.current).forEach((peer) => addStreamTracksToPeer(peer, cameraStream));
+      setCameraEnabled(true);
+      setVoiceStatus('Camera on');
+      await renegotiatePeers();
+    } catch (err) {
+      cameraStreamRef.current = null;
+      setCameraEnabled(false);
+      setError(getMediaErrorMessage(err, 'Could not access the camera'));
+      setVoiceStatus(voiceJoinedRef.current ? 'Voice connected' : 'Voice idle');
+    }
+  }
+
+  async function stopCamera() {
+    const stream = cameraStreamRef.current;
+    if (!stream) return;
+    removeStreamTracksFromPeers(stream);
+    stream.getTracks().forEach((track) => track.stop());
+    cameraStreamRef.current = null;
+    setCameraEnabled(false);
+    setVoiceStatus('Camera off');
+    await renegotiatePeers();
+  }
+
+  function toggleCamera() {
+    if (cameraEnabled || cameraStreamRef.current) {
+      stopCamera().catch(() => setError('Could not stop camera'));
+      return;
+    }
+    startCamera().catch(() => setError('Could not access the camera'));
   }
 
   function cleanupVoice({ emitLeave = true } = {}) {
     if (screenStreamRef.current) {
+      removeStreamTracksFromPeers(screenStreamRef.current);
       screenStreamRef.current.getTracks().forEach((track) => track.stop());
       screenStreamRef.current = null;
       setScreenSharing(false);
+    }
+    if (cameraStreamRef.current) {
+      removeStreamTracksFromPeers(cameraStreamRef.current);
+      cameraStreamRef.current.getTracks().forEach((track) => track.stop());
+      cameraStreamRef.current = null;
+      setCameraEnabled(false);
     }
     if (emitLeave && socketRef.current?.connected) socketRef.current.emit('leave-voice');
     Object.keys(peersRef.current).forEach(closePeer);
@@ -1541,6 +1707,7 @@ export default function App() {
     pendingIceCandidatesRef.current = {};
     setMicMuted(false);
     setVoiceJoined(false);
+    setVoiceExpanded(false);
     setVoiceStatus('Voice idle');
     setParticipantVolumes({});
     setVoiceParticipants({});
@@ -1644,14 +1811,14 @@ export default function App() {
       username: user?.username || 'You',
       user,
       muted: micMuted,
-      status: micMuted ? 'Microphone muted' : 'Speaking ready'
+      status: screenSharing ? 'Sharing screen' : cameraEnabled ? 'Camera on' : micMuted ? 'Microphone muted' : 'Speaking ready'
     },
     ...Object.entries(voiceParticipants).map(([socketId, participant]) => ({
       socketId,
       username: participant.username || socketId.slice(0, 8),
       user: participant,
       muted: false,
-      status: remoteStreams[socketId]?.getVideoTracks?.().length ? 'Sharing screen' : 'Connected'
+      status: remoteStreams[socketId]?.getVideoTracks?.().length ? 'Video active' : 'Connected'
     }))
   ];
 
@@ -1682,7 +1849,7 @@ export default function App() {
       {isDesktopShell ? <DesktopTitleBar user={user} onOpenSettings={() => setShowSettingsModal(true)} onWindowAction={handleWindowAction} /> : null}
       <div className={mobileSidebarOpen ? 'mobile-overlay active' : 'mobile-overlay'} onClick={() => setMobileSidebarOpen(false)} />
 
-      <main className={`${isMobile && mobileChatOpen ? 'app-shell mobile-chat-open' : 'app-shell'}${isDesktopShell ? ' desktop-shell' : ''}`}>
+      <main className={`${isMobile && mobileChatOpen ? 'app-shell mobile-chat-open' : 'app-shell'}${isDesktopShell ? ' desktop-shell' : ''}${voiceExpanded && voiceJoined ? ' voice-expanded-mode' : ''}`}>
         <aside className="rail">
           {[
             ['server', '#', 'Server'],
@@ -1803,13 +1970,14 @@ export default function App() {
             <button type="button" onClick={handleJoinVoice}>{voiceJoined ? 'Leave voice' : `Join voice${activeVoiceChannel ? `: ${activeVoiceChannel.name}` : ''}`}</button>
             {voiceJoined ? <button type="button" onClick={toggleMicrophone}>{micMuted ? 'Unmute mic' : 'Mute mic'}</button> : null}
             {voiceJoined ? <button type="button" onClick={() => (screenSharing ? stopScreenShare() : startScreenShare())}>{screenSharing ? 'Stop stream' : 'Start stream'}</button> : null}
+            {voiceJoined ? <button type="button" onClick={toggleCamera}>{cameraEnabled ? 'Camera off' : 'Camera on'}</button> : null}
             <button className="ghost-btn" type="button" disabled={voiceJoined} onClick={() => setNoiseSuppressionEnabled((prev) => !prev)}>Noise suppression: {noiseSuppressionEnabled ? 'On' : 'Off'}</button>
             <p className="voice-status">{voiceStatus}</p>
             <button className="danger" type="button" onClick={handleLogout}>Logout</button>
           </div>
         </aside>
 
-        <section className={voiceJoined ? 'chat-panel voice-mode' : 'chat-panel'}>
+        <section className={`${voiceJoined ? 'chat-panel voice-mode' : 'chat-panel'}${voiceExpanded && voiceJoined ? ' voice-expanded' : ''}`}>
           <header className="chat-header">
             <div>
               {isMobile ? (
@@ -1844,12 +2012,17 @@ export default function App() {
             <VoiceStage
               activeVoiceChannel={activeVoiceChannel}
               localScreenStream={screenSharing ? screenStreamRef.current : null}
+              localCameraStream={cameraEnabled ? cameraStreamRef.current : null}
               noiseSuppressionEnabled={noiseSuppressionEnabled}
               onLeave={handleJoinVoice}
               onToggleMic={toggleMicrophone}
               onToggleScreen={() => (screenSharing ? stopScreenShare() : startScreenShare())}
+              onToggleCamera={toggleCamera}
+              onToggleExpanded={() => setVoiceExpanded((prev) => !prev)}
               micMuted={micMuted}
               screenSharing={screenSharing}
+              cameraEnabled={cameraEnabled}
+              expanded={voiceExpanded}
               participants={voiceStageParticipants}
               remoteStreams={remoteStreams}
               voiceParticipants={voiceParticipants}
@@ -1870,7 +2043,7 @@ export default function App() {
             </div>
           ) : (
             <>
-              <div className="messages">
+              <div className="messages" ref={messagesRef} onScroll={handleMessagesScroll}>
                 {messages.length === 0 ? <div className="empty-state"><h3>{workspace === 'dm' ? 'No direct messages yet' : 'No messages yet'}</h3><p className="muted">{workspace === 'dm' ? 'This thread is ready.' : 'Start the conversation in this channel.'}</p></div> : messages.map((message) => <MessageItem key={message.id} message={message} currentUserId={user?.id} onAvatarClick={setViewedProfile} />)}
                 <div ref={endRef} />
               </div>
@@ -1965,6 +2138,7 @@ export default function App() {
         inputVolume={inputVolume}
         outputVolume={outputVolume}
         micMuted={micMuted}
+        cameraEnabled={cameraEnabled}
         cameraTesting={cameraTesting}
         noiseSuppressionEnabled={noiseSuppressionEnabled}
         avatarUploading={avatarUploading}
@@ -1980,6 +2154,7 @@ export default function App() {
         onInputVolumeChange={setInputVolume}
         onOutputVolumeChange={setOutputVolume}
         onToggleMic={toggleMicrophone}
+        onToggleCamera={toggleCamera}
         onTestCamera={testCamera}
         onToggleNoiseSuppression={() => setNoiseSuppressionEnabled((prev) => !prev)}
         onLogout={handleLogout}
