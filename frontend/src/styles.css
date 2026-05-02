@@ -155,6 +155,44 @@ p {
   white-space: nowrap;
 }
 
+.realtime-pill.connected {
+  border-color: color-mix(in srgb, var(--success) 52%, transparent);
+  background: color-mix(in srgb, var(--success) 18%, var(--surface-2));
+  color: #ddfbe9;
+}
+
+.realtime-pill.connecting,
+.realtime-pill.reconnecting {
+  border-color: color-mix(in srgb, var(--warning) 52%, transparent);
+  background: color-mix(in srgb, var(--warning) 16%, var(--surface-2));
+  color: #fff1cc;
+}
+
+.realtime-pill.disconnected,
+.realtime-pill.offline {
+  border-color: color-mix(in srgb, var(--danger) 46%, transparent);
+  background: color-mix(in srgb, var(--danger) 14%, var(--surface-2));
+  color: #ffd9de;
+}
+
+.realtime-banner {
+  margin: 10px 16px 0;
+  padding: 9px 12px;
+  border: 1px solid color-mix(in srgb, var(--warning) 34%, transparent);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--warning) 10%, var(--surface-1));
+  color: #f5dfad;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.realtime-banner.offline,
+.realtime-banner.disconnected {
+  border-color: color-mix(in srgb, var(--danger) 34%, transparent);
+  background: color-mix(in srgb, var(--danger) 10%, var(--surface-1));
+  color: #ffcbd2;
+}
+
 .auth-wrapper {
   min-height: 100dvh;
   display: grid;

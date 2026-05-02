@@ -1,5 +1,13 @@
 apply plugin: 'com.android.application'
 
+def releaseKeystore = System.getenv("WEBCORD_ANDROID_KEYSTORE")
+def releaseKeyAlias = System.getenv("WEBCORD_ANDROID_KEY_ALIAS")
+def releaseStorePassword = System.getenv("WEBCORD_ANDROID_KEYSTORE_PASSWORD")
+def releaseKeyPassword = System.getenv("WEBCORD_ANDROID_KEY_PASSWORD")
+def hasReleaseSigning = releaseKeystore && releaseKeyAlias && releaseStorePassword && releaseKeyPassword
+def androidVersionCode = System.getenv("WEBCORD_ANDROID_VERSION_CODE")
+def androidVersionName = System.getenv("WEBCORD_ANDROID_VERSION_NAME")
+
 android {
     namespace = "com.webcord.app"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -7,8 +15,8 @@ android {
         applicationId "com.webcord.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode androidVersionCode ? Integer.parseInt(androidVersionCode) : 1
+        versionName androidVersionName ?: "1.0.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -16,9 +24,23 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        release {
+            if (hasReleaseSigning) {
+                storeFile file(releaseKeystore)
+                storePassword releaseStorePassword
+                keyAlias releaseKeyAlias
+                keyPassword releaseKeyPassword
+            }
+        }
+    }
     buildTypes {
         release {
             minifyEnabled false
+            shrinkResources false
+            if (hasReleaseSigning) {
+                signingConfig signingConfigs.release
+            }
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
     }

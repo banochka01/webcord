@@ -13,6 +13,13 @@ const API_URL = import.meta.env.VITE_API_URL || (IS_NATIVE_CLIENT ? `${REMOTE_OR
 const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || (API_URL.startsWith('http') ? new URL(API_URL).origin : window.location.origin);
 const SOCKET_TRANSPORTS = IS_NATIVE_CLIENT ? ['websocket'] : ['websocket', 'polling'];
 const MESSAGE_POLL_INTERVAL_MS = 6000;
+const SOCKET_STATUS_LABELS = {
+  connecting: 'Connecting',
+  connected: 'Live',
+  reconnecting: 'Reconnecting',
+  disconnected: 'Disconnected',
+  offline: 'Offline'
+};
 const KEYS = {
   text: 'webcord_last_text_channel_id',
   voice: 'webcord_last_voice_channel_id',
@@ -653,6 +660,9 @@ export default function App() {
   const [voiceParticipants, setVoiceParticipants] = useState({});
   const [remoteStreams, setRemoteStreams] = useState({});
   const [error, setError] = useState('');
+  const [networkOnline, setNetworkOnline] = useState(() => navigator.onLine !== false);
+  const [socketStatus, setSocketStatus] = useState(() => (navigator.onLine === false ? 'offline' : 'disconnected'));
+  const [lastRealtimeSync, setLastRealtimeSync] = useState(null);
   const [theme, setTheme] = useState(() => JSON.parse(localStorage.getItem(KEYS.theme) || 'null') || DEFAULT_THEME);
   const [profileDraft, setProfileDraft] = useState({ bio: '', avatarUrl: '', bannerUrl: '' });
   const [isDesktopShell] = useState(() => /\bElectron\b/i.test(navigator.userAgent) || Boolean(window.webcordDesktop || window.webcordWindow || window.electronAPI));
@@ -756,6 +766,27 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    const handleOnline = () => {
+      setNetworkOnline(true);
+      setSocketStatus(socketRef.current?.connected ? 'connected' : 'reconnecting');
+      socketRef.current?.connect();
+      refreshCurrentMessages({ silent: true }).catch(() => {});
+      refreshSocialData().catch(() => {});
+    };
+    const handleOffline = () => {
+      setNetworkOnline(false);
+      setSocketStatus('offline');
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, [isAuthed, token, workspace, channelId, dmConversationId]);
+
+  useEffect(() => {
     if (!isMobile) {
       setMobileChatOpen(false);
     }
@@ -767,10 +798,11 @@ export default function App() {
       setChannels([]);
       setSocial(EMPTY_SOCIAL);
       setMessages([]);
+      setSocketStatus(networkOnline ? 'disconnected' : 'offline');
       return;
     }
     bootstrapApp().catch((err) => setError(err.message));
-  }, [isAuthed]);
+  }, [isAuthed, networkOnline]);
 
   useEffect(() => {
     if (!isAuthed) return;
@@ -779,22 +811,17 @@ export default function App() {
     if (Array.isArray(cachedMessages) && cachedMessages.length > 0) {
       setMessages(cachedMessages);
     }
-    const path =
-      workspace === 'dm' && dmConversationId
-        ? `/dms/${dmConversationId}/messages`
-        : workspace === 'server' && channelId
-          ? `/messages/${channelId}`
-          : '';
-    if (!path) {
+    if (!getCurrentMessagePath()) {
       setMessages([]);
       return;
     }
-    apiFetch(path, {}, token).then((nextMessages) => setMessages(sortMessages(nextMessages))).catch((err) => setError(err.message));
+    refreshCurrentMessages().catch((err) => setError(err.message));
   }, [isAuthed, workspace, channelId, dmConversationId, token]);
 
   useEffect(() => {
     if (!isAuthed) return undefined;
 
+    setSocketStatus(networkOnline ? 'connecting' : 'offline');
     const socket = io(SOCKET_URL, {
       path: '/socket.io',
       auth: { token },
@@ -809,17 +836,38 @@ export default function App() {
     socketRef.current = socket;
 
     socket.on('connect', () => {
+      setSocketStatus('connected');
+      setLastRealtimeSync(new Date().toISOString());
       setError('');
       rejoinRealtimeRooms(socket);
+      refreshSocialData().catch(() => {});
+      refreshCurrentMessages({ silent: true }).catch(() => {});
     });
     socket.io.on('reconnect', () => {
+      setSocketStatus('connected');
+      setLastRealtimeSync(new Date().toISOString());
       rejoinRealtimeRooms(socket);
+      refreshSocialData().catch(() => {});
+      refreshCurrentMessages({ silent: true }).catch(() => {});
       if (voiceJoinedRef.current) {
         cleanupVoice({ emitLeave: false });
         setVoiceStatus('Voice reconnected. Join the channel again.');
       }
     });
-    socket.on('connect_error', (err) => setError(err.message || 'Socket connection failed'));
+    socket.io.on('reconnect_attempt', () => setSocketStatus(networkOnline ? 'reconnecting' : 'offline'));
+    socket.io.on('reconnect_error', () => setSocketStatus(networkOnline ? 'reconnecting' : 'offline'));
+    socket.io.on('reconnect_failed', () => setSocketStatus('disconnected'));
+    socket.on('disconnect', (reason) => {
+      if (reason === 'io client disconnect') {
+        setSocketStatus('disconnected');
+        return;
+      }
+      setSocketStatus(networkOnline ? 'reconnecting' : 'offline');
+    });
+    socket.on('connect_error', (err) => {
+      setSocketStatus(networkOnline ? 'reconnecting' : 'offline');
+      setError(err.message || 'Socket connection failed');
+    });
     socket.on('socket-error', (payload) => setError(payload?.error || 'Socket error'));
     socket.on('new-message', (message) => {
       const scope = scopeRef.current;
@@ -914,11 +962,12 @@ export default function App() {
     socket.on('voice-user-left', ({ socketId }) => closePeer(socketId));
 
     return () => {
+      setSocketStatus('disconnected');
       socket.disconnect();
       socketRef.current = null;
       cleanupVoice({ emitLeave: false });
     };
-  }, [isAuthed, token, peerConfig]);
+  }, [isAuthed, token, peerConfig, networkOnline]);
 
   useEffect(() => {
     if (!isAuthed) return undefined;
@@ -926,18 +975,7 @@ export default function App() {
     const interval = window.setInterval(() => {
       refreshSocialData().catch(() => {});
 
-      const path =
-        workspace === 'dm' && dmConversationId
-          ? `/dms/${dmConversationId}/messages`
-          : workspace === 'server' && channelId
-            ? `/messages/${channelId}`
-            : '';
-
-      if (path) {
-        apiFetch(path, {}, token)
-          .then((nextMessages) => setMessages(sortMessages(nextMessages)))
-          .catch(() => {});
-      }
+      refreshCurrentMessages({ silent: true }).catch(() => {});
     }, MESSAGE_POLL_INTERVAL_MS);
 
     return () => window.clearInterval(interval);
@@ -962,6 +1000,26 @@ export default function App() {
   useEffect(() => {
     if (voiceChannelId) localStorage.setItem(KEYS.voice, String(voiceChannelId));
   }, [voiceChannelId]);
+
+  function getCurrentMessagePath() {
+    if (workspace === 'dm' && dmConversationId) return `/dms/${dmConversationId}/messages`;
+    if (workspace === 'server' && channelId) return `/messages/${channelId}`;
+    return '';
+  }
+
+  async function refreshCurrentMessages({ silent = false } = {}) {
+    const path = getCurrentMessagePath();
+    if (!isAuthed || !path) return;
+
+    try {
+      const nextMessages = await apiFetch(path, {}, token);
+      setMessages(sortMessages(nextMessages));
+      setLastRealtimeSync(new Date().toISOString());
+    } catch (err) {
+      if (!silent) setError(err.message);
+      throw err;
+    }
+  }
 
   function rejoinRealtimeRooms(socket = socketRef.current) {
     if (!socket?.connected) return;
@@ -1229,6 +1287,11 @@ export default function App() {
     event.preventDefault();
     const content = newMessage.trim();
     if ((!content && !pendingAttachment) || !token) return;
+    if (!networkOnline) {
+      setError('You are offline. Reconnect before sending.');
+      setSocketStatus('offline');
+      return;
+    }
 
     try {
       let createdMessage = null;
@@ -1557,6 +1620,11 @@ export default function App() {
         : activeTextChannel
           ? `# ${activeTextChannel.name}`
           : 'Server chat';
+  const realtimeStatus = networkOnline ? socketStatus : 'offline';
+  const realtimeLabel = SOCKET_STATUS_LABELS[realtimeStatus] || SOCKET_STATUS_LABELS.disconnected;
+  const syncTime = lastRealtimeSync
+    ? new Date(lastRealtimeSync).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    : '';
   const voiceStageParticipants = [
     {
       socketId: 'self',
@@ -1744,10 +1812,20 @@ export default function App() {
               <p className="muted">{workspace === 'friends' ? 'Requests, friends, and direct conversations.' : workspace === 'dm' ? 'Private messages synced through the backend.' : 'Server chat synced through the backend.'}</p>
             </div>
             <div className="header-badges">
+              <span className={`live-pill realtime-pill ${realtimeStatus}`}>
+                {realtimeLabel}{syncTime && realtimeStatus === 'connected' ? ` ${syncTime}` : ''}
+              </span>
               <span className="live-pill">{social.friends.length} friends</span>
               {voiceJoined ? <span className="live-pill">Voice active</span> : null}
             </div>
           </header>
+          {realtimeStatus !== 'connected' ? (
+            <div className={`realtime-banner ${realtimeStatus}`}>
+              {realtimeStatus === 'offline'
+                ? 'Network is offline. Messages will refresh when connection returns.'
+                : 'Realtime connection is recovering. WebCord keeps polling until live sync resumes.'}
+            </div>
+          ) : null}
 
           {voiceJoined ? (
             <VoiceStage

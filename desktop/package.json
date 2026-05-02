@@ -8,7 +8,9 @@
     "start": "electron .",
     "dev": "set WEBCORD_DESKTOP_URL=http://127.0.0.1:5173&& electron .",
     "pack": "npm --prefix ../frontend run build && electron-builder --dir",
-    "build": "npm --prefix ../frontend run build && electron-builder --win nsis portable --publish never"
+    "build": "npm --prefix ../frontend run build && electron-builder --win nsis portable --publish never",
+    "build:win": "npm --prefix ../frontend run build && electron-builder --win nsis portable --publish never",
+    "release": "npm run build:win"
   },
   "devDependencies": {
     "electron": "^39.2.7",
@@ -36,8 +38,12 @@
       ]
     },
     "nsis": {
+      "artifactName": "${productName}-Setup-${version}-${arch}.${ext}",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
+    },
+    "portable": {
+      "artifactName": "${productName}-Portable-${version}-${arch}.${ext}"
     }
   }
 }

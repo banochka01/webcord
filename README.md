@@ -64,6 +64,15 @@ The included Docker Compose setup starts PostgreSQL, backend, and frontend nginx
 
 For an external nginx reverse proxy, forward traffic to the frontend container port and keep `client_max_body_size 25m` so uploads match the backend limit.
 
+Production deploy from the server checkout:
+
+```bash
+cd /opt/webcord
+BRANCH=codex/webcord-ui-redesign ./scripts/deploy.sh
+```
+
+The deploy script refuses dirty tracked files by default, writes a pre-deploy patch to `/opt/webcord_backups`, rebuilds containers, and waits for `/api/health`.
+
 ## Desktop Client
 
 ```bash
@@ -80,6 +89,7 @@ npm run build
 ```
 
 The Electron shell is frameless, uses the React titlebar, exposes safe window controls through preload IPC, supports notifications, and includes a tray entry.
+Artifacts are written to `desktop/dist`.
 
 ## Android Client
 
@@ -94,6 +104,15 @@ Build a debug APK:
 ```bash
 npm run android:build
 ```
+
+Build release artifacts:
+
+```bash
+npm run android:release:apk
+npm run android:release:aab
+```
+
+Unsigned release outputs are generated when signing env vars are not set. For signed Android releases set `WEBCORD_ANDROID_KEYSTORE`, `WEBCORD_ANDROID_KEY_ALIAS`, `WEBCORD_ANDROID_KEYSTORE_PASSWORD`, `WEBCORD_ANDROID_KEY_PASSWORD`, and optionally `WEBCORD_ANDROID_VERSION_CODE` / `WEBCORD_ANDROID_VERSION_NAME`.
 
 The Android client uses Capacitor, bundles `frontend/dist`, keeps the mobile safe-area viewport, disables WebView text zoom, and uses the production API origin by default for native builds.
 

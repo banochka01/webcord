@@ -4,15 +4,20 @@
   "private": true,
   "scripts": {
     "postinstall": "node scripts/patch-capacitor-gradle.cjs",
+    "check": "node --check backend/src/server.js && npm --prefix frontend run build",
     "frontend:build": "npm --prefix frontend run build",
     "android:add": "npm.cmd run frontend:build && cap add android",
     "android:sync": "node scripts/patch-capacitor-gradle.cjs && npm.cmd run frontend:build && cap sync android && node scripts/patch-capacitor-gradle.cjs",
     "android:open": "npm.cmd run android:sync && cap open android",
     "android:build": "npm.cmd run android:sync && cd android && gradlew.bat assembleDebug --parallel --build-cache --no-daemon",
     "android:build:offline": "npm.cmd run android:sync && cd android && gradlew.bat assembleDebug --offline --parallel --build-cache --no-daemon",
+    "android:release:apk": "npm.cmd run android:sync && cd android && gradlew.bat assembleRelease --parallel --build-cache --no-daemon",
+    "android:release:aab": "npm.cmd run android:sync && cd android && gradlew.bat bundleRelease --parallel --build-cache --no-daemon",
     "desktop:install": "npm --prefix desktop install",
     "desktop:start": "npm --prefix frontend run build && npm --prefix desktop start",
-    "desktop:build": "npm --prefix desktop run build"
+    "desktop:pack": "npm --prefix desktop run pack",
+    "desktop:build": "npm --prefix desktop run build",
+    "clients:release": "npm.cmd run android:release:apk && npm.cmd run desktop:build"
   },
   "dependencies": {
     "@capacitor/android": "^8.0.0",
