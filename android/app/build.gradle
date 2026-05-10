@@ -15,8 +15,8 @@ android {
         applicationId "com.webcord.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode androidVersionCode ? Integer.parseInt(androidVersionCode) : 1
-        versionName androidVersionName ?: "1.0.0"
+        versionCode androidVersionCode ? Integer.parseInt(androidVersionCode) : 312
+        versionName androidVersionName ?: "3.1.2"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

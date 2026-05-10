@@ -4,11 +4,13 @@ import App from './App.jsx';
 import './styles.css';
 
 const isNativeClient = Boolean(
+  window.__TAURI__?.window ||
+  window.__TAURI_INTERNALS__ ||
   window.Capacitor?.isNativePlatform?.() ||
   window.webcordDesktop ||
   window.webcordWindow ||
   window.electronAPI ||
-  /\b(WebCordAndroid|WebCordDesktop|Electron)\b/i.test(navigator.userAgent)
+  /\b(WebCordAndroid|WebCordTauri|WebCordDesktop|Electron)\b/i.test(navigator.userAgent)
 );
 
 if (isNativeClient) {

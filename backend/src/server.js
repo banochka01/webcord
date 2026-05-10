@@ -15,15 +15,44 @@ const server = http.createServer(app);
 
 const PORT = Number(process.env.PORT || 3001);
 const MAX_UPLOAD_SIZE_MB = Number(process.env.MAX_UPLOAD_SIZE_MB || 25);
+const DEFAULT_MESSAGE_LIMIT = 100;
+const MAX_MESSAGE_LIMIT = 200;
 const CLIENT_ORIGINS = String(process.env.CLIENT_URL || '')
   .split(',')
   .map((origin) => origin.trim())
   .filter(Boolean);
+const BLOCKED_UPLOAD_EXTENSIONS = new Set(['.cjs', '.htm', '.html', '.js', '.mjs', '.svg', '.xhtml', '.xml']);
+const BLOCKED_UPLOAD_MIME_TYPES = new Set([
+  'application/javascript',
+  'application/xhtml+xml',
+  'application/xml',
+  'image/svg+xml',
+  'text/html',
+  'text/javascript',
+  'text/xml'
+]);
+const INLINE_UPLOAD_EXTENSIONS = new Set([
+  '.apng',
+  '.avif',
+  '.gif',
+  '.jpeg',
+  '.jpg',
+  '.m4v',
+  '.mov',
+  '.mp4',
+  '.ogg',
+  '.png',
+  '.webm',
+  '.webp'
+]);
 const NATIVE_CLIENT_ORIGINS = [
   'capacitor://localhost',
   'ionic://localhost',
   'app://localhost',
   'file://',
+  'http://tauri.localhost',
+  'https://tauri.localhost',
+  'tauri://localhost',
   'http://localhost',
   'https://localhost'
 ];
@@ -46,10 +75,25 @@ const storage = multer.diskStorage({
 
 const upload = multer({
   storage,
-  limits: { fileSize: MAX_UPLOAD_SIZE_MB * 1024 * 1024 }
+  limits: { fileSize: MAX_UPLOAD_SIZE_MB * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const ext = path.extname(file.originalname || '').toLowerCase();
+    const mimeType = String(file.mimetype || '').toLowerCase();
+
+    if (BLOCKED_UPLOAD_EXTENSIONS.has(ext) || BLOCKED_UPLOAD_MIME_TYPES.has(mimeType)) {
+      const error = new Error('This file type is not allowed.');
+      error.status = 415;
+      error.code = 'UNSUPPORTED_UPLOAD_TYPE';
+      cb(error);
+      return;
+    }
+
+    cb(null, true);
+  }
 });
 
 const voiceParticipants = new Map();
+const rateLimitBuckets = new Map();
 const publicUserSelect = {
   id: true,
   username: true,
@@ -57,11 +101,109 @@ const publicUserSelect = {
   bannerUrl: true,
   bio: true
 };
+const authRateLimit = createRateLimiter({ windowMs: 60_000, max: 20, keyPrefix: 'auth' });
+const messageRateLimitConfig = { windowMs: 10_000, max: 18, keyPrefix: 'message' };
+const messageRateLimit = createRateLimiter(messageRateLimitConfig);
+const uploadRateLimit = createRateLimiter({ windowMs: 60_000, max: 20, keyPrefix: 'upload' });
 
 function getAttachmentType(mimeType = '') {
   if (mimeType.startsWith('image/')) return 'IMAGE';
   if (mimeType.startsWith('video/')) return 'VIDEO';
   return 'FILE';
+}
+
+function sendApiError(res, status, code, error) {
+  return res.status(status).json({ code, error });
+}
+
+function createApiError(status, code, message) {
+  const error = new Error(message);
+  error.status = status;
+  error.code = code;
+  return error;
+}
+
+function consumeRateLimit({ identity, windowMs, max, keyPrefix }) {
+  const key = `${keyPrefix}:${identity || 'anonymous'}`;
+  const now = Date.now();
+  const bucket = rateLimitBuckets.get(key) || { count: 0, resetAt: now + windowMs };
+
+  if (bucket.resetAt <= now) {
+    bucket.count = 0;
+    bucket.resetAt = now + windowMs;
+  }
+
+  bucket.count += 1;
+  rateLimitBuckets.set(key, bucket);
+
+  return {
+    allowed: bucket.count <= max,
+    retryAfter: Math.ceil((bucket.resetAt - now) / 1000)
+  };
+}
+
+function createRateLimiter({ windowMs, max, keyPrefix }) {
+  return (req, res, next) => {
+    const identity = req.user?.userId || req.ip || 'anonymous';
+    const result = consumeRateLimit({ identity, windowMs, max, keyPrefix });
+
+    if (!result.allowed) {
+      res.setHeader('Retry-After', String(result.retryAfter));
+      return sendApiError(res, 429, 'RATE_LIMITED', 'Too many requests. Try again shortly.');
+    }
+
+    return next();
+  };
+}
+
+function checkSocketRateLimit(socket, config = messageRateLimitConfig) {
+  const result = consumeRateLimit({
+    ...config,
+    identity: socket.user?.userId || socket.id
+  });
+
+  if (!result.allowed) {
+    socket.emit('socket-error', {
+      code: 'RATE_LIMITED',
+      error: 'Too many messages. Try again shortly.',
+      retryAfter: result.retryAfter
+    });
+    return false;
+  }
+
+  return true;
+}
+
+function parsePositiveInt(value) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function parseOptionalPositiveInt(value) {
+  if (value === undefined || value === null || value === '') return null;
+  return parsePositiveInt(value);
+}
+
+function parseMessagePagination(query = {}) {
+  const limit = Math.min(MAX_MESSAGE_LIMIT, Math.max(1, parsePositiveInt(query.limit) || DEFAULT_MESSAGE_LIMIT));
+  const beforeId = parseOptionalPositiveInt(query.beforeId);
+  return { limit, beforeId };
+}
+
+function sendCaughtApiError(res, error, fallbackCode, fallbackMessage) {
+  if (error?.status && error?.code) {
+    return sendApiError(res, error.status, error.code, error.message || fallbackMessage);
+  }
+
+  return sendApiError(res, 500, fallbackCode, fallbackMessage);
+}
+
+function getUploadDisposition(filePath) {
+  const ext = path.extname(filePath || '').toLowerCase();
+  if (INLINE_UPLOAD_EXTENSIONS.has(ext)) return '';
+
+  const filename = path.basename(filePath || 'download').replace(/["\r\n]/g, '_');
+  return `attachment; filename="${filename}"`;
 }
 
 function normalizeUserPair(leftId, rightId) {
@@ -209,7 +351,7 @@ function emitSocialRefresh(userIds) {
   });
 }
 
-async function createChannelMessage({ channelId, userId, content, attachmentUrl, attachmentType, attachmentName }) {
+async function createChannelMessage({ channelId, userId, content, attachmentUrl, attachmentType, attachmentName, replyToId }) {
   const channel = await prisma.channel.findUnique({
     where: { id: channelId },
     select: { id: true, type: true }
@@ -219,6 +361,17 @@ async function createChannelMessage({ channelId, userId, content, attachmentUrl,
     return null;
   }
 
+  if (replyToId) {
+    const replyTarget = await prisma.message.findUnique({
+      where: { id: replyToId },
+      select: { channelId: true }
+    });
+
+    if (!replyTarget || replyTarget.channelId !== channelId) {
+      throw createApiError(400, 'INVALID_REPLY_TARGET', 'Reply target was not found in this channel.');
+    }
+  }
+
   return prisma.message.create({
     data: {
       channelId,
@@ -226,21 +379,38 @@ async function createChannelMessage({ channelId, userId, content, attachmentUrl,
       authorId: userId,
       attachmentUrl,
       attachmentType,
-      attachmentName
+      attachmentName,
+      replyToId: replyToId || null
     },
     include: {
-      author: { select: publicUserSelect }
+      author: { select: publicUserSelect },
+      replyTo: {
+        include: {
+          author: { select: publicUserSelect }
+        }
+      }
     }
   });
 }
 
-async function createDirectConversationMessage({ conversationId, userId, content, attachmentUrl, attachmentType, attachmentName }) {
+async function createDirectConversationMessage({ conversationId, userId, content, attachmentUrl, attachmentType, attachmentName, replyToId }) {
   const conversation = await prisma.directConversation.findUnique({
     where: { id: conversationId }
   });
 
   if (!conversation || ![conversation.userOneId, conversation.userTwoId].includes(userId)) {
     return { conversation: null, message: null };
+  }
+
+  if (replyToId) {
+    const replyTarget = await prisma.directMessage.findUnique({
+      where: { id: replyToId },
+      select: { conversationId: true }
+    });
+
+    if (!replyTarget || replyTarget.conversationId !== conversationId) {
+      throw createApiError(400, 'INVALID_REPLY_TARGET', 'Reply target was not found in this conversation.');
+    }
   }
 
   const message = await prisma.directMessage.create({
@@ -250,10 +420,16 @@ async function createDirectConversationMessage({ conversationId, userId, content
       authorId: userId,
       attachmentUrl,
       attachmentType,
-      attachmentName
+      attachmentName,
+      replyToId: replyToId || null
     },
     include: {
-      author: { select: publicUserSelect }
+      author: { select: publicUserSelect },
+      replyTo: {
+        include: {
+          author: { select: publicUserSelect }
+        }
+      }
     }
   });
 
@@ -288,7 +464,16 @@ app.set('trust proxy', 1);
 app.use(cors({ origin: isAllowedCorsOrigin, credentials: true }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use('/uploads', express.static(uploadDir));
+app.use(
+  '/uploads',
+  express.static(uploadDir, {
+    setHeaders: (res, filePath) => {
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      const disposition = getUploadDisposition(filePath);
+      if (disposition) res.setHeader('Content-Disposition', disposition);
+    }
+  })
+);
 
 app.get('/health', (_req, res) => {
   res.json({ ok: true, voiceRooms: voiceParticipants.size });
@@ -298,7 +483,7 @@ app.get('/api/health', (_req, res) => {
   res.json({ ok: true, voiceRooms: voiceParticipants.size });
 });
 
-app.post('/api/auth/register', async (req, res) => {
+app.post('/api/auth/register', authRateLimit, async (req, res) => {
   try {
     const username = String(req.body.username || '').trim();
     const password = String(req.body.password || '');
@@ -337,7 +522,7 @@ app.post('/api/auth/register', async (req, res) => {
   }
 });
 
-app.post('/api/auth/login', async (req, res) => {
+app.post('/api/auth/login', authRateLimit, async (req, res) => {
   try {
     const username = String(req.body.username || '').trim();
     const password = String(req.body.password || '');
@@ -662,15 +847,34 @@ app.get('/api/dms/:conversationId/messages', authMiddleware, async (req, res) =>
       return res.status(404).json({ error: 'Conversation not found' });
     }
 
+    await prisma.directMessage.updateMany({
+      where: {
+        conversationId,
+        authorId: { not: currentUserId },
+        readAt: null
+      },
+      data: { readAt: new Date() }
+    });
+
+    const { limit, beforeId } = parseMessagePagination(req.query);
     const messages = await prisma.directMessage.findMany({
-      where: { conversationId },
-      orderBy: { createdAt: 'asc' },
+      where: {
+        conversationId,
+        ...(beforeId ? { id: { lt: beforeId } } : {})
+      },
+      orderBy: { id: 'desc' },
+      take: limit,
       include: {
-        author: { select: publicUserSelect }
+        author: { select: publicUserSelect },
+        replyTo: {
+          include: {
+            author: { select: publicUserSelect }
+          }
+        }
       }
     });
 
-    return res.json(messages);
+    return res.json(messages.reverse());
   } catch (error) {
     console.error(error);
     return res.status(500).json({ error: 'Failed to fetch direct messages' });
@@ -744,28 +948,39 @@ app.get('/api/messages/:channelId', authMiddleware, async (req, res) => {
       return res.status(400).json({ error: 'Invalid channel id' });
     }
 
+    const { limit, beforeId } = parseMessagePagination(req.query);
     const messages = await prisma.message.findMany({
-      where: { channelId },
-      orderBy: { createdAt: 'asc' },
+      where: {
+        channelId,
+        ...(beforeId ? { id: { lt: beforeId } } : {})
+      },
+      orderBy: { id: 'desc' },
+      take: limit,
       include: {
-        author: { select: publicUserSelect }
+        author: { select: publicUserSelect },
+        replyTo: {
+          include: {
+            author: { select: publicUserSelect }
+          }
+        }
       }
     });
 
-    return res.json(messages);
+    return res.json(messages.reverse());
   } catch (error) {
     console.error(error);
     return res.status(500).json({ error: 'Failed to fetch messages' });
   }
 });
 
-app.post('/api/messages', authMiddleware, async (req, res) => {
+app.post('/api/messages', authMiddleware, messageRateLimit, async (req, res) => {
   try {
     const channelId = Number(req.body.channelId);
     const content = String(req.body.content || '').trim();
     const attachmentUrl = req.body.attachmentUrl || null;
     const attachmentType = req.body.attachmentType || null;
     const attachmentName = req.body.attachmentName || null;
+    const replyToId = parseOptionalPositiveInt(req.body.replyToId);
 
     if (!channelId || Number.isNaN(channelId)) {
       return res.status(400).json({ error: 'Invalid channel id' });
@@ -774,6 +989,9 @@ app.post('/api/messages', authMiddleware, async (req, res) => {
     if (!content && !attachmentUrl) {
       return res.status(400).json({ error: 'Message content or attachment is required' });
     }
+    if (req.body.replyToId && !replyToId) {
+      return sendApiError(res, 400, 'INVALID_REPLY_TARGET', 'Invalid reply target');
+    }
 
     const message = await createChannelMessage({
       channelId,
@@ -781,7 +999,8 @@ app.post('/api/messages', authMiddleware, async (req, res) => {
       content,
       attachmentUrl,
       attachmentType,
-      attachmentName
+      attachmentName,
+      replyToId
     });
 
     if (!message) {
@@ -792,17 +1011,18 @@ app.post('/api/messages', authMiddleware, async (req, res) => {
     return res.status(201).json(message);
   } catch (error) {
     console.error(error);
-    return res.status(500).json({ error: 'Failed to send message' });
+    return sendCaughtApiError(res, error, 'MESSAGE_SEND_FAILED', 'Failed to send message');
   }
 });
 
-app.post('/api/dms/:conversationId/messages', authMiddleware, async (req, res) => {
+app.post('/api/dms/:conversationId/messages', authMiddleware, messageRateLimit, async (req, res) => {
   try {
     const conversationId = Number(req.params.conversationId);
     const content = String(req.body.content || '').trim();
     const attachmentUrl = req.body.attachmentUrl || null;
     const attachmentType = req.body.attachmentType || null;
     const attachmentName = req.body.attachmentName || null;
+    const replyToId = parseOptionalPositiveInt(req.body.replyToId);
 
     if (!conversationId || Number.isNaN(conversationId)) {
       return res.status(400).json({ error: 'Invalid conversation id' });
@@ -811,6 +1031,9 @@ app.post('/api/dms/:conversationId/messages', authMiddleware, async (req, res) =
     if (!content && !attachmentUrl) {
       return res.status(400).json({ error: 'Message content or attachment is required' });
     }
+    if (req.body.replyToId && !replyToId) {
+      return sendApiError(res, 400, 'INVALID_REPLY_TARGET', 'Invalid reply target');
+    }
 
     const { conversation, message } = await createDirectConversationMessage({
       conversationId,
@@ -818,7 +1041,8 @@ app.post('/api/dms/:conversationId/messages', authMiddleware, async (req, res) =
       content,
       attachmentUrl,
       attachmentType,
-      attachmentName
+      attachmentName,
+      replyToId
     });
 
     if (!conversation || !message) {
@@ -837,11 +1061,169 @@ app.post('/api/dms/:conversationId/messages', authMiddleware, async (req, res) =
     });
   } catch (error) {
     console.error(error);
-    return res.status(500).json({ error: 'Failed to send direct message' });
+    return sendCaughtApiError(res, error, 'MESSAGE_SEND_FAILED', 'Failed to send direct message');
   }
 });
 
-app.post('/api/upload', authMiddleware, upload.single('file'), async (req, res) => {
+app.patch('/api/messages/:messageId', authMiddleware, messageRateLimit, async (req, res) => {
+  try {
+    const messageId = Number(req.params.messageId);
+    const content = String(req.body.content || '').trim();
+
+    if (!messageId || Number.isNaN(messageId)) {
+      return sendApiError(res, 400, 'INVALID_MESSAGE_ID', 'Invalid message id');
+    }
+    if (!content) {
+      return sendApiError(res, 400, 'MESSAGE_EMPTY', 'Message content is required');
+    }
+
+    const existing = await prisma.message.findUnique({ where: { id: messageId } });
+    if (!existing || existing.authorId !== req.user.userId || existing.deletedAt) {
+      return sendApiError(res, 404, 'MESSAGE_NOT_FOUND', 'Message not found');
+    }
+
+    const message = await prisma.message.update({
+      where: { id: messageId },
+      data: { content, editedAt: new Date() },
+      include: {
+        author: { select: publicUserSelect },
+        replyTo: { include: { author: { select: publicUserSelect } } }
+      }
+    });
+
+    io.to(`channel:${message.channelId}`).emit('message:updated', message);
+    return res.json(message);
+  } catch (error) {
+    console.error(error);
+    return sendApiError(res, 500, 'MESSAGE_EDIT_FAILED', 'Failed to edit message');
+  }
+});
+
+app.delete('/api/messages/:messageId', authMiddleware, messageRateLimit, async (req, res) => {
+  try {
+    const messageId = Number(req.params.messageId);
+    if (!messageId || Number.isNaN(messageId)) {
+      return sendApiError(res, 400, 'INVALID_MESSAGE_ID', 'Invalid message id');
+    }
+
+    const existing = await prisma.message.findUnique({ where: { id: messageId } });
+    if (!existing || existing.authorId !== req.user.userId) {
+      return sendApiError(res, 404, 'MESSAGE_NOT_FOUND', 'Message not found');
+    }
+
+    const message = await prisma.message.update({
+      where: { id: messageId },
+      data: {
+        content: '',
+        attachmentUrl: null,
+        attachmentType: null,
+        attachmentName: null,
+        deletedAt: new Date()
+      },
+      include: {
+        author: { select: publicUserSelect },
+        replyTo: { include: { author: { select: publicUserSelect } } }
+      }
+    });
+
+    io.to(`channel:${message.channelId}`).emit('message:updated', message);
+    return res.json(message);
+  } catch (error) {
+    console.error(error);
+    return sendApiError(res, 500, 'MESSAGE_DELETE_FAILED', 'Failed to delete message');
+  }
+});
+
+app.patch('/api/dms/:conversationId/messages/:messageId', authMiddleware, messageRateLimit, async (req, res) => {
+  try {
+    const conversationId = Number(req.params.conversationId);
+    const messageId = Number(req.params.messageId);
+    const content = String(req.body.content || '').trim();
+
+    if (!conversationId || Number.isNaN(conversationId) || !messageId || Number.isNaN(messageId)) {
+      return sendApiError(res, 400, 'INVALID_MESSAGE_ID', 'Invalid message id');
+    }
+    if (!content) {
+      return sendApiError(res, 400, 'MESSAGE_EMPTY', 'Message content is required');
+    }
+
+    const conversation = await prisma.directConversation.findUnique({ where: { id: conversationId } });
+    const existing = await prisma.directMessage.findUnique({ where: { id: messageId } });
+    if (
+      !conversation ||
+      ![conversation.userOneId, conversation.userTwoId].includes(req.user.userId) ||
+      !existing ||
+      existing.conversationId !== conversationId ||
+      existing.authorId !== req.user.userId ||
+      existing.deletedAt
+    ) {
+      return sendApiError(res, 404, 'MESSAGE_NOT_FOUND', 'Message not found');
+    }
+
+    const message = await prisma.directMessage.update({
+      where: { id: messageId },
+      data: { content, editedAt: new Date() },
+      include: {
+        author: { select: publicUserSelect },
+        replyTo: { include: { author: { select: publicUserSelect } } }
+      }
+    });
+
+    io.to(`dm:${conversationId}`).emit('direct-message:updated', { ...message, conversationId });
+    emitSocialRefresh([conversation.userOneId, conversation.userTwoId]);
+    return res.json({ ...message, conversationId });
+  } catch (error) {
+    console.error(error);
+    return sendApiError(res, 500, 'MESSAGE_EDIT_FAILED', 'Failed to edit direct message');
+  }
+});
+
+app.delete('/api/dms/:conversationId/messages/:messageId', authMiddleware, messageRateLimit, async (req, res) => {
+  try {
+    const conversationId = Number(req.params.conversationId);
+    const messageId = Number(req.params.messageId);
+
+    if (!conversationId || Number.isNaN(conversationId) || !messageId || Number.isNaN(messageId)) {
+      return sendApiError(res, 400, 'INVALID_MESSAGE_ID', 'Invalid message id');
+    }
+
+    const conversation = await prisma.directConversation.findUnique({ where: { id: conversationId } });
+    const existing = await prisma.directMessage.findUnique({ where: { id: messageId } });
+    if (
+      !conversation ||
+      ![conversation.userOneId, conversation.userTwoId].includes(req.user.userId) ||
+      !existing ||
+      existing.conversationId !== conversationId ||
+      existing.authorId !== req.user.userId
+    ) {
+      return sendApiError(res, 404, 'MESSAGE_NOT_FOUND', 'Message not found');
+    }
+
+    const message = await prisma.directMessage.update({
+      where: { id: messageId },
+      data: {
+        content: '',
+        attachmentUrl: null,
+        attachmentType: null,
+        attachmentName: null,
+        deletedAt: new Date()
+      },
+      include: {
+        author: { select: publicUserSelect },
+        replyTo: { include: { author: { select: publicUserSelect } } }
+      }
+    });
+
+    io.to(`dm:${conversationId}`).emit('direct-message:updated', { ...message, conversationId });
+    emitSocialRefresh([conversation.userOneId, conversation.userTwoId]);
+    return res.json({ ...message, conversationId });
+  } catch (error) {
+    console.error(error);
+    return sendApiError(res, 500, 'MESSAGE_DELETE_FAILED', 'Failed to delete direct message');
+  }
+});
+
+app.post('/api/upload', authMiddleware, uploadRateLimit, upload.single('file'), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: 'No file uploaded' });
   }
@@ -856,6 +1238,10 @@ app.post('/api/upload', authMiddleware, upload.single('file'), async (req, res) 
 app.use((error, _req, res, next) => {
   if (error instanceof multer.MulterError && error.code === 'LIMIT_FILE_SIZE') {
     return res.status(413).json({ error: 'File too large. Max 25MB.' });
+  }
+
+  if (error?.code === 'UNSUPPORTED_UPLOAD_TYPE') {
+    return sendApiError(res, error.status || 415, error.code, error.message || 'This file type is not allowed.');
   }
 
   if (error) {
@@ -987,14 +1373,21 @@ io.on('connection', (socket) => {
 
   socket.on('send-message', async (payload = {}) => {
     try {
+      if (!checkSocketRateLimit(socket)) return;
+
       const channelId = Number(payload.channelId);
       const content = String(payload.content || '').trim();
       const attachmentUrl = payload.attachmentUrl || null;
       const attachmentType = payload.attachmentType || null;
       const attachmentName = payload.attachmentName || null;
+      const replyToId = parseOptionalPositiveInt(payload.replyToId);
 
       if (!channelId || Number.isNaN(channelId)) return;
       if (!content && !attachmentUrl) return;
+      if (payload.replyToId && !replyToId) {
+        socket.emit('socket-error', { code: 'INVALID_REPLY_TARGET', error: 'Invalid reply target' });
+        return;
+      }
 
       const message = await createChannelMessage({
         channelId,
@@ -1002,7 +1395,8 @@ io.on('connection', (socket) => {
         content,
         attachmentUrl,
         attachmentType,
-        attachmentName
+        attachmentName,
+        replyToId
       });
 
       if (!message) {
@@ -1013,20 +1407,27 @@ io.on('connection', (socket) => {
       io.to(`channel:${channelId}`).emit('new-message', message);
     } catch (error) {
       console.error(error);
-      socket.emit('socket-error', { error: 'Failed to send message' });
+      socket.emit('socket-error', { code: error?.code, error: error?.message || 'Failed to send message' });
     }
   });
 
   socket.on('send-direct-message', async (payload = {}) => {
     try {
+      if (!checkSocketRateLimit(socket)) return;
+
       const conversationId = Number(payload.conversationId);
       const content = String(payload.content || '').trim();
       const attachmentUrl = payload.attachmentUrl || null;
       const attachmentType = payload.attachmentType || null;
       const attachmentName = payload.attachmentName || null;
+      const replyToId = parseOptionalPositiveInt(payload.replyToId);
 
       if (!conversationId || Number.isNaN(conversationId)) return;
       if (!content && !attachmentUrl) return;
+      if (payload.replyToId && !replyToId) {
+        socket.emit('socket-error', { code: 'INVALID_REPLY_TARGET', error: 'Invalid reply target' });
+        return;
+      }
 
       const { conversation, message } = await createDirectConversationMessage({
         conversationId,
@@ -1034,7 +1435,8 @@ io.on('connection', (socket) => {
         content,
         attachmentUrl,
         attachmentType,
-        attachmentName
+        attachmentName,
+        replyToId
       });
 
       if (!conversation || !message) {
@@ -1049,7 +1451,7 @@ io.on('connection', (socket) => {
       emitSocialRefresh([conversation.userOneId, conversation.userTwoId]);
     } catch (error) {
       console.error(error);
-      socket.emit('socket-error', { error: 'Failed to send direct message' });
+      socket.emit('socket-error', { code: error?.code, error: error?.message || 'Failed to send direct message' });
     }
   });
 

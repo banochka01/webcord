@@ -67,11 +67,16 @@ model Message {
   attachmentUrl  String?
   attachmentType AttachmentType?
   attachmentName String?
+  replyToId      Int?
+  editedAt       DateTime?
+  deletedAt      DateTime?
   channelId      Int
   authorId       Int
   createdAt      DateTime        @default(now())
   channel        Channel         @relation(fields: [channelId], references: [id], onDelete: Cascade)
   author         User            @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  replyTo        Message?        @relation("MessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies        Message[]       @relation("MessageReplies")
 
   @@index([channelId, createdAt])
   @@index([authorId])
@@ -125,12 +130,19 @@ model DirectMessage {
   attachmentUrl  String?
   attachmentType AttachmentType?
   attachmentName String?
+  replyToId      Int?
+  editedAt       DateTime?
+  deletedAt      DateTime?
+  readAt         DateTime?
   conversationId Int
   authorId       Int
   createdAt      DateTime        @default(now())
   conversation   DirectConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   author         User            @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  replyTo        DirectMessage?   @relation("DirectMessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies        DirectMessage[]  @relation("DirectMessageReplies")
 
   @@index([conversationId, createdAt])
   @@index([authorId])
+  @@index([conversationId, readAt])
 }

@@ -2,7 +2,7 @@
 
 WebCord is a Discord-like web chat with channels, direct messages, friends, file uploads, voice rooms, screen sharing support, and a dark responsive client UI.
 
-The canonical project logo is `webcord.png` in the repository root. The web favicon/PWA icons, Electron icon, Android launcher icon, and Android splash assets are generated from that source image.
+The canonical project logo is `webcord.png` in the repository root. The web favicon/PWA icons, Tauri/Electron icon, Android launcher icon, and Android splash assets are generated from that source image.
 
 ## Stack
 
@@ -80,20 +80,19 @@ See `docs/production-runbook.md` for the deployment checklist and rollback notes
 ## Desktop Client
 
 ```bash
-cd desktop
 npm install
-npm run start
+npm run desktop:start
 ```
 
 Build Windows packages:
 
 ```bash
-cd desktop
-npm run build
+npm run desktop:build
 ```
 
-The Electron shell is frameless, uses the React titlebar, exposes safe window controls through preload IPC, supports notifications, and includes a tray entry.
-Artifacts are written to `desktop/dist`.
+The primary desktop shell uses Tauri v2 with a frameless native window, React titlebar controls, WebView2 on Windows, native notifications, external release links, and `webcord://` deep-link handling. Install Rust before building Tauri packages.
+
+The previous Electron shell is kept as a legacy fallback under `desktop:electron:*` scripts.
 
 ## Android Client
 

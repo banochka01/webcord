@@ -1,11 +1,14 @@
 {
   "name": "webcord-native-clients",
-  "version": "2.0.0",
+  "version": "3.1.2",
   "private": true,
   "scripts": {
     "postinstall": "node scripts/patch-capacitor-gradle.cjs",
-    "check": "node --check backend/src/server.js && npm --prefix frontend run build",
-    "frontend:build": "npm --prefix frontend run build",
+    "check": "node --check backend/src/server.js && node --check backend/src/auth.js && node --check desktop/main.cjs && node --check desktop/preload.cjs && npm --prefix backend run db:validate && npm --prefix frontend run build",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
+    "frontend:build": "npm.cmd --prefix frontend run build",
     "android:add": "npm.cmd run frontend:build && cap add android",
     "android:sync": "node scripts/patch-capacitor-gradle.cjs && npm.cmd run frontend:build && cap sync android && node scripts/patch-capacitor-gradle.cjs",
     "android:open": "npm.cmd run android:sync && cap open android",
@@ -13,10 +16,12 @@
     "android:build:offline": "npm.cmd run android:sync && cd android && gradlew.bat assembleDebug --offline --parallel --build-cache --no-daemon",
     "android:release:apk": "npm.cmd run android:sync && cd android && gradlew.bat assembleRelease --parallel --build-cache --no-daemon",
     "android:release:aab": "npm.cmd run android:sync && cd android && gradlew.bat bundleRelease --parallel --build-cache --no-daemon",
-    "desktop:install": "npm --prefix desktop install",
-    "desktop:start": "npm --prefix frontend run build && npm --prefix desktop start",
-    "desktop:pack": "npm --prefix desktop run pack",
-    "desktop:build": "npm --prefix desktop run build",
+    "desktop:start": "tauri dev",
+    "desktop:build": "tauri build",
+    "desktop:electron:install": "npm --prefix desktop install",
+    "desktop:electron:start": "npm.cmd --prefix frontend run build && npm.cmd --prefix desktop start",
+    "desktop:electron:pack": "npm.cmd --prefix desktop run pack",
+    "desktop:electron:build": "npm.cmd --prefix desktop run build",
     "clients:release": "npm.cmd run android:release:apk && npm.cmd run desktop:build"
   },
   "dependencies": {
@@ -27,6 +32,7 @@
     "@capacitor/status-bar": "^8.0.0"
   },
   "devDependencies": {
-    "@capacitor/cli": "^8.0.0"
+    "@capacitor/cli": "^8.0.0",
+    "@tauri-apps/cli": "^2.10.1"
   }
 }

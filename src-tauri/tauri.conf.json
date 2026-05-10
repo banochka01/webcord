@@ -1,0 +1,70 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "WebCord",
+  "version": "3.1.2",
+  "identifier": "com.webcord.desktop",
+  "build": {
+    "beforeDevCommand": {
+      "cwd": "..",
+      "script": "npm.cmd --prefix frontend run dev",
+      "wait": false
+    },
+    "beforeBuildCommand": {
+      "cwd": "..",
+      "script": "npm.cmd --prefix frontend run build"
+    },
+    "devUrl": "http://127.0.0.1:5173",
+    "frontendDist": "../frontend/dist"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "security": {
+      "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:3001 http://localhost:3001 https://webcordes.ru ws://127.0.0.1:3001 ws://localhost:3001 wss://webcordes.ru; img-src 'self' asset: http://asset.localhost data: blob: https: http:; media-src 'self' asset: http://asset.localhost data: blob: https: http:; style-src 'self' 'unsafe-inline'; font-src 'self' data:;"
+    },
+    "windows": [
+      {
+        "label": "main",
+        "title": "WebCord",
+        "width": 1320,
+        "height": 860,
+        "minWidth": 1020,
+        "minHeight": 680,
+        "center": true,
+        "decorations": false,
+        "resizable": true,
+        "shadow": true,
+        "backgroundColor": "#090b10",
+        "userAgent": "WebCordTauri"
+      }
+    ]
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "../desktop/build/icon.ico",
+      "../desktop/build/icon.png"
+    ],
+    "category": "SocialNetworking",
+    "shortDescription": "WebCord native desktop chat client",
+    "longDescription": "WebCord is a native desktop shell for a Discord-like chat with channels, direct messages, friends, voice rooms and screen sharing.",
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      },
+      "nsis": {
+        "installMode": "both",
+        "displayLanguageSelector": false,
+        "installerIcon": "../desktop/build/icon.ico"
+      }
+    }
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["webcord"]
+      }
+    }
+  }
+}

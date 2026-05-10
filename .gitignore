@@ -30,3 +30,6 @@ android/app/build/
 android/build/
 desktop/dist/
 desktop/out/
+
+src-tauri/target/
+src-tauri/gen/

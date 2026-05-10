@@ -17,14 +17,43 @@ const fallbackIcon = nativeImage.createFromDataURL(
 const iconPath = path.join(__dirname, 'build', 'icon.png');
 const appIcon = fs.existsSync(iconPath) ? nativeImage.createFromPath(iconPath) : fallbackIcon;
 const trayIcon = appIcon.isEmpty() ? fallbackIcon : appIcon;
+const updatesUrl = 'https://github.com/banochka01/webcord/releases';
+const allowedExternalProtocols = new Set(['http:', 'https:', 'mailto:']);
 
 let mainWindow;
 let tray;
+let pendingDeepLink = '';
+
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+}
 
 function getFrontendEntry() {
   if (process.env.WEBCORD_DESKTOP_URL) return process.env.WEBCORD_DESKTOP_URL;
   if (app.isPackaged) return path.join(process.resourcesPath, 'frontend', 'index.html');
   return path.join(__dirname, '..', 'frontend', 'dist', 'index.html');
+}
+
+function isTrustedAppUrl(value = '') {
+  try {
+    const parsed = new URL(value);
+    if (parsed.protocol === 'file:') return true;
+    if (['localhost', '127.0.0.1'].includes(parsed.hostname)) return true;
+    return parsed.origin === 'https://webcordes.ru';
+  } catch {
+    return false;
+  }
+}
+
+function openTrustedExternalUrl(value = '') {
+  try {
+    const parsed = new URL(value);
+    if (!allowedExternalProtocols.has(parsed.protocol)) return false;
+    shell.openExternal(parsed.href);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function sendWindowState() {
@@ -48,7 +77,7 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      sandbox: true,
       backgroundThrottling: false
     }
   });
@@ -63,19 +92,26 @@ function createWindow() {
   }
 
   mainWindow.once('ready-to-show', () => mainWindow.show());
+  mainWindow.webContents.once('did-finish-load', () => {
+    if (pendingDeepLink) {
+      mainWindow.webContents.send('app:deep-link', pendingDeepLink);
+      pendingDeepLink = '';
+    }
+  });
   mainWindow.on('maximize', sendWindowState);
   mainWindow.on('unmaximize', sendWindowState);
   mainWindow.on('focus', () => mainWindow.webContents.send('window:focus', true));
   mainWindow.on('blur', () => mainWindow.webContents.send('window:focus', false));
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    openTrustedExternalUrl(url);
     return { action: 'deny' };
   });
 
   const webSession = mainWindow.webContents.session;
-  webSession.setPermissionRequestHandler((_webContents, permission, callback) => {
-    callback(['notifications', 'media', 'display-capture'].includes(permission));
+  webSession.setPermissionRequestHandler((webContents, permission, callback, details) => {
+    const sourceUrl = details?.requestingUrl || webContents.getURL();
+    callback(isTrustedAppUrl(sourceUrl) && ['notifications', 'media', 'display-capture'].includes(permission));
   });
 
   if (typeof webSession.setDisplayMediaRequestHandler === 'function') {
@@ -105,7 +141,20 @@ function createTray() {
   });
 }
 
+function focusWithDeepLink(url = '') {
+  pendingDeepLink = url;
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createWindow();
+    return;
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+  if (url) mainWindow.webContents.send('app:deep-link', url);
+}
+
 app.commandLine.appendSwitch('disable-features', 'HardwareMediaKeyHandling');
+app.setAsDefaultProtocolClient('webcord');
 
 app.whenReady().then(() => {
   createWindow();
@@ -114,6 +163,16 @@ app.whenReady().then(() => {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
+});
+
+app.on('second-instance', (_event, argv) => {
+  const url = argv.find((item) => item.startsWith('webcord://')) || '';
+  focusWithDeepLink(url);
+});
+
+app.on('open-url', (event, url) => {
+  event.preventDefault();
+  focusWithDeepLink(url);
 });
 
 app.on('window-all-closed', () => {
@@ -137,4 +196,17 @@ ipcMain.handle('app:notify', (_event, payload = {}) => {
     icon: trayIcon
   }).show();
   return true;
+});
+ipcMain.handle('app:check-updates', () => {
+  return { ok: openTrustedExternalUrl(updatesUrl), url: updatesUrl };
+});
+ipcMain.handle('app:set-badge', (_event, count = 0) => {
+  const nextCount = Math.max(0, Number(count) || 0);
+  if (process.platform === 'darwin') {
+    app.dock?.setBadge(nextCount ? String(nextCount) : '');
+  }
+  if (tray) {
+    tray.setToolTip(nextCount ? `WebCord - ${nextCount} unread` : 'WebCord');
+  }
+  return nextCount;
 });

@@ -3,6 +3,10 @@ import jwt from 'jsonwebtoken';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'change_me_now';
 
+if (process.env.NODE_ENV === 'production' && (!process.env.JWT_SECRET || JWT_SECRET === 'change_me_now')) {
+  throw new Error('JWT_SECRET must be set to a strong secret in production.');
+}
+
 export async function hashPassword(password) {
   return bcrypt.hash(password, 10);
 }

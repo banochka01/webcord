@@ -73,5 +73,5 @@ The script:
 
 - Android APK: `android/app/build/outputs/apk/release/app-release-unsigned.apk`
 - Android AAB: `android/app/build/outputs/bundle/release/app-release.aab`
-- Desktop installer: `desktop/dist/WebCord-Setup-2.0.0-x64.exe`
-- Desktop portable: `desktop/dist/WebCord-Portable-2.0.0-x64.exe`
+- Desktop installer: `src-tauri/target/release/bundle/nsis/WebCord_3.1.2_x64-setup.exe`
+- Desktop portable/MSI artifacts: `src-tauri/target/release/bundle/`

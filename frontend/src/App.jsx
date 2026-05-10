@@ -2,12 +2,15 @@ import React, { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'rea
 import { io } from 'socket.io-client';
 
 const REMOTE_ORIGIN = import.meta.env.VITE_REMOTE_ORIGIN || 'https://webcordes.ru';
+const RELEASES_URL = 'https://github.com/banochka01/webcord/releases';
+const IS_TAURI_CLIENT = Boolean(window.__TAURI__?.window || window.__TAURI_INTERNALS__);
 const IS_NATIVE_CLIENT = Boolean(
+  IS_TAURI_CLIENT ||
   window.webcordDesktop ||
   window.webcordWindow ||
   window.electronAPI ||
   window.Capacitor?.isNativePlatform?.() ||
-  /\b(WebCordDesktop|WebCordAndroid|Electron)\b/i.test(navigator.userAgent)
+  /\b(WebCordTauri|WebCordDesktop|WebCordAndroid|Electron)\b/i.test(navigator.userAgent)
 );
 const API_URL = import.meta.env.VITE_API_URL || (IS_NATIVE_CLIENT ? `${REMOTE_ORIGIN}/api` : '/api');
 const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || (API_URL.startsWith('http') ? new URL(API_URL).origin : window.location.origin);
@@ -25,7 +28,8 @@ const KEYS = {
   voice: 'webcord_last_voice_channel_id',
   dm: 'webcord_last_dm_id',
   theme: 'webcord_theme',
-  messages: 'webcord_message_cache_v1'
+  messages: 'webcord_message_cache_v1',
+  settings: 'webcord_client_settings_v1'
 };
 
 const PRESETS = {
@@ -37,6 +41,77 @@ const PRESETS = {
 
 const DEFAULT_THEME = PRESETS.Webcord;
 const EMPTY_SOCIAL = { friends: [], requests: [], conversations: [] };
+const DEFAULT_CLIENT_SETTINGS = {
+  notificationsEnabled: true,
+  micDeviceId: '',
+  cameraDeviceId: '',
+  outputDeviceId: ''
+};
+
+function getNativeBridge() {
+  const existingBridge = window.webcordDesktop || window.webcordWindow || window.electronAPI;
+  if (existingBridge) return existingBridge;
+
+  const tauri = window.__TAURI__;
+  const appWindow = tauri?.window?.getCurrentWindow?.();
+  if (!tauri || !appWindow) return null;
+
+  const notifications = tauri.notification;
+  const opener = tauri.opener;
+  const deepLink = tauri.deepLink || tauri.deep_link || tauri.deepLinking;
+
+  return {
+    platform: 'tauri',
+    minimize: () => appWindow.minimize(),
+    maximize: () => appWindow.toggleMaximize(),
+    toggleMaximize: () => appWindow.toggleMaximize(),
+    close: () => appWindow.close(),
+    notify: async (payload = {}) => {
+      if (notifications?.isPermissionGranted && notifications?.requestPermission && notifications?.sendNotification) {
+        let allowed = await notifications.isPermissionGranted();
+        if (!allowed) {
+          allowed = (await notifications.requestPermission()) === 'granted';
+        }
+        if (allowed) notifications.sendNotification({ title: payload.title || 'WebCord', body: payload.body || '' });
+        return allowed;
+      }
+
+      if ('Notification' in window && Notification.permission === 'granted') {
+        new Notification(payload.title || 'WebCord', { body: payload.body || '' });
+        return true;
+      }
+
+      return false;
+    },
+    checkUpdates: () => (opener?.openUrl ? opener.openUrl(RELEASES_URL) : window.open(RELEASES_URL, '_blank', 'noopener,noreferrer')),
+    setBadge: (count = 0) => Promise.resolve(Math.max(0, Number(count) || 0)),
+    onDeepLink: (callback) => {
+      let closed = false;
+      const unlisteners = [];
+      const handleUrls = (urls) => {
+        const list = Array.isArray(urls) ? urls : [urls];
+        list.filter(Boolean).forEach((url) => callback(String(url)));
+      };
+
+      deepLink?.getCurrent?.().then((urls) => {
+        if (!closed && urls) handleUrls(urls);
+      }).catch(() => {});
+
+      deepLink?.onOpenUrl?.((urls) => {
+        if (!closed) handleUrls(urls);
+      }).then((unlisten) => unlisteners.push(unlisten)).catch(() => {});
+
+      appWindow.listen?.('deep-link', (event) => {
+        if (!closed) handleUrls(event.payload);
+      }).then((unlisten) => unlisteners.push(unlisten)).catch(() => {});
+
+      return () => {
+        closed = true;
+        unlisteners.forEach((unlisten) => unlisten?.());
+      };
+    }
+  };
+}
 const EmojiPicker = lazy(async () => {
   const [{ default: Picker }, { default: data }] = await Promise.all([
     import('@emoji-mart/react'),
@@ -56,6 +131,30 @@ const VOICE_AUDIO_CONSTRAINTS = {
   sampleSize: { ideal: 16 },
   latency: { ideal: 0.02 }
 };
+
+function readClientSettings() {
+  try {
+    return { ...DEFAULT_CLIENT_SETTINGS, ...(JSON.parse(localStorage.getItem(KEYS.settings) || '{}') || {}) };
+  } catch {
+    return DEFAULT_CLIENT_SETTINGS;
+  }
+}
+
+function getIceServers() {
+  const servers = [{ urls: 'stun:stun.l.google.com:19302' }];
+  const turnUrls = String(import.meta.env.VITE_TURN_URLS || import.meta.env.VITE_TURN_URL || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  if (turnUrls.length > 0) {
+    const username = import.meta.env.VITE_TURN_USERNAME || '';
+    const credential = import.meta.env.VITE_TURN_CREDENTIAL || '';
+    servers.push(username || credential ? { urls: turnUrls, username, credential } : { urls: turnUrls });
+  }
+
+  return servers;
+}
 
 function getScopeKey(type, id) {
   return `${type}:${id || 'none'}`;
@@ -116,8 +215,9 @@ function getPublicAssetUrl(value) {
 }
 
 function showClientNotification(title, body) {
+  if (!readClientSettings().notificationsEnabled) return;
   if (!IS_NATIVE_CLIENT || !document.hidden) return;
-  const bridge = window.webcordDesktop || window.webcordWindow || window.electronAPI;
+  const bridge = getNativeBridge();
   if (typeof bridge?.notify === 'function') {
     bridge.notify({ title, body });
     return;
@@ -140,6 +240,12 @@ function mergeMessage(list, item) {
   if (!item?.id) return list;
   if (list.some((entry) => String(entry.id) === String(item.id))) return list;
   return sortMessages([...list, item]);
+}
+
+function replaceMessage(list, item) {
+  if (!item?.id) return list;
+  if (!list.some((entry) => String(entry.id) === String(item.id))) return mergeMessage(list, item);
+  return sortMessages(list.map((entry) => (String(entry.id) === String(item.id) ? { ...entry, ...item } : entry)));
 }
 
 function areMessageListsEqual(left = [], right = []) {
@@ -276,8 +382,14 @@ function BrandLogo({ className = '' }) {
   return <img className={className ? `brand-logo ${className}` : 'brand-logo'} src={getPublicAssetUrl('/icons/webcord.png')} alt="" aria-hidden="true" />;
 }
 
-function MessageItem({ message, currentUserId, onAvatarClick }) {
+function MessageItem({ message, currentUserId, workspace, onAvatarClick, onReply, onEdit, onDelete }) {
   const isOwn = String(message.author?.id) === String(currentUserId);
+  const isDeleted = Boolean(message.deletedAt);
+  const statusText = workspace === 'dm' && isOwn
+    ? message.readAt
+      ? 'Read'
+      : 'Delivered'
+    : '';
 
   return (
     <div className={isOwn ? 'message-card own' : 'message-card'}>
@@ -286,12 +398,23 @@ function MessageItem({ message, currentUserId, onAvatarClick }) {
           {message.author?.avatarUrl ? <img src={getAttachmentUrl(message.author.avatarUrl)} alt={message.author?.username || 'user'} /> : (message.author?.username || '?').slice(0, 1).toUpperCase()}
         </button>
         <strong>{message.author?.username || 'unknown'}</strong>
-        <span>{new Date(message.createdAt).toLocaleString()}</span>
+        <span>{new Date(message.createdAt).toLocaleString()}{message.editedAt ? ' · edited' : ''}{statusText ? ` · ${statusText}` : ''}</span>
+        <div className="message-actions">
+          {!isDeleted ? <button type="button" onClick={() => onReply?.(message)}>Reply</button> : null}
+          {isOwn && !isDeleted && message.content ? <button type="button" onClick={() => onEdit?.(message)}>Edit</button> : null}
+          {isOwn && !isDeleted ? <button className="danger-text" type="button" onClick={() => onDelete?.(message)}>Delete</button> : null}
+        </div>
       </div>
-      {message.content ? <p>{message.content}</p> : null}
-      {message.attachmentType === 'IMAGE' ? <img className="message-media" src={getAttachmentUrl(message.attachmentUrl)} alt={message.attachmentName || 'image'} /> : null}
-      {message.attachmentType === 'VIDEO' ? <video className="message-media" controls src={getAttachmentUrl(message.attachmentUrl)} /> : null}
-      {message.attachmentType === 'FILE' ? <a className="file-link" href={getAttachmentUrl(message.attachmentUrl)} download>{message.attachmentName || 'file'}</a> : null}
+      {message.replyTo ? (
+        <button className="reply-snippet" type="button" onClick={() => onReply?.(message.replyTo)}>
+          <strong>{message.replyTo.author?.username || 'Reply'}</strong>
+          <span>{message.replyTo.deletedAt ? 'Deleted message' : message.replyTo.content || message.replyTo.attachmentName || 'Attachment'}</span>
+        </button>
+      ) : null}
+      {isDeleted ? <p className="muted deleted-message">Message deleted</p> : message.content ? <p>{message.content}</p> : null}
+      {!isDeleted && message.attachmentType === 'IMAGE' ? <img className="message-media" src={getAttachmentUrl(message.attachmentUrl)} alt={message.attachmentName || 'image'} /> : null}
+      {!isDeleted && message.attachmentType === 'VIDEO' ? <video className="message-media" controls src={getAttachmentUrl(message.attachmentUrl)} /> : null}
+      {!isDeleted && message.attachmentType === 'FILE' ? <a className="file-link" href={getAttachmentUrl(message.attachmentUrl)} download>{message.attachmentName || 'file'}</a> : null}
     </div>
   );
 }
@@ -504,7 +627,7 @@ function VoiceStage({
 function DesktopTitleBar({ user, onOpenSettings, onWindowAction }) {
   return (
     <div className="desktop-titlebar">
-      <div className="titlebar-drag">
+      <div className="titlebar-drag" data-tauri-drag-region>
         <span className="titlebar-mark"><BrandLogo /></span>
         <span className="titlebar-name">WebCord</span>
         <span className="titlebar-channel">{user?.username ? `@${user.username}` : 'Desktop'}</span>
@@ -530,7 +653,10 @@ function SettingsModal({
   micMuted,
   cameraEnabled,
   cameraTesting,
+  cameraPreviewStream,
   noiseSuppressionEnabled,
+  mediaDevices,
+  clientSettings,
   avatarUploading,
   bannerUploading,
   onClose,
@@ -546,6 +672,11 @@ function SettingsModal({
   onToggleMic,
   onToggleCamera,
   onTestCamera,
+  onToggleCameraPreview,
+  onClientSettingChange,
+  onRefreshDevices,
+  onToggleNotifications,
+  onCheckUpdates,
   onToggleNoiseSuppression,
   onLogout
 }) {
@@ -631,12 +762,29 @@ function SettingsModal({
           <div className="settings-page">
             <h2>Voice & Video</h2>
             <div className="settings-card-list">
+              <label>Input Device<select value={clientSettings.micDeviceId} onChange={(e) => onClientSettingChange('micDeviceId', e.target.value)}><option value="">Default microphone</option>{mediaDevices.audioinput.map((device) => <option value={device.deviceId} key={device.deviceId}>{device.label || `Microphone ${device.deviceId.slice(0, 5)}`}</option>)}</select></label>
+              <label>Camera<select value={clientSettings.cameraDeviceId} onChange={(e) => onClientSettingChange('cameraDeviceId', e.target.value)}><option value="">Default camera</option>{mediaDevices.videoinput.map((device) => <option value={device.deviceId} key={device.deviceId}>{device.label || `Camera ${device.deviceId.slice(0, 5)}`}</option>)}</select></label>
+              <label>Output Device<select value={clientSettings.outputDeviceId} onChange={(e) => onClientSettingChange('outputDeviceId', e.target.value)}><option value="">Default output</option>{mediaDevices.audiooutput.map((device) => <option value={device.deviceId} key={device.deviceId}>{device.label || `Output ${device.deviceId.slice(0, 5)}`}</option>)}</select></label>
               <label className="settings-slider">Input Volume<span>{inputVolume}%</span><input type="range" min="0" max="200" value={inputVolume} onChange={(e) => onInputVolumeChange(Number(e.target.value))} /></label>
               <label className="settings-slider">Output Volume<span>{outputVolume}%</span><input type="range" min="0" max="200" value={outputVolume} onChange={(e) => onOutputVolumeChange(Number(e.target.value))} /></label>
+              {cameraPreviewStream ? (
+                <div className="camera-preview">
+                  <video
+                    autoPlay
+                    playsInline
+                    muted
+                    ref={(node) => {
+                      if (node && node.srcObject !== cameraPreviewStream) node.srcObject = cameraPreviewStream;
+                    }}
+                  />
+                </div>
+              ) : null}
               <div className="settings-actions-row">
                 <button type="button" onClick={onToggleMic}>{micMuted ? 'Unmute Microphone' : 'Mute Microphone'}</button>
                 <button type="button" onClick={onToggleCamera}>{cameraEnabled ? 'Turn Camera Off' : 'Turn Camera On'}</button>
                 <button type="button" onClick={onTestCamera}>{cameraTesting ? 'Testing Camera...' : 'Test Camera'}</button>
+                <button type="button" onClick={onToggleCameraPreview}>{cameraPreviewStream ? 'Stop Preview' : 'Preview Camera'}</button>
+                <button className="ghost-btn" type="button" onClick={onRefreshDevices}>Refresh Devices</button>
                 <button className="ghost-btn" type="button" onClick={onToggleNoiseSuppression}>Noise Suppression: {noiseSuppressionEnabled ? 'On' : 'Off'}</button>
               </div>
             </div>
@@ -665,8 +813,24 @@ function SettingsModal({
         ) : null}
 
         {activeSection === 'privacy' ? <StaticSettingsPage title="Privacy" rows={['Friend requests use the existing backend flow.', 'Profile popovers expose username, avatar, banner and bio.', 'No extra tracking settings are stored by this client.']} /> : null}
-        {activeSection === 'notifications' ? <StaticSettingsPage title="Notifications" rows={['Unread and push notification preferences are not backed by the API yet.', 'Message and voice status indicators stay visible in the client.']} /> : null}
-        {activeSection === 'devices' ? <StaticSettingsPage title="Devices" rows={['Microphone and camera permissions are handled by the browser or desktop shell.', 'Connected voice peers use the existing WebRTC implementation.']} /> : null}
+        {activeSection === 'notifications' ? (
+          <div className="settings-page">
+            <h2>Notifications</h2>
+            <div className="settings-card-list">
+              <div className="settings-row"><span>Client notifications</span><button type="button" onClick={onToggleNotifications}>{clientSettings.notificationsEnabled ? 'Enabled' : 'Disabled'}</button></div>
+              <div className="settings-row"><span>Browser permission</span><strong>{'Notification' in window ? Notification.permission : 'Unsupported'}</strong></div>
+              <div className="settings-row"><span>Desktop updates</span><button type="button" onClick={onCheckUpdates}>Check Releases</button></div>
+            </div>
+          </div>
+        ) : null}
+        {activeSection === 'devices' ? (
+          <StaticSettingsPage title="Devices" rows={[
+            `${mediaDevices.audioinput.length} microphone(s) detected`,
+            `${mediaDevices.videoinput.length} camera(s) detected`,
+            `${mediaDevices.audiooutput.length} output device(s) detected`,
+            'TURN can be configured without secrets in the repo via VITE_TURN_URLS, VITE_TURN_USERNAME and VITE_TURN_CREDENTIAL.'
+          ]} />
+        ) : null}
       </section>
     </div>
   );
@@ -705,6 +869,9 @@ export default function App() {
   const [friendUsername, setFriendUsername] = useState('');
   const [newMessage, setNewMessage] = useState('');
   const [pendingAttachment, setPendingAttachment] = useState(null);
+  const [replyTarget, setReplyTarget] = useState(null);
+  const [editingMessage, setEditingMessage] = useState(null);
+  const [dmSearch, setDmSearch] = useState('');
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [settingsSection, setSettingsSection] = useState('account');
@@ -722,6 +889,11 @@ export default function App() {
   const [inputVolume, setInputVolume] = useState(100);
   const [outputVolume, setOutputVolume] = useState(100);
   const [cameraTesting, setCameraTesting] = useState(false);
+  const [cameraPreviewStream, setCameraPreviewStream] = useState(null);
+  const [mediaDevices, setMediaDevices] = useState({ audioinput: [], videoinput: [], audiooutput: [] });
+  const [clientSettings, setClientSettings] = useState(() => readClientSettings());
+  const [toasts, setToasts] = useState([]);
+  const [unreadCount, setUnreadCount] = useState(0);
   const [participantVolumes, setParticipantVolumes] = useState({});
   const [voiceParticipants, setVoiceParticipants] = useState({});
   const [remoteStreams, setRemoteStreams] = useState({});
@@ -731,7 +903,7 @@ export default function App() {
   const [lastRealtimeSync, setLastRealtimeSync] = useState(null);
   const [theme, setTheme] = useState(() => JSON.parse(localStorage.getItem(KEYS.theme) || 'null') || DEFAULT_THEME);
   const [profileDraft, setProfileDraft] = useState({ bio: '', avatarUrl: '', bannerUrl: '' });
-  const [isDesktopShell] = useState(() => /\bElectron\b/i.test(navigator.userAgent) || Boolean(window.webcordDesktop || window.webcordWindow || window.electronAPI));
+  const [isDesktopShell] = useState(() => IS_TAURI_CLIENT || /\b(Electron|WebCordTauri)\b/i.test(navigator.userAgent) || Boolean(window.webcordDesktop || window.webcordWindow || window.electronAPI));
 
   const socketRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -745,6 +917,7 @@ export default function App() {
   const voiceAudioContextRef = useRef(null);
   const remoteAudioRef = useRef({});
   const remoteStreamsRef = useRef({});
+  const cameraPreviewStreamRef = useRef(null);
   const pendingIceCandidatesRef = useRef({});
   const messagesRef = useRef(null);
   const shouldStickToBottomRef = useRef(true);
@@ -764,11 +937,16 @@ export default function App() {
   const activeTextChannel = textChannels.find((item) => String(item.id) === String(channelId));
   const activeVoiceChannel = voiceChannels.find((item) => String(item.id) === String(voiceChannelId));
   const activeConversation = social.conversations.find((item) => String(item.id) === String(dmConversationId));
+  const filteredConversations = social.conversations.filter((conversation) => {
+    const query = dmSearch.trim().toLowerCase();
+    if (!query) return true;
+    return `${conversation.user?.username || ''} ${conversation.lastMessage?.content || ''} ${conversation.lastMessage?.attachmentName || ''}`.toLowerCase().includes(query);
+  });
   const incomingRequests = social.requests.filter((item) => item.direction === 'INCOMING' && item.status === 'PENDING');
   const outgoingRequests = social.requests.filter((item) => item.direction === 'OUTGOING' && item.status === 'PENDING');
   const peerConfig = useMemo(
     () => ({
-      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+      iceServers: getIceServers(),
       iceCandidatePoolSize: 4,
       bundlePolicy: 'max-bundle',
       rtcpMuxPolicy: 'require'
@@ -785,6 +963,24 @@ export default function App() {
     }).forEach(([key, value]) => document.documentElement.style.setProperty(key, value));
     localStorage.setItem(KEYS.theme, JSON.stringify(theme));
   }, [theme]);
+
+  useEffect(() => {
+    localStorage.setItem(KEYS.settings, JSON.stringify(clientSettings));
+  }, [clientSettings]);
+
+  useEffect(() => {
+    if (!showSettingsModal) return;
+    refreshMediaDevices().catch(() => {});
+  }, [showSettingsModal]);
+
+  useEffect(() => {
+    cameraPreviewStreamRef.current = cameraPreviewStream;
+    return undefined;
+  }, [cameraPreviewStream]);
+
+  useEffect(() => () => {
+    cameraPreviewStreamRef.current?.getTracks?.().forEach((track) => track.stop());
+  }, []);
 
   useEffect(() => {
     if (user) {
@@ -862,10 +1058,43 @@ export default function App() {
   }, [isAuthed, token, workspace, channelId, dmConversationId]);
 
   useEffect(() => {
+    const bridge = getNativeBridge();
+    if (typeof bridge?.onDeepLink !== 'function') return undefined;
+    return bridge.onDeepLink((url) => {
+      try {
+        const parsed = new URL(url);
+        const dmId = parsed.hostname === 'dm' ? parsed.pathname.replace('/', '') : '';
+        const channel = parsed.hostname === 'channel' ? parsed.pathname.replace('/', '') : '';
+        if (dmId) {
+          setWorkspace('dm');
+          setDmConversationId(String(dmId));
+          setMobileChatOpen(true);
+        }
+        if (channel) {
+          setWorkspace('server');
+          setChannelId(String(channel));
+          setMobileChatOpen(true);
+        }
+      } catch {
+        pushToast('Could not open WebCord link', 'error');
+      }
+    });
+  }, []);
+
+  useEffect(() => {
     if (!isMobile) {
       setMobileChatOpen(false);
     }
   }, [isMobile]);
+
+  useEffect(() => {
+    const bridge = getNativeBridge();
+    if (typeof bridge?.setBadge === 'function') bridge.setBadge(unreadCount).catch?.(() => {});
+  }, [unreadCount]);
+
+  useEffect(() => {
+    if (workspace === 'dm') setUnreadCount(0);
+  }, [workspace, dmConversationId]);
 
   useEffect(() => {
     if (!isAuthed) {
@@ -954,13 +1183,26 @@ export default function App() {
         }
       }
     });
+    socket.on('message:updated', (message) => {
+      const scope = scopeRef.current;
+      if (scope.type === 'channel' && String(message.channelId) === scope.id) {
+        setMessages((prev) => replaceMessage(prev, message));
+      }
+    });
     socket.on('direct-message:new', (message) => {
       const scope = scopeRef.current;
       if (scope.type === 'dm' && String(message.conversationId) === scope.id) {
         setMessages((prev) => mergeMessage(prev, message));
         if (String(message.author?.id) !== String(user?.id)) {
+          if (document.hidden || workspaceRef.current !== 'dm') setUnreadCount((count) => count + 1);
           showClientNotification(message.author?.username || 'Direct message', message.content || message.attachmentName || 'New direct message');
         }
+      }
+    });
+    socket.on('direct-message:updated', (message) => {
+      const scope = scopeRef.current;
+      if (scope.type === 'dm' && String(message.conversationId) === scope.id) {
+        setMessages((prev) => replaceMessage(prev, message));
       }
     });
     socket.on('channel-created', (channel) => {
@@ -1081,6 +1323,73 @@ export default function App() {
     if (workspace === 'dm' && dmConversationId) return `/dms/${dmConversationId}/messages`;
     if (workspace === 'server' && channelId) return `/messages/${channelId}`;
     return '';
+  }
+
+  function pushToast(message, tone = 'info') {
+    const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    setToasts((prev) => [...prev.slice(-3), { id, message, tone }]);
+    window.setTimeout(() => {
+      setToasts((prev) => prev.filter((toast) => toast.id !== id));
+    }, 4200);
+  }
+
+  function reportError(err, fallback = 'Something went wrong') {
+    const message = err?.message || fallback;
+    setError(message);
+    pushToast(message, 'error');
+  }
+
+  async function refreshMediaDevices() {
+    if (!navigator.mediaDevices?.enumerateDevices) return;
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    setMediaDevices({
+      audioinput: devices.filter((device) => device.kind === 'audioinput'),
+      videoinput: devices.filter((device) => device.kind === 'videoinput'),
+      audiooutput: devices.filter((device) => device.kind === 'audiooutput')
+    });
+  }
+
+  function updateClientSetting(key, value) {
+    setClientSettings((prev) => ({ ...prev, [key]: value }));
+  }
+
+  async function toggleNotifications() {
+    const nextEnabled = !clientSettings.notificationsEnabled;
+    if (nextEnabled && 'Notification' in window && Notification.permission === 'default') {
+      await Notification.requestPermission().catch(() => {});
+    }
+    updateClientSetting('notificationsEnabled', nextEnabled);
+    pushToast(nextEnabled ? 'Notifications enabled' : 'Notifications disabled');
+  }
+
+  async function stopCameraPreview() {
+    const stream = cameraPreviewStreamRef.current;
+    if (stream) stream.getTracks().forEach((track) => track.stop());
+    cameraPreviewStreamRef.current = null;
+    setCameraPreviewStream(null);
+  }
+
+  async function toggleCameraPreview() {
+    if (cameraPreviewStreamRef.current) {
+      await stopCameraPreview();
+      return;
+    }
+    if (!navigator.mediaDevices?.getUserMedia) {
+      reportError(new Error('Camera is not supported in this browser'));
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: clientSettings.cameraDeviceId ? { deviceId: { exact: clientSettings.cameraDeviceId } } : true,
+        audio: false
+      });
+      cameraPreviewStreamRef.current = stream;
+      setCameraPreviewStream(stream);
+      await refreshMediaDevices();
+    } catch (err) {
+      reportError(new Error(getMediaErrorMessage(err, 'Could not access the camera')));
+    }
   }
 
   function handleMessagesScroll() {
@@ -1380,6 +1689,22 @@ export default function App() {
       shouldStickToBottomRef.current = true;
       let createdMessage = null;
 
+      if (editingMessage) {
+        const path = workspace === 'dm'
+          ? `/dms/${dmConversationId}/messages/${editingMessage.id}`
+          : `/messages/${editingMessage.id}`;
+        const updatedMessage = await apiFetch(path, { method: 'PATCH', body: JSON.stringify({ content }) }, token);
+        setMessages((prev) => replaceMessage(prev, updatedMessage));
+        setEditingMessage(null);
+        setReplyTarget(null);
+        setError('');
+        setNewMessage('');
+        setPendingAttachment(null);
+        setShowEmojiPicker(false);
+        pushToast('Message updated');
+        return;
+      }
+
       if (workspace === 'server' && channelId) {
         createdMessage = await apiFetch(
           '/messages',
@@ -1390,7 +1715,8 @@ export default function App() {
               content,
               attachmentUrl: pendingAttachment?.url,
               attachmentType: pendingAttachment?.type,
-              attachmentName: pendingAttachment?.name
+              attachmentName: pendingAttachment?.name,
+              replyToId: replyTarget?.id
             })
           },
           token
@@ -1406,7 +1732,8 @@ export default function App() {
               content,
               attachmentUrl: pendingAttachment?.url,
               attachmentType: pendingAttachment?.type,
-              attachmentName: pendingAttachment?.name
+              attachmentName: pendingAttachment?.name,
+              replyToId: replyTarget?.id
             })
           },
           token
@@ -1420,10 +1747,42 @@ export default function App() {
       setError('');
       setNewMessage('');
       setPendingAttachment(null);
+      setReplyTarget(null);
       setShowEmojiPicker(false);
     } catch (err) {
-      setError(err.message);
+      reportError(err, 'Failed to send message');
     }
+  }
+
+  function beginReply(message) {
+    setReplyTarget(message);
+    setEditingMessage(null);
+  }
+
+  function beginEdit(message) {
+    setEditingMessage(message);
+    setReplyTarget(null);
+    setNewMessage(message.content || '');
+  }
+
+  async function deleteMessage(message) {
+    if (!message?.id || !token) return;
+    try {
+      const path = workspace === 'dm'
+        ? `/dms/${dmConversationId}/messages/${message.id}`
+        : `/messages/${message.id}`;
+      const updatedMessage = await apiFetch(path, { method: 'DELETE' }, token);
+      setMessages((prev) => replaceMessage(prev, updatedMessage));
+      pushToast('Message deleted');
+    } catch (err) {
+      reportError(err, 'Failed to delete message');
+    }
+  }
+
+  function cancelComposerContext() {
+    setReplyTarget(null);
+    setEditingMessage(null);
+    setNewMessage('');
   }
 
   function addStreamTracksToPeer(peer, stream) {
@@ -1636,6 +1995,7 @@ export default function App() {
       setVoiceStatus('Requesting camera...');
       const cameraStream = await navigator.mediaDevices.getUserMedia({
         video: {
+          ...(clientSettings.cameraDeviceId ? { deviceId: { exact: clientSettings.cameraDeviceId } } : {}),
           width: { ideal: 1280 },
           height: { ideal: 720 },
           frameRate: { ideal: 30 }
@@ -1727,9 +2087,13 @@ export default function App() {
       setError('');
       setVoiceStatus('Requesting microphone...');
       const rawStream = await navigator.mediaDevices.getUserMedia({
-        audio: VOICE_AUDIO_CONSTRAINTS,
+        audio: {
+          ...VOICE_AUDIO_CONSTRAINTS,
+          ...(clientSettings.micDeviceId ? { deviceId: { exact: clientSettings.micDeviceId } } : {})
+        },
         video: false
       });
+      await refreshMediaDevices();
       const { stream, audioContext } = noiseSuppressionEnabled
         ? await createEnhancedVoiceStream(rawStream)
         : { stream: rawStream, audioContext: null };
@@ -1769,7 +2133,11 @@ export default function App() {
     try {
       setError('');
       setCameraTesting(true);
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: clientSettings.cameraDeviceId ? { deviceId: { exact: clientSettings.cameraDeviceId } } : true,
+        audio: false
+      });
+      await refreshMediaDevices();
       setVoiceStatus('Camera permission granted');
       window.setTimeout(() => {
         stream.getTracks().forEach((track) => track.stop());
@@ -1782,7 +2150,7 @@ export default function App() {
   }
 
   function handleWindowAction(action) {
-    const bridge = window.webcordDesktop || window.webcordWindow || window.electronAPI;
+    const bridge = getNativeBridge();
     const methodMap = {
       minimize: ['minimize', 'windowMinimize'],
       maximize: ['maximize', 'toggleMaximize', 'windowMaximize'],
@@ -1957,7 +2325,9 @@ export default function App() {
             <div className="stack">
               <section className="sidebar-card">
                 <p className="section-label">Direct messages</p>
-                {social.conversations.length === 0 ? <p className="muted">Accept a friend request to unlock DMs.</p> : social.conversations.map((conversation) => <button key={conversation.id} className={String(conversation.id) === String(dmConversationId) ? 'channel-btn active conversation-btn' : 'channel-btn conversation-btn'} type="button" onClick={() => selectConversation(conversation.id)}><strong>@ {conversation.user?.username}</strong><span>{conversation.lastMessage?.content || conversation.lastMessage?.attachmentName || 'Start talking'}</span></button>)}
+                <input value={dmSearch} onChange={(e) => setDmSearch(e.target.value)} placeholder="Search DMs" />
+                {social.conversations.length === 0 ? <p className="muted">Accept a friend request to unlock DMs.</p> : filteredConversations.map((conversation) => <button key={conversation.id} className={String(conversation.id) === String(dmConversationId) ? 'channel-btn active conversation-btn' : 'channel-btn conversation-btn'} type="button" onClick={() => selectConversation(conversation.id)}><strong>@ {conversation.user?.username}</strong><span>{conversation.lastMessage?.content || conversation.lastMessage?.attachmentName || 'Start talking'}</span></button>)}
+                {social.conversations.length > 0 && filteredConversations.length === 0 ? <p className="muted">No DMs match this search.</p> : null}
               </section>
               <section className="sidebar-card">
                 <p className="section-label">Friends</p>
@@ -2044,10 +2414,17 @@ export default function App() {
           ) : (
             <>
               <div className="messages" ref={messagesRef} onScroll={handleMessagesScroll}>
-                {messages.length === 0 ? <div className="empty-state"><h3>{workspace === 'dm' ? 'No direct messages yet' : 'No messages yet'}</h3><p className="muted">{workspace === 'dm' ? 'This thread is ready.' : 'Start the conversation in this channel.'}</p></div> : messages.map((message) => <MessageItem key={message.id} message={message} currentUserId={user?.id} onAvatarClick={setViewedProfile} />)}
+                {messages.length === 0 ? <div className="empty-state"><h3>{workspace === 'dm' ? 'No direct messages yet' : 'No messages yet'}</h3><p className="muted">{workspace === 'dm' ? 'This thread is ready.' : 'Start the conversation in this channel.'}</p></div> : messages.map((message) => <MessageItem key={message.id} message={message} workspace={workspace} currentUserId={user?.id} onAvatarClick={setViewedProfile} onReply={beginReply} onEdit={beginEdit} onDelete={deleteMessage} />)}
                 <div ref={endRef} />
               </div>
               <form className="message-form composer" onSubmit={sendMessage}>
+                {replyTarget || editingMessage ? (
+                  <div className="composer-context">
+                    <span>{editingMessage ? 'Editing message' : `Replying to ${replyTarget?.author?.username || 'message'}`}</span>
+                    <strong>{editingMessage?.content || replyTarget?.content || replyTarget?.attachmentName || 'Attachment'}</strong>
+                    <button className="icon-btn" type="button" onClick={cancelComposerContext}>x</button>
+                  </div>
+                ) : null}
                 <input ref={fileInputRef} type="file" onChange={handleFileSelect} hidden />
                 <button className="icon-btn composer-btn" type="button" onClick={() => fileInputRef.current?.click()}>+</button>
                 <div className="emoji-wrapper">
@@ -2060,8 +2437,8 @@ export default function App() {
                     </div>
                   ) : null}
                 </div>
-                <input value={newMessage} onChange={(e) => setNewMessage(e.target.value)} placeholder={workspace === 'dm' ? 'Message your friend' : 'Send a message'} />
-                <button className="composer-send" type="submit" disabled={uploading || (!newMessage.trim() && !pendingAttachment)}>Send</button>
+                <input value={newMessage} onChange={(e) => setNewMessage(e.target.value)} placeholder={editingMessage ? 'Edit your message' : workspace === 'dm' ? 'Message your friend' : 'Send a message'} />
+                <button className="composer-send" type="submit" disabled={uploading || (!newMessage.trim() && !pendingAttachment)}>{editingMessage ? 'Save' : 'Send'}</button>
               </form>
             </>
           )}
@@ -2095,6 +2472,9 @@ export default function App() {
                       node.srcObject = stream;
                     }
                     node.volume = Math.min(1, ((participantVolumes[socketId] ?? 100) / 100) * (outputVolume / 100));
+                    if (clientSettings.outputDeviceId && typeof node.setSinkId === 'function' && node.sinkId !== clientSettings.outputDeviceId) {
+                      node.setSinkId(clientSettings.outputDeviceId).catch(() => {});
+                    }
                     node.play?.().catch(() => {});
                   }}
                 />
@@ -2129,6 +2509,10 @@ export default function App() {
         </aside>
       </main>
 
+      <div className="toast-stack" aria-live="polite">
+        {toasts.map((toast) => <div className={`toast ${toast.tone}`} key={toast.id}>{toast.message}</div>)}
+      </div>
+
       <SettingsModal
         open={showSettingsModal}
         activeSection={settingsSection}
@@ -2140,10 +2524,13 @@ export default function App() {
         micMuted={micMuted}
         cameraEnabled={cameraEnabled}
         cameraTesting={cameraTesting}
+        cameraPreviewStream={cameraPreviewStream}
         noiseSuppressionEnabled={noiseSuppressionEnabled}
+        mediaDevices={mediaDevices}
+        clientSettings={clientSettings}
         avatarUploading={avatarUploading}
         bannerUploading={bannerUploading}
-        onClose={() => setShowSettingsModal(false)}
+        onClose={() => { setShowSettingsModal(false); stopCameraPreview().catch(() => {}); }}
         onSectionChange={setSettingsSection}
         onDraftChange={setProfileDraft}
         onUploadAvatar={() => avatarInputRef.current?.click()}
@@ -2156,6 +2543,15 @@ export default function App() {
         onToggleMic={toggleMicrophone}
         onToggleCamera={toggleCamera}
         onTestCamera={testCamera}
+        onToggleCameraPreview={toggleCameraPreview}
+        onClientSettingChange={updateClientSetting}
+        onRefreshDevices={() => refreshMediaDevices().catch((err) => reportError(err, 'Could not refresh devices'))}
+        onToggleNotifications={() => toggleNotifications().catch((err) => reportError(err, 'Could not update notifications'))}
+        onCheckUpdates={() => {
+          const bridge = getNativeBridge();
+          if (typeof bridge?.checkUpdates === 'function') bridge.checkUpdates();
+          else window.open(RELEASES_URL, '_blank', 'noopener,noreferrer');
+        }}
         onToggleNoiseSuppression={() => setNoiseSuppressionEnabled((prev) => !prev)}
         onLogout={handleLogout}
       />
