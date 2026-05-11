@@ -30,6 +30,7 @@ services:
       DATABASE_URL: postgresql://webcord:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/webcord?schema=public
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
       CLIENT_URL: ${CLIENT_URL:-https://webcordes.ru}
+      ADMIN_USERNAMES: ${ADMIN_USERNAMES:-}
       UPLOAD_DIR: /app/uploads
     volumes:
       - backend_uploads:/app/uploads

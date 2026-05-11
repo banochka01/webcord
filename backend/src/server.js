@@ -21,6 +21,12 @@ const CLIENT_ORIGINS = String(process.env.CLIENT_URL || '')
   .split(',')
   .map((origin) => origin.trim())
   .filter(Boolean);
+const ADMIN_USERNAMES = new Set(
+  String(process.env.ADMIN_USERNAMES || process.env.ADMIN_USERS || '')
+    .split(',')
+    .map((username) => normalizeUsername(username))
+    .filter(Boolean)
+);
 const BLOCKED_UPLOAD_EXTENSIONS = new Set(['.cjs', '.htm', '.html', '.js', '.mjs', '.svg', '.xhtml', '.xml']);
 const BLOCKED_UPLOAD_MIME_TYPES = new Set([
   'application/javascript',
@@ -105,6 +111,14 @@ const authRateLimit = createRateLimiter({ windowMs: 60_000, max: 20, keyPrefix: 
 const messageRateLimitConfig = { windowMs: 10_000, max: 18, keyPrefix: 'message' };
 const messageRateLimit = createRateLimiter(messageRateLimitConfig);
 const uploadRateLimit = createRateLimiter({ windowMs: 60_000, max: 20, keyPrefix: 'upload' });
+
+function normalizeUsername(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function isAdminUsername(username) {
+  return ADMIN_USERNAMES.has(normalizeUsername(username));
+}
 
 function getAttachmentType(mimeType = '') {
   if (mimeType.startsWith('image/')) return 'IMAGE';
@@ -196,6 +210,29 @@ function sendCaughtApiError(res, error, fallbackCode, fallbackMessage) {
   }
 
   return sendApiError(res, 500, fallbackCode, fallbackMessage);
+}
+
+async function adminMiddleware(req, res, next) {
+  try {
+    if (ADMIN_USERNAMES.size === 0) {
+      return sendApiError(res, 403, 'ADMIN_NOT_CONFIGURED', 'Admin access is not configured.');
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: req.user.userId },
+      select: publicUserSelect
+    });
+
+    if (!user || !isAdminUsername(user.username)) {
+      return sendApiError(res, 403, 'ADMIN_FORBIDDEN', 'Admin access denied.');
+    }
+
+    req.adminUser = user;
+    return next();
+  } catch (error) {
+    console.error('Admin authorization failed:', error);
+    return sendApiError(res, 500, 'ADMIN_AUTH_FAILED', 'Failed to verify admin access.');
+  }
 }
 
 function getUploadDisposition(filePath) {
@@ -492,6 +529,10 @@ app.post('/api/auth/register', authRateLimit, async (req, res) => {
       return res.status(400).json({ error: 'username and password are required' });
     }
 
+    if (isAdminUsername(username)) {
+      return sendApiError(res, 403, 'ADMIN_USERNAME_RESERVED', 'This username is reserved.');
+    }
+
     const existing = await prisma.user.findUnique({ where: { username } });
     if (existing) {
       return res.status(409).json({ error: 'Username already exists' });
@@ -551,6 +592,60 @@ app.post('/api/auth/login', authRateLimit, async (req, res) => {
   } catch (error) {
     console.error(error);
     return res.status(500).json({ error: 'Failed to login' });
+  }
+});
+
+app.get('/api/admin/overview', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const [
+      users,
+      guilds,
+      textChannels,
+      voiceChannels,
+      messages,
+      directConversations,
+      directMessages,
+      pendingFriendRequests,
+      recentUsers
+    ] = await Promise.all([
+      prisma.user.count(),
+      prisma.guild.count(),
+      prisma.channel.count({ where: { type: 'TEXT' } }),
+      prisma.channel.count({ where: { type: 'VOICE' } }),
+      prisma.message.count({ where: { deletedAt: null } }),
+      prisma.directConversation.count(),
+      prisma.directMessage.count({ where: { deletedAt: null } }),
+      prisma.friendRequest.count({ where: { status: 'PENDING' } }),
+      prisma.user.findMany({
+        orderBy: { createdAt: 'desc' },
+        take: 8,
+        select: publicUserSelect
+      })
+    ]);
+
+    return res.json({
+      admin: req.adminUser,
+      allowedAdmins: [...ADMIN_USERNAMES].sort(),
+      stats: {
+        users,
+        guilds,
+        textChannels,
+        voiceChannels,
+        messages,
+        directConversations,
+        directMessages,
+        pendingFriendRequests,
+        voiceRooms: voiceParticipants.size
+      },
+      recentUsers,
+      runtime: {
+        nodeEnv: process.env.NODE_ENV || 'development',
+        uptimeSeconds: Math.round(process.uptime())
+      }
+    });
+  } catch (error) {
+    console.error(error);
+    return sendApiError(res, 500, 'ADMIN_OVERVIEW_FAILED', 'Failed to load admin overview.');
   }
 });
 

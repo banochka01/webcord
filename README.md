@@ -46,6 +46,7 @@ Update secrets before production:
 - `JWT_SECRET`
 - `CLIENT_URL`
 - `DATABASE_URL`
+- `ADMIN_USERNAMES` for `/admin` access, comma-separated existing login names.
 
 Run with Docker:
 

@@ -31,6 +31,7 @@ const KEYS = {
   messages: 'webcord_message_cache_v1',
   settings: 'webcord_client_settings_v1'
 };
+const ADMIN_PATH = '/admin';
 
 const PRESETS = {
   Webcord: { bg: '#0b1020', panel: '#10182d', accent: '#5865f2', text: '#f8fbff' },
@@ -186,8 +187,18 @@ async function apiFetch(path, options = {}, token) {
   });
   const contentType = res.headers.get('content-type') || '';
   const payload = contentType.includes('application/json') ? await res.json() : null;
-  if (!res.ok) throw new Error(payload?.error || 'Request failed');
+  if (!res.ok) {
+    const error = new Error(payload?.error || 'Request failed');
+    error.status = res.status;
+    error.code = payload?.code || '';
+    throw error;
+  }
   return payload;
+}
+
+function normalizeAppPath(pathname = window.location.pathname) {
+  const normalized = String(pathname || '/').replace(/\/+$/, '');
+  return normalized || '/';
 }
 
 function getApiOrigin() {
@@ -847,6 +858,101 @@ function StaticSettingsPage({ title, rows }) {
   );
 }
 
+function AdminPanel({ user, overview, status, error, onRefresh, onOpenApp, onLogout }) {
+  const denied = status === 'denied';
+  const loading = status === 'checking' || status === 'idle';
+  const stats = overview?.stats || {};
+  const statCards = [
+    ['Users', stats.users],
+    ['Text channels', stats.textChannels],
+    ['Voice channels', stats.voiceChannels],
+    ['Messages', stats.messages],
+    ['DM threads', stats.directConversations],
+    ['DM messages', stats.directMessages],
+    ['Pending requests', stats.pendingFriendRequests],
+    ['Voice rooms', stats.voiceRooms]
+  ];
+
+  return (
+    <main className="admin-shell">
+      <section className="admin-hero">
+        <div>
+          <span className="hero-badge brand-badge"><BrandLogo /> WebCord Admin</span>
+          <h1>{denied ? 'Access denied' : 'Control Center'}</h1>
+          <p className="muted">{denied ? 'This account is not allowed to open the admin panel.' : `Signed in as @${overview?.admin?.username || user?.username || 'admin'}`}</p>
+        </div>
+        <div className="admin-actions">
+          {!denied ? <button type="button" onClick={onRefresh} disabled={loading}>{loading ? 'Refreshing' : 'Refresh'}</button> : null}
+          <button className="ghost-btn" type="button" onClick={onOpenApp}>Open WebCord</button>
+          <button className="danger" type="button" onClick={onLogout}>Logout</button>
+        </div>
+      </section>
+
+      {loading ? (
+        <section className="admin-state">
+          <h2>Checking access</h2>
+          <p className="muted">Waiting for the server.</p>
+        </section>
+      ) : null}
+
+      {denied ? (
+        <section className="admin-state denied">
+          <h2>Forbidden</h2>
+          <p className="muted">{error || 'Your username is not in the admin allowlist.'}</p>
+        </section>
+      ) : null}
+
+      {!loading && !denied && error ? (
+        <section className="admin-state denied">
+          <h2>Admin panel unavailable</h2>
+          <p className="muted">{error}</p>
+        </section>
+      ) : null}
+
+      {!loading && !denied && overview ? (
+        <>
+          <section className="admin-grid">
+            {statCards.map(([label, value]) => (
+              <div className="admin-stat-card" key={label}>
+                <span>{label}</span>
+                <strong>{Number(value || 0).toLocaleString()}</strong>
+              </div>
+            ))}
+          </section>
+
+          <section className="admin-columns">
+            <div className="admin-panel-card">
+              <p className="section-label">Recent users</p>
+              {(overview.recentUsers || []).length === 0 ? <p className="muted">No users yet.</p> : overview.recentUsers.map((item) => (
+                <div className="admin-user-row" key={item.id}>
+                  <UserAvatar user={item} />
+                  <div>
+                    <strong>@{item.username}</strong>
+                    <span>{item.bio || 'No bio'}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="admin-panel-card">
+              <p className="section-label">Allowed admins</p>
+              <div className="admin-chip-list">
+                {(overview.allowedAdmins || []).map((item) => <span className="live-pill" key={item}>@{item}</span>)}
+              </div>
+              <div className="admin-runtime">
+                <span>Runtime</span>
+                <strong>{overview.runtime?.nodeEnv || 'unknown'}</strong>
+                <span>Uptime</span>
+                <strong>{Math.floor((overview.runtime?.uptimeSeconds || 0) / 60)} min</strong>
+              </div>
+            </div>
+          </section>
+        </>
+      ) : null}
+    </main>
+  );
+}
+
 export default function App() {
   const [mode, setMode] = useState('login');
   const [username, setUsername] = useState('');
@@ -904,6 +1010,10 @@ export default function App() {
   const [theme, setTheme] = useState(() => JSON.parse(localStorage.getItem(KEYS.theme) || 'null') || DEFAULT_THEME);
   const [profileDraft, setProfileDraft] = useState({ bio: '', avatarUrl: '', bannerUrl: '' });
   const [isDesktopShell] = useState(() => IS_TAURI_CLIENT || /\b(Electron|WebCordTauri)\b/i.test(navigator.userAgent) || Boolean(window.webcordDesktop || window.webcordWindow || window.electronAPI));
+  const [currentPath, setCurrentPath] = useState(() => normalizeAppPath());
+  const [adminOverview, setAdminOverview] = useState(null);
+  const [adminStatus, setAdminStatus] = useState('idle');
+  const [adminError, setAdminError] = useState('');
 
   const socketRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -931,6 +1041,7 @@ export default function App() {
   const voiceChannelIdRef = useRef('');
   const volumeRef = useRef({});
 
+  const isAdminRoute = currentPath === ADMIN_PATH;
   const isAuthed = Boolean(token && user);
   const textChannels = channels.filter((item) => item.type === 'TEXT');
   const voiceChannels = channels.filter((item) => item.type === 'VOICE');
@@ -953,6 +1064,42 @@ export default function App() {
     }),
     []
   );
+
+  useEffect(() => {
+    const syncPath = () => setCurrentPath(normalizeAppPath());
+    window.addEventListener('popstate', syncPath);
+    return () => window.removeEventListener('popstate', syncPath);
+  }, []);
+
+  useEffect(() => {
+    if (isAdminRoute) setMode('login');
+  }, [isAdminRoute]);
+
+  useEffect(() => {
+    if (!isAdminRoute) {
+      setAdminOverview(null);
+      setAdminStatus('idle');
+      setAdminError('');
+      return;
+    }
+
+    setMobileSidebarOpen(false);
+    setMobileChatOpen(false);
+    setShowSettingsModal(false);
+    setViewedProfile(null);
+    cleanupVoice();
+    setVoiceJoined(false);
+    socketRef.current?.disconnect();
+
+    if (!isAuthed) {
+      setAdminOverview(null);
+      setAdminStatus('idle');
+      setAdminError('');
+      return;
+    }
+
+    loadAdminOverview();
+  }, [isAdminRoute, isAuthed, token]);
 
   useEffect(() => {
     Object.entries({
@@ -1040,9 +1187,11 @@ export default function App() {
     const handleOnline = () => {
       setNetworkOnline(true);
       setSocketStatus(socketRef.current?.connected ? 'connected' : 'reconnecting');
-      socketRef.current?.connect();
-      refreshCurrentMessages({ silent: true }).catch(() => {});
-      refreshSocialData().catch(() => {});
+      if (!isAdminRoute) {
+        socketRef.current?.connect();
+        refreshCurrentMessages({ silent: true }).catch(() => {});
+        refreshSocialData().catch(() => {});
+      }
     };
     const handleOffline = () => {
       setNetworkOnline(false);
@@ -1055,7 +1204,7 @@ export default function App() {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
-  }, [isAuthed, token, workspace, channelId, dmConversationId]);
+  }, [isAuthed, isAdminRoute, token, workspace, channelId, dmConversationId]);
 
   useEffect(() => {
     const bridge = getNativeBridge();
@@ -1097,7 +1246,7 @@ export default function App() {
   }, [workspace, dmConversationId]);
 
   useEffect(() => {
-    if (!isAuthed) {
+    if (!isAuthed || isAdminRoute) {
       setGuild(null);
       setChannels([]);
       setSocial(EMPTY_SOCIAL);
@@ -1106,10 +1255,10 @@ export default function App() {
       return;
     }
     bootstrapApp().catch((err) => setError(err.message));
-  }, [isAuthed, networkOnline]);
+  }, [isAuthed, isAdminRoute, networkOnline]);
 
   useEffect(() => {
-    if (!isAuthed) return;
+    if (!isAuthed || isAdminRoute) return;
     const scopeKey = workspace === 'dm' ? getScopeKey('dm', dmConversationId) : getScopeKey('channel', channelId);
     const cachedMessages = readMessageCache()[scopeKey];
     if (Array.isArray(cachedMessages) && cachedMessages.length > 0) {
@@ -1120,10 +1269,10 @@ export default function App() {
       return;
     }
     refreshCurrentMessages().catch((err) => setError(err.message));
-  }, [isAuthed, workspace, channelId, dmConversationId, token]);
+  }, [isAuthed, isAdminRoute, workspace, channelId, dmConversationId, token]);
 
   useEffect(() => {
-    if (!isAuthed) return undefined;
+    if (!isAuthed || isAdminRoute) return undefined;
 
     setSocketStatus(networkOnline ? 'connecting' : 'offline');
     const socket = io(SOCKET_URL, {
@@ -1285,10 +1434,10 @@ export default function App() {
       socketRef.current = null;
       cleanupVoice({ emitLeave: false });
     };
-  }, [isAuthed, token, peerConfig, networkOnline]);
+  }, [isAuthed, isAdminRoute, token, peerConfig, networkOnline]);
 
   useEffect(() => {
-    if (!isAuthed) return undefined;
+    if (!isAuthed || isAdminRoute) return undefined;
 
     const interval = window.setInterval(() => {
       refreshSocialData().catch(() => {});
@@ -1297,7 +1446,7 @@ export default function App() {
     }, MESSAGE_POLL_INTERVAL_MS);
 
     return () => window.clearInterval(interval);
-  }, [isAuthed, workspace, dmConversationId, channelId, token]);
+  }, [isAuthed, isAdminRoute, workspace, dmConversationId, channelId, token]);
 
   useEffect(() => {
     if (socketRef.current && guild?.id) socketRef.current.emit('join-guild', { guildId: guild.id });
@@ -1337,6 +1486,34 @@ export default function App() {
     const message = err?.message || fallback;
     setError(message);
     pushToast(message, 'error');
+  }
+
+  function navigateTo(path) {
+    const nextPath = normalizeAppPath(path);
+    if (normalizeAppPath() !== nextPath) {
+      window.history.pushState({}, '', nextPath);
+    }
+    setCurrentPath(nextPath);
+  }
+
+  async function loadAdminOverview() {
+    setAdminStatus('checking');
+    setAdminError('');
+    try {
+      const overview = await apiFetch('/admin/overview', {}, token);
+      setAdminOverview(overview);
+      setAdminStatus('allowed');
+      if (overview.admin) setUser(overview.admin);
+    } catch (err) {
+      setAdminOverview(null);
+      setAdminError(err.message);
+      if (err.status === 401) {
+        handleLogout();
+        setAdminStatus('idle');
+        return;
+      }
+      setAdminStatus(err.status === 403 ? 'denied' : 'error');
+    }
   }
 
   async function refreshMediaDevices() {
@@ -2195,18 +2372,37 @@ export default function App() {
       <main className="auth-wrapper">
         <form className="auth-card" onSubmit={handleAuthSubmit}>
           <span className="hero-badge brand-badge"><BrandLogo /> WebCord</span>
-          <h1>Discord-style chat for the web.</h1>
-          <p className="muted">Login to test live channels, DMs, friends, and voice.</p>
-          <div className="auth-switch">
-            <button type="button" className={mode === 'login' ? 'active' : ''} onClick={() => setMode('login')}>Login</button>
-            <button type="button" className={mode === 'register' ? 'active' : ''} onClick={() => setMode('register')}>Register</button>
-          </div>
+          <h1>{isAdminRoute ? 'WebCord Admin' : 'Discord-style chat for the web.'}</h1>
+          <p className="muted">{isAdminRoute ? 'Sign in with an allowed admin username.' : 'Login to test live channels, DMs, friends, and voice.'}</p>
+          {!isAdminRoute ? (
+            <div className="auth-switch">
+              <button type="button" className={mode === 'login' ? 'active' : ''} onClick={() => setMode('login')}>Login</button>
+              <button type="button" className={mode === 'register' ? 'active' : ''} onClick={() => setMode('register')}>Register</button>
+            </div>
+          ) : null}
           <input placeholder="Username" value={username} onChange={(e) => setUsername(e.target.value)} required />
           <input type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} required />
           {error ? <p className="error">{error}</p> : null}
-          <button type="submit">{mode === 'login' ? 'Enter WebCord' : 'Create account'}</button>
+          <button type="submit">{isAdminRoute || mode === 'login' ? 'Enter WebCord' : 'Create account'}</button>
         </form>
       </main>
+    );
+  }
+
+  if (isAdminRoute) {
+    return (
+      <AdminPanel
+        user={user}
+        overview={adminOverview}
+        status={adminStatus}
+        error={adminError}
+        onRefresh={loadAdminOverview}
+        onOpenApp={() => {
+          setWorkspace('server');
+          navigateTo('/');
+        }}
+        onLogout={handleLogout}
+      />
     );
   }
 

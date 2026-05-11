@@ -283,6 +283,137 @@ p {
   color: var(--muted-text);
 }
 
+.admin-shell {
+  min-height: 100dvh;
+  display: grid;
+  align-content: start;
+  gap: 18px;
+  padding: 28px;
+  background:
+    linear-gradient(120deg, rgba(74, 144, 226, 0.16), transparent 26%),
+    linear-gradient(180deg, #10141c, #07090d);
+}
+
+.admin-hero,
+.admin-state,
+.admin-panel-card,
+.admin-stat-card {
+  border: 1px solid var(--border-strong);
+  background: rgba(18, 22, 31, 0.9);
+  box-shadow: var(--shadow);
+}
+
+.admin-hero {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  align-items: center;
+  padding: 22px;
+  border-radius: 16px;
+}
+
+.admin-hero h1 {
+  margin: 8px 0 6px;
+  font-size: clamp(30px, 6vw, 64px);
+  line-height: 0.95;
+}
+
+.admin-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.admin-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.admin-stat-card {
+  min-height: 116px;
+  display: grid;
+  align-content: space-between;
+  padding: 16px;
+  border-radius: 14px;
+}
+
+.admin-stat-card span,
+.admin-runtime span,
+.admin-user-row span {
+  color: var(--muted-text);
+  font-size: 13px;
+}
+
+.admin-stat-card strong {
+  font-size: 34px;
+  line-height: 1;
+}
+
+.admin-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.8fr);
+  gap: 14px;
+}
+
+.admin-panel-card,
+.admin-state {
+  padding: 18px;
+  border-radius: 14px;
+}
+
+.admin-state {
+  min-height: 180px;
+  display: grid;
+  place-content: center;
+  text-align: center;
+}
+
+.admin-state h2 {
+  margin: 0 0 8px;
+}
+
+.admin-state.denied {
+  border-color: color-mix(in srgb, var(--danger) 40%, transparent);
+}
+
+.admin-user-row {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  padding: 10px 0;
+  border-top: 1px solid var(--border-soft);
+}
+
+.admin-user-row:first-of-type {
+  border-top: 0;
+}
+
+.admin-user-row strong,
+.admin-user-row span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0 18px;
+}
+
+.admin-runtime {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-soft);
+}
+
 .desktop-titlebar {
   height: 32px;
   display: grid;
@@ -1913,6 +2044,31 @@ p {
   .account-hero {
     grid-template-columns: 1fr;
   }
+
+  .admin-shell {
+    padding: max(16px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+  }
+
+  .admin-hero,
+  .admin-columns {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-hero {
+    display: grid;
+  }
+
+  .admin-actions {
+    justify-content: stretch;
+  }
+
+  .admin-actions button {
+    flex: 1 1 140px;
+  }
+
+  .admin-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 560px) {
@@ -1952,6 +2108,14 @@ p {
 
   .color-grid {
     grid-template-columns: 1fr;
+  }
+
+  .admin-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-stat-card {
+    min-height: 94px;
   }
 }
 
