@@ -393,6 +393,219 @@ function BrandLogo({ className = '' }) {
   return <img className={className ? `brand-logo ${className}` : 'brand-logo'} src={getPublicAssetUrl('/icons/webcord.png')} alt="" aria-hidden="true" />;
 }
 
+function DownloadIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+      <path d="M12 3v10.4" />
+      <path d="m7.8 9.7 4.2 4.2 4.2-4.2" />
+      <path d="M5 18.5h14" />
+    </svg>
+  );
+}
+
+function BrowserIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+      <rect x="4" y="5" width="16" height="14" rx="3" />
+      <path d="M4 9h16" />
+      <path d="M8 7h.01M11 7h.01" />
+      <path d="M9 14h6" />
+    </svg>
+  );
+}
+
+function LandingPage({
+  mode,
+  setMode,
+  username,
+  setUsername,
+  password,
+  setPassword,
+  error,
+  onSubmit
+}) {
+  const [authOpen, setAuthOpen] = useState(false);
+  const usernameInputRef = useRef(null);
+
+  function openAuth(nextMode = 'login') {
+    setMode(nextMode);
+    setAuthOpen(true);
+    window.setTimeout(() => usernameInputRef.current?.focus(), 80);
+  }
+
+  function handleDownload() {
+    window.open(RELEASES_URL, '_blank', 'noopener,noreferrer');
+  }
+
+  return (
+    <main className="landing-page">
+      <div className="landing-stars" aria-hidden="true">
+        {Array.from({ length: 28 }, (_, index) => (
+          <span key={index} className={`landing-star star-${index + 1}`} />
+        ))}
+      </div>
+
+      <header className="landing-header">
+        <a className="landing-brand" href="/" aria-label="WebCord home">
+          <BrandLogo className="landing-brand-logo" />
+          <span>WebCord</span>
+        </a>
+        <nav className="landing-nav" aria-label="Главная навигация">
+          <a href="#download">Загрузить</a>
+          <a href="#features">Возможности</a>
+          <a href="#safety">Безопасность</a>
+          <a href="#support">Поддержка</a>
+          <a href="#developers">Разработчикам</a>
+        </nav>
+        <button className="landing-login-btn" type="button" onClick={() => openAuth('login')}>Вход</button>
+      </header>
+
+      <section className="landing-hero" aria-label="WebCord">
+        <div className="landing-copy">
+          <h1>
+            <span>Чат группы,</span>
+            <span>где всегда</span>
+            <span>весело</span>
+          </h1>
+          <p>
+            WebCord объединяет друзей, команды и сообщества в темном пространстве
+            с каналами, личными сообщениями, голосом и быстрым обменом файлами.
+          </p>
+          <div className="landing-actions" id="download">
+            <button className="landing-cta landing-cta-download" type="button" onClick={handleDownload}>
+              <DownloadIcon />
+              <span>Загрузить для Windows</span>
+            </button>
+            <button className="landing-cta landing-cta-browser" type="button" onClick={() => openAuth('login')}>
+              <BrowserIcon />
+              <span>Открыть WebCord в браузере</span>
+            </button>
+          </div>
+        </div>
+
+        <div className="landing-showcase" aria-hidden="true">
+          <div className="landing-space-card card-a">voice</div>
+          <div className="landing-space-card card-b">DM</div>
+          <div className="landing-device desktop-device">
+            <div className="device-bar">
+              <span />
+              <span />
+              <span />
+              <strong>WebCord</strong>
+            </div>
+            <div className="mock-app">
+              <div className="mock-rail">
+                <i />
+                <i />
+                <i />
+                <i />
+              </div>
+              <div className="mock-sidebar">
+                <strong>Night server</strong>
+                <span className="active"># lobby</span>
+                <span># games</span>
+                <span># music</span>
+                <span>Voice lounge</span>
+              </div>
+              <div className="mock-chat">
+                <div className="mock-message wide">
+                  <b />
+                  <span />
+                  <span />
+                </div>
+                <div className="mock-message own">
+                  <b />
+                  <span />
+                </div>
+                <div className="mock-message image">
+                  <b />
+                  <span />
+                </div>
+                <div className="mock-composer">
+                  <span>Написать сообщение...</span>
+                  <i />
+                </div>
+              </div>
+              <div className="mock-members">
+                <i />
+                <i />
+                <i />
+                <i />
+                <i />
+              </div>
+            </div>
+          </div>
+
+          <div className="landing-device phone-device">
+            <div className="phone-speaker" />
+            <div className="phone-grid">
+              <span />
+              <span />
+              <span />
+              <span />
+            </div>
+            <div className="phone-controls">
+              <i />
+              <i />
+              <i />
+            </div>
+          </div>
+
+          <div className="landing-controller">
+            <span />
+            <span />
+            <i />
+            <i />
+          </div>
+          <div className="landing-companion">
+            <BrandLogo />
+          </div>
+        </div>
+      </section>
+
+      <section className="landing-feature-strip" id="features" aria-label="Возможности WebCord">
+        <article>
+          <strong>Каналы и DMs</strong>
+          <span>Общение в сообществах и личных беседах без лишнего шума.</span>
+        </article>
+        <article id="safety">
+          <strong>Темный клиент</strong>
+          <span>Адаптивный интерфейс, PWA, desktop и мобильные сборки.</span>
+        </article>
+        <article id="support">
+          <strong>Голосовые комнаты</strong>
+          <span>Микрофон, камера, демонстрация экрана и живые статусы.</span>
+        </article>
+        <article id="developers">
+          <strong>Своя инфраструктура</strong>
+          <span>Express, Socket.IO, PostgreSQL и готовый Docker-стек.</span>
+        </article>
+      </section>
+
+      {authOpen ? (
+        <div className="landing-auth-overlay" role="dialog" aria-modal="true" aria-label="Вход в WebCord" onClick={() => setAuthOpen(false)}>
+          <form className="auth-card landing-auth-card" onSubmit={onSubmit} onClick={(event) => event.stopPropagation()}>
+            <div className="landing-auth-top">
+              <span className="hero-badge brand-badge"><BrandLogo /> WebCord</span>
+              <button className="landing-auth-close" type="button" aria-label="Закрыть форму входа" onClick={() => setAuthOpen(false)}>x</button>
+            </div>
+            <h2>{mode === 'login' ? 'Добро пожаловать обратно' : 'Создать аккаунт'}</h2>
+            <p className="muted">{mode === 'login' ? 'Войдите, чтобы перейти к каналам и друзьям.' : 'Зарегистрируйтесь и сразу откройте свой WebCord.'}</p>
+            <div className="auth-switch">
+              <button type="button" className={mode === 'login' ? 'active' : ''} onClick={() => setMode('login')}>Вход</button>
+              <button type="button" className={mode === 'register' ? 'active' : ''} onClick={() => setMode('register')}>Регистрация</button>
+            </div>
+            <input ref={usernameInputRef} placeholder="Имя пользователя" value={username} onChange={(event) => setUsername(event.target.value)} required />
+            <input type="password" placeholder="Пароль" value={password} onChange={(event) => setPassword(event.target.value)} required />
+            {error ? <p className="error">{error}</p> : null}
+            <button type="submit">{mode === 'login' ? 'Войти в WebCord' : 'Создать аккаунт'}</button>
+          </form>
+        </div>
+      ) : null}
+    </main>
+  );
+}
+
 function MessageItem({ message, currentUserId, workspace, onAvatarClick, onReply, onEdit, onDelete }) {
   const isOwn = String(message.author?.id) === String(currentUserId);
   const isDeleted = Boolean(message.deletedAt);
@@ -2368,6 +2581,21 @@ export default function App() {
   ];
 
   if (!isAuthed) {
+    if (!isAdminRoute) {
+      return (
+        <LandingPage
+          mode={mode}
+          setMode={setMode}
+          username={username}
+          setUsername={setUsername}
+          password={password}
+          setPassword={setPassword}
+          error={error}
+          onSubmit={handleAuthSubmit}
+        />
+      );
+    }
+
     return (
       <main className="auth-wrapper">
         <form className="auth-card" onSubmit={handleAuthSubmit}>
