@@ -49,6 +49,13 @@ class WebCordShell extends StatelessWidget {
                   bottom: MediaQuery.sizeOf(context).width < 980 ? 92 : 12,
                   child: VoiceMiniPanel(state: state),
                 ),
+              if (state.isAuthed && state.incomingCall != null)
+                Positioned(
+                  left: 12,
+                  right: 12,
+                  top: 12,
+                  child: IncomingCallBanner(state: state),
+                ),
               if (state.error != null)
                 Positioned(
                   left: 16,
@@ -255,6 +262,9 @@ class MobileShell extends StatelessWidget {
             state.selectedTextChannelId == null) ||
         (state.workspace == WorkspaceKind.direct &&
             state.selectedConversationId == null);
+    final showQuickSwitch =
+        state.workspace == WorkspaceKind.server ||
+        state.workspace == WorkspaceKind.direct;
     return Scaffold(
       backgroundColor: Colors.transparent,
       appBar: AppBar(
@@ -308,8 +318,10 @@ class MobileShell extends StatelessWidget {
             ? Sidebar(state: state, compact: true)
             : Column(
                 children: [
-                  MobileQuickSwitch(state: state),
-                  const SizedBox(height: 10),
+                  if (showQuickSwitch) ...[
+                    MobileQuickSwitch(state: state),
+                    const SizedBox(height: 10),
+                  ],
                   if (state.workspace == WorkspaceKind.server) ...[
                     MobileVoiceDock(state: state),
                     const SizedBox(height: 10),
@@ -322,19 +334,30 @@ class MobileShell extends StatelessWidget {
         backgroundColor: WebCordColors.bg.withAlpha(244),
         indicatorColor: WebCordColors.accent.withAlpha(45),
         selectedIndex: switch (state.workspace) {
-          WorkspaceKind.server => 0,
-          WorkspaceKind.friends => 1,
-          WorkspaceKind.direct => 2,
+          WorkspaceKind.direct || WorkspaceKind.friends => 0,
+          WorkspaceKind.server => 1,
+          WorkspaceKind.calls => 2,
+          WorkspaceKind.stories => 3,
+          WorkspaceKind.profile => 4,
         },
         onDestinationSelected: (index) {
           final next = [
-            WorkspaceKind.server,
-            WorkspaceKind.friends,
             WorkspaceKind.direct,
+            WorkspaceKind.server,
+            WorkspaceKind.calls,
+            WorkspaceKind.stories,
+            WorkspaceKind.profile,
           ][index];
           state.selectWorkspace(next);
         },
         destinations: [
+          NavigationDestination(
+            icon: NavIconWithBadge(
+              icon: Icons.chat_bubble_rounded,
+              count: state.directUnreadCount,
+            ),
+            label: 'Chats',
+          ),
           NavigationDestination(
             icon: NavIconWithBadge(
               icon: Icons.tag_rounded,
@@ -343,15 +366,19 @@ class MobileShell extends StatelessWidget {
             label: 'Channels',
           ),
           const NavigationDestination(
-            icon: Icon(Icons.people_alt_rounded),
-            label: 'Friends',
+            icon: Icon(Icons.call_rounded),
+            label: 'Calls',
           ),
           NavigationDestination(
-            icon: NavIconWithBadge(
-              icon: Icons.alternate_email_rounded,
-              count: state.directUnreadCount,
+            icon: Badge(
+              isLabelVisible: state.stories.any((story) => !story.viewed),
+              child: const Icon(Icons.auto_stories_rounded),
             ),
-            label: 'Directs',
+            label: 'Stories',
+          ),
+          const NavigationDestination(
+            icon: Icon(Icons.person_rounded),
+            label: 'Profile',
           ),
         ],
       ),
@@ -409,10 +436,26 @@ class ServerRail extends StatelessWidget {
               label: 'Directs',
               onTap: () => state.selectWorkspace(WorkspaceKind.direct),
             ),
+            RailButton(
+              selected: state.workspace == WorkspaceKind.calls,
+              icon: Icons.call_rounded,
+              label: 'Calls',
+              onTap: () => state.selectWorkspace(WorkspaceKind.calls),
+            ),
+            RailButton(
+              selected: state.workspace == WorkspaceKind.stories,
+              icon: Icons.auto_stories_rounded,
+              label: 'Stories',
+              onTap: () => state.selectWorkspace(WorkspaceKind.stories),
+            ),
             const Spacer(),
-            Tooltip(
-              message: state.user?.displayLabel ?? 'Profile',
-              child: UserAvatar(user: state.user, size: 40),
+            InkWell(
+              borderRadius: BorderRadius.circular(999),
+              onTap: () => state.selectWorkspace(WorkspaceKind.profile),
+              child: Tooltip(
+                message: state.user?.displayLabel ?? 'Profile',
+                child: UserAvatar(user: state.user, size: 40),
+              ),
             ),
             const SizedBox(height: 8),
             RailButton(
@@ -511,7 +554,10 @@ class _SidebarState extends State<Sidebar> {
             child: switch (state.workspace) {
               WorkspaceKind.server => _serverList(context, state),
               WorkspaceKind.friends => _friendsList(context, state),
-              WorkspaceKind.direct => _directList(state),
+              WorkspaceKind.direct ||
+              WorkspaceKind.calls ||
+              WorkspaceKind.stories ||
+              WorkspaceKind.profile => _directList(state),
             },
           ),
         ],
@@ -624,19 +670,30 @@ class _SidebarState extends State<Sidebar> {
   Widget _directList(WebCordState state) {
     return ListView(
       children: [
-        const SectionLabel('Direct messages'),
+        Row(
+          children: [
+            const Expanded(child: SectionLabel('Chats')),
+            IconButton(
+              tooltip: 'Create group',
+              onPressed: () => showCreateGroupDialog(context, state),
+              icon: const Icon(Icons.group_add_rounded, size: 19),
+            ),
+          ],
+        ),
         if (state.social.conversations.isEmpty)
-          const EmptyLine('Accept a friend request to unlock DMs')
+          const EmptyLine('Accept a friend request or create a group')
         else
           for (final conversation in state.social.conversations)
             NavRow(
               selected: conversation.id == state.selectedConversationId,
-              icon: Icons.alternate_email_rounded,
-              title: conversation.user.displayLabel,
+              icon: conversation.isGroup
+                  ? Icons.groups_rounded
+                  : Icons.alternate_email_rounded,
+              title: conversation.displayTitle,
               subtitle: conversation.lastMessage?.content.isNotEmpty == true
                   ? conversation.lastMessage!.content
                   : conversation.lastMessage?.attachmentName ??
-                        'Conversation ready',
+                        conversation.subtitleLabel,
               trailing: state.unreadConversationIds.contains(conversation.id)
                   ? const UnreadDot()
                   : null,
@@ -704,6 +761,15 @@ class MainSurface extends StatelessWidget {
     if (state.workspace == WorkspaceKind.friends) {
       return FriendsHome(state: state);
     }
+    if (state.workspace == WorkspaceKind.calls) {
+      return CallsHome(state: state);
+    }
+    if (state.workspace == WorkspaceKind.stories) {
+      return StoriesHome(state: state);
+    }
+    if (state.workspace == WorkspaceKind.profile) {
+      return ProfileHome(state: state);
+    }
     return Panel(
       padding: EdgeInsets.zero,
       color: WebCordColors.panel.withAlpha(238),
@@ -764,6 +830,28 @@ class ChatHeader extends StatelessWidget {
             ),
           ),
           LivePill(status: state.socketStatus),
+          if (state.workspace == WorkspaceKind.direct &&
+              state.activeConversation != null) ...[
+            const SizedBox(width: 8),
+            IconButton.filledTonal(
+              tooltip: 'Audio call',
+              onPressed: state.busy || state.mediaBusy
+                  ? null
+                  : () => state.startDirectCall(state.activeConversation!),
+              icon: const Icon(Icons.call_rounded),
+            ),
+            const SizedBox(width: 6),
+            IconButton.filledTonal(
+              tooltip: 'Video call',
+              onPressed: state.busy || state.mediaBusy
+                  ? null
+                  : () => state.startDirectCall(
+                      state.activeConversation!,
+                      video: true,
+                    ),
+              icon: const Icon(Icons.videocam_rounded),
+            ),
+          ],
           if (mobile && state.workspace == WorkspaceKind.server) ...[
             const SizedBox(width: 8),
             IconButton.filledTonal(
@@ -813,7 +901,7 @@ class VoiceCallBanner extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    state.activeVoiceChannel?.name ?? 'Voice room',
+                    state.activeVoiceTitle,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(fontWeight: FontWeight.w900),
                   ),
@@ -967,67 +1055,93 @@ class VoiceVideoTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final palette = WebCordPalette.of(context);
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(8),
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [palette.panelStrong, palette.panelSoft],
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOutCubic,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: feed.speaking
+              ? WebCordColors.success.withAlpha(190)
+              : palette.border,
+          width: feed.speaking ? 2 : 1,
+        ),
+        boxShadow: feed.speaking
+            ? [
+                BoxShadow(
+                  color: WebCordColors.success.withAlpha(42),
+                  blurRadius: 20,
+                  offset: const Offset(0, 10),
+                ),
+              ]
+            : const [],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(7),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [palette.panelStrong, palette.panelSoft],
+                ),
+              ),
+              child: RTCVideoView(
+                feed.renderer,
+                objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+                mirror: feed.local && !feed.screen,
               ),
             ),
-            child: RTCVideoView(
-              feed.renderer,
-              objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
-              mirror: feed.local && !feed.screen,
-            ),
-          ),
-          Positioned(
-            left: 8,
-            right: 8,
-            bottom: 8,
-            child: Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 5,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withAlpha(150),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.white.withAlpha(30)),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        feed.screen
-                            ? Icons.screen_share_rounded
-                            : Icons.videocam_rounded,
-                        size: 14,
-                        color: palette.cyan,
-                      ),
-                      const SizedBox(width: 5),
-                      Text(
-                        feed.label,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w900,
-                          fontSize: 12,
+            Positioned(
+              left: 8,
+              right: 8,
+              bottom: 8,
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 5,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withAlpha(150),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.white.withAlpha(30)),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          feed.screen
+                              ? Icons.screen_share_rounded
+                              : feed.speaking
+                              ? Icons.graphic_eq_rounded
+                              : Icons.videocam_rounded,
+                          size: 14,
+                          color: feed.speaking
+                              ? WebCordColors.success
+                              : palette.cyan,
                         ),
-                      ),
-                    ],
+                        const SizedBox(width: 5),
+                        Text(
+                          feed.label,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w900,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -1078,7 +1192,7 @@ class VoiceMiniPanel extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        state.activeVoiceChannel?.name ?? 'Voice room',
+                        state.activeVoiceTitle,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(fontWeight: FontWeight.w900),
                       ),
@@ -1098,6 +1212,90 @@ class VoiceMiniPanel extends StatelessWidget {
                   tooltip: 'Leave voice',
                   onPressed: state.joinOrLeaveVoice,
                   icon: const Icon(Icons.call_end_rounded),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class IncomingCallBanner extends StatelessWidget {
+  const IncomingCallBanner({required this.state, super.key});
+
+  final WebCordState state;
+
+  @override
+  Widget build(BuildContext context) {
+    final call = state.incomingCall;
+    if (call == null) return const SizedBox.shrink();
+    final palette = WebCordPalette.of(context);
+    return Align(
+      alignment: Alignment.topCenter,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 560),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: palette.panel.withAlpha(246),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: palette.cyan.withAlpha(150)),
+            boxShadow: [
+              BoxShadow(
+                color: palette.cyan.withAlpha(34),
+                blurRadius: 28,
+                offset: const Offset(0, 12),
+              ),
+            ],
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Row(
+              children: [
+                Container(
+                  width: 42,
+                  height: 42,
+                  decoration: BoxDecoration(
+                    color: WebCordColors.success.withAlpha(30),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: WebCordColors.success.withAlpha(120),
+                    ),
+                  ),
+                  child: Icon(
+                    call.video ? Icons.videocam_rounded : Icons.call_rounded,
+                    color: WebCordColors.success,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        call.title,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontWeight: FontWeight.w900),
+                      ),
+                      Text(
+                        call.video ? 'Incoming video call' : 'Incoming call',
+                        style: TextStyle(color: palette.muted, fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton.filledTonal(
+                  tooltip: 'Decline',
+                  onPressed: state.declineIncomingCall,
+                  icon: const Icon(Icons.call_end_rounded),
+                ),
+                const SizedBox(width: 8),
+                IconButton.filled(
+                  tooltip: 'Accept',
+                  onPressed: state.acceptIncomingCall,
+                  icon: const Icon(Icons.call_rounded),
                 ),
               ],
             ),
@@ -1146,7 +1344,7 @@ class VoiceCallScreen extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            state.activeVoiceChannel?.name ?? 'Voice room',
+                            state.activeVoiceTitle,
                             overflow: TextOverflow.ellipsis,
                             style: Theme.of(context).textTheme.headlineMedium,
                           ),
@@ -1268,7 +1466,14 @@ class _VoiceAudioStage extends StatelessWidget {
                   const EmptyLine('Waiting for others')
                 else
                   for (final participant in state.voiceParticipants)
-                    VoiceParticipantPresence(participant: participant),
+                    VoiceParticipantPresence(
+                      participant: participant,
+                      onTap: () => showVoiceParticipantSheet(
+                        context,
+                        state,
+                        participant,
+                      ),
+                    ),
               ],
             ),
           ),
@@ -1704,6 +1909,376 @@ class FriendsHome extends StatelessWidget {
   }
 }
 
+class CallsHome extends StatelessWidget {
+  const CallsHome({required this.state, super.key});
+
+  final WebCordState state;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = WebCordPalette.of(context);
+    return Panel(
+      child: ListView(
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.call_rounded, color: WebCordColors.cyan),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Calls',
+                  style: Theme.of(context).textTheme.headlineMedium,
+                ),
+              ),
+              if (state.voiceJoined)
+                FilledButton.icon(
+                  onPressed: () => showVoiceCallScreen(context, state),
+                  icon: const Icon(Icons.open_in_full_rounded),
+                  label: const Text('Open'),
+                ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          if (state.activeCall != null)
+            DecoratedBox(
+              decoration: BoxDecoration(
+                color: palette.cyan.withAlpha(22),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: palette.cyan.withAlpha(130)),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.graphic_eq_rounded,
+                      color: WebCordColors.success,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            state.activeCall!.title,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontWeight: FontWeight.w900),
+                          ),
+                          VoiceQualityPill(stats: state.voiceQuality),
+                        ],
+                      ),
+                    ),
+                    IconButton.filledTonal(
+                      tooltip: 'End call',
+                      onPressed: state.endActiveCall,
+                      icon: const Icon(Icons.call_end_rounded),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          const SectionLabel('Start a call'),
+          if (state.social.conversations.isEmpty)
+            const EmptyState(
+              icon: Icons.chat_bubble_outline_rounded,
+              title: 'No chats yet',
+              body: 'Open a direct message or create a group first.',
+            )
+          else
+            for (final conversation in state.social.conversations)
+              CallConversationRow(state: state, conversation: conversation),
+        ],
+      ),
+    );
+  }
+}
+
+class CallConversationRow extends StatelessWidget {
+  const CallConversationRow({
+    required this.state,
+    required this.conversation,
+    super.key,
+  });
+
+  final WebCordState state;
+  final DirectConversation conversation;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: WebCordColors.panelSoft,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: WebCordColors.border),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(10),
+          child: Row(
+            children: [
+              ConversationAvatar(conversation: conversation, size: 38),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      conversation.displayTitle,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.w900),
+                    ),
+                    Text(
+                      conversation.subtitleLabel,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: WebCordColors.muted,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              IconButton.filledTonal(
+                tooltip: 'Audio call',
+                onPressed: state.busy || state.mediaBusy
+                    ? null
+                    : () => state.startDirectCall(conversation),
+                icon: const Icon(Icons.call_rounded),
+              ),
+              const SizedBox(width: 6),
+              IconButton.filledTonal(
+                tooltip: 'Video call',
+                onPressed: state.busy || state.mediaBusy
+                    ? null
+                    : () => state.startDirectCall(conversation, video: true),
+                icon: const Icon(Icons.videocam_rounded),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class StoriesHome extends StatelessWidget {
+  const StoriesHome({required this.state, super.key});
+
+  final WebCordState state;
+
+  @override
+  Widget build(BuildContext context) {
+    return Panel(
+      child: ListView(
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.auto_stories_rounded, color: WebCordColors.cyan),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Stories',
+                  style: Theme.of(context).textTheme.headlineMedium,
+                ),
+              ),
+              OutlinedButton.icon(
+                onPressed: state.refreshStories,
+                icon: const Icon(Icons.refresh_rounded),
+                label: const Text('Refresh'),
+              ),
+              const SizedBox(width: 8),
+              FilledButton.icon(
+                onPressed: state.uploading ? null : state.createStoryFromFile,
+                icon: state.uploading
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.add_photo_alternate_rounded),
+                label: const Text('Add'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          if (state.stories.isEmpty)
+            const EmptyState(
+              icon: Icons.auto_stories_outlined,
+              title: 'No stories yet',
+              body: 'Share a photo or video for 24 hours.',
+            )
+          else
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                for (final story in state.stories)
+                  StoryCard(
+                    story: story,
+                    state: state,
+                    onTap: () => showStoryViewer(context, state, story),
+                  ),
+              ],
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class StoryCard extends StatelessWidget {
+  const StoryCard({
+    required this.story,
+    required this.state,
+    required this.onTap,
+    super.key,
+  });
+
+  final StoryItem story;
+  final WebCordState state;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = WebCordPalette.of(context);
+    final url = state.api.attachmentUri(story.mediaUrl).toString();
+    return SizedBox(
+      width: 136,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: onTap,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: palette.panelSoft,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: story.viewed ? palette.border : palette.cyan,
+              width: story.viewed ? 1 : 2,
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              ClipRRect(
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(6),
+                ),
+                child: SizedBox(
+                  height: 178,
+                  width: double.infinity,
+                  child: story.isVideo
+                      ? DecoratedBox(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                              colors: [palette.panelStrong, palette.accent],
+                            ),
+                          ),
+                          child: const Center(
+                            child: Icon(Icons.play_arrow_rounded, size: 42),
+                          ),
+                        )
+                      : Image.network(
+                          url,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, _, _) => const Center(
+                            child: Icon(Icons.broken_image_rounded),
+                          ),
+                        ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.all(8),
+                child: Row(
+                  children: [
+                    UserAvatar(user: story.author, size: 26),
+                    const SizedBox(width: 7),
+                    Expanded(
+                      child: Text(
+                        story.author.displayLabel,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+Future<void> showStoryViewer(
+  BuildContext context,
+  WebCordState state,
+  StoryItem story,
+) async {
+  await state.markStoryViewed(story);
+  final message = ChatMessage(
+    id: story.id,
+    content: story.caption,
+    author: story.author,
+    createdAt: story.createdAt,
+    attachmentUrl: story.mediaUrl,
+    attachmentType: story.isVideo ? 'VIDEO' : 'IMAGE',
+    attachmentName: story.caption.isEmpty ? 'Story' : story.caption,
+  );
+  if (!context.mounted) return;
+  await showMediaViewer(context, message, state);
+}
+
+class ProfileHome extends StatelessWidget {
+  const ProfileHome({required this.state, super.key});
+
+  final WebCordState state;
+
+  @override
+  Widget build(BuildContext context) {
+    final user = state.user;
+    return Panel(
+      child: ListView(
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.person_rounded, color: WebCordColors.cyan),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Profile',
+                  style: Theme.of(context).textTheme.headlineMedium,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          if (user != null)
+            UserProfileSummary(user: user, state: state, expanded: true),
+          const SectionLabel('Edit profile'),
+          _ProfileSettingsPanel(state: state),
+          const SectionLabel('Friends'),
+          if (state.social.friends.isEmpty)
+            const EmptyLine('No friends yet')
+          else
+            for (final friend in state.social.friends.take(8))
+              UserRow(
+                user: friend.user,
+                subtitle: 'Open direct message',
+                onTap: () => state.openDirect(friend),
+              ),
+        ],
+      ),
+    );
+  }
+}
+
 class RightPanel extends StatelessWidget {
   const RightPanel({required this.state, super.key});
 
@@ -1768,7 +2343,9 @@ class RightPanel extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    state.activeVoiceChannel?.name ?? 'No voice channel',
+                    state.voiceJoined
+                        ? state.activeVoiceTitle
+                        : state.activeVoiceChannel?.name ?? 'No voice channel',
                     style: const TextStyle(fontWeight: FontWeight.w900),
                   ),
                   const SizedBox(height: 6),
@@ -1807,6 +2384,11 @@ class RightPanel extends StatelessWidget {
                       child: VoiceParticipantPresence(
                         participant: participant,
                         dense: true,
+                        onTap: () => showVoiceParticipantSheet(
+                          context,
+                          state,
+                          participant,
+                        ),
                       ),
                     ),
                 ],
@@ -1915,11 +2497,13 @@ class VoiceParticipantPresence extends StatelessWidget {
   const VoiceParticipantPresence({
     required this.participant,
     this.dense = false,
+    this.onTap,
     super.key,
   });
 
   final VoiceParticipant participant;
   final bool dense;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -1927,56 +2511,74 @@ class VoiceParticipantPresence extends StatelessWidget {
     final activeColor = participant.speaking
         ? WebCordColors.success
         : palette.muted;
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: participant.speaking
-            ? WebCordColors.success.withAlpha(28)
-            : Colors.transparent,
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: participant.speaking
-              ? WebCordColors.success.withAlpha(110)
-              : Colors.transparent,
-        ),
-      ),
-      child: Padding(
-        padding: EdgeInsets.symmetric(
-          horizontal: dense ? 2 : 8,
-          vertical: dense ? 2 : 7,
-        ),
-        child: Row(
-          children: [
-            Icon(Icons.circle, size: 9, color: activeColor),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                participant.username,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontWeight: participant.speaking
-                      ? FontWeight.w900
-                      : FontWeight.w700,
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOutCubic,
+          decoration: BoxDecoration(
+            color: participant.speaking
+                ? WebCordColors.success.withAlpha(34)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: participant.speaking
+                  ? WebCordColors.success.withAlpha(150)
+                  : Colors.transparent,
+            ),
+            boxShadow: participant.speaking
+                ? [
+                    BoxShadow(
+                      color: WebCordColors.success.withAlpha(34),
+                      blurRadius: 18,
+                      offset: const Offset(0, 8),
+                    ),
+                  ]
+                : const [],
+          ),
+          child: Padding(
+            padding: EdgeInsets.symmetric(
+              horizontal: dense ? 2 : 8,
+              vertical: dense ? 2 : 7,
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.circle, size: 9, color: activeColor),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    participant.displayLabel,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontWeight: participant.speaking
+                          ? FontWeight.w900
+                          : FontWeight.w700,
+                    ),
+                  ),
                 ),
-              ),
+                _PresenceIcon(
+                  active: !participant.muted,
+                  icon: participant.muted
+                      ? Icons.mic_off_rounded
+                      : Icons.mic_rounded,
+                ),
+                _PresenceIcon(
+                  active: participant.camera,
+                  icon: participant.camera
+                      ? Icons.videocam_rounded
+                      : Icons.videocam_off_rounded,
+                ),
+                if (participant.screen)
+                  const _PresenceIcon(
+                    active: true,
+                    icon: Icons.screen_share_rounded,
+                  ),
+              ],
             ),
-            _PresenceIcon(
-              active: !participant.muted,
-              icon: participant.muted
-                  ? Icons.mic_off_rounded
-                  : Icons.mic_rounded,
-            ),
-            _PresenceIcon(
-              active: participant.camera,
-              icon: participant.camera
-                  ? Icons.videocam_rounded
-                  : Icons.videocam_off_rounded,
-            ),
-            if (participant.screen)
-              const _PresenceIcon(
-                active: true,
-                icon: Icons.screen_share_rounded,
-              ),
-          ],
+          ),
         ),
       ),
     );
@@ -2156,7 +2758,9 @@ class MobileQuickSwitch extends StatelessWidget {
               .map(
                 (conversation) => (
                   id: conversation.id,
-                  label: '@ ${conversation.user.displayLabel}',
+                  label: conversation.isGroup
+                      ? conversation.displayTitle
+                      : '@ ${conversation.displayTitle}',
                   selected: conversation.id == state.selectedConversationId,
                 ),
               )
@@ -2276,21 +2880,32 @@ class MobileNavigationSheet extends StatelessWidget {
           else
             for (final channel in state.voiceChannels)
               MobileVoiceRoomRow(channel: channel, state: state),
-          const SectionLabel('Direct messages'),
+          Row(
+            children: [
+              const Expanded(child: SectionLabel('Chats')),
+              TextButton.icon(
+                onPressed: () => showCreateGroupDialog(context, state),
+                icon: const Icon(Icons.group_add_rounded, size: 18),
+                label: const Text('Group'),
+              ),
+            ],
+          ),
           if (state.social.conversations.isEmpty)
-            const EmptyLine('No direct messages yet')
+            const EmptyLine('No chats yet')
           else
             for (final conversation in state.social.conversations)
               MobileSheetRow(
                 selected:
                     conversation.id == state.selectedConversationId &&
                     state.workspace == WorkspaceKind.direct,
-                icon: Icons.alternate_email_rounded,
-                title: conversation.user.displayLabel,
+                icon: conversation.isGroup
+                    ? Icons.groups_rounded
+                    : Icons.alternate_email_rounded,
+                title: conversation.displayTitle,
                 subtitle: conversation.lastMessage?.content.isNotEmpty == true
                     ? conversation.lastMessage!.content
                     : conversation.lastMessage?.attachmentName ??
-                          'Open direct message',
+                          conversation.subtitleLabel,
                 trailing: state.unreadConversationIds.contains(conversation.id)
                     ? const UnreadDot()
                     : null,
@@ -2404,11 +3019,323 @@ class MobileVoiceSheet extends StatelessWidget {
             for (final participant in state.voiceParticipants)
               Padding(
                 padding: const EdgeInsets.only(bottom: 8),
-                child: VoiceParticipantPresence(participant: participant),
+                child: VoiceParticipantPresence(
+                  participant: participant,
+                  onTap: () =>
+                      showVoiceParticipantSheet(context, state, participant),
+                ),
               ),
         ],
       ),
     );
+  }
+}
+
+Future<void> showVoiceParticipantSheet(
+  BuildContext context,
+  WebCordState state,
+  VoiceParticipant participant,
+) {
+  return showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    useSafeArea: true,
+    backgroundColor: Colors.transparent,
+    builder: (context) => AnimatedBuilder(
+      animation: state,
+      builder: (context, _) =>
+          VoiceParticipantSheet(state: state, participant: participant),
+    ),
+  );
+}
+
+class VoiceParticipantSheet extends StatelessWidget {
+  const VoiceParticipantSheet({
+    required this.state,
+    required this.participant,
+    super.key,
+  });
+
+  final WebCordState state;
+  final VoiceParticipant participant;
+
+  @override
+  Widget build(BuildContext context) {
+    final user =
+        participant.user ??
+        PublicUser(id: participant.userId, username: participant.username);
+    final volume = state.participantVolume(participant.socketId);
+    return _MobileSheetFrame(
+      title: participant.displayLabel,
+      icon: participant.speaking
+          ? Icons.graphic_eq_rounded
+          : Icons.person_rounded,
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 18),
+        children: [
+          UserProfileSummary(user: user, state: state),
+          const SizedBox(height: 12),
+          DecoratedBox(
+            decoration: BoxDecoration(
+              color: WebCordColors.panelSoft,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: WebCordColors.border),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
+              child: Row(
+                children: [
+                  const Icon(Icons.volume_up_rounded),
+                  const SizedBox(width: 10),
+                  const SizedBox(
+                    width: 78,
+                    child: Text(
+                      'Volume',
+                      style: TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                  ),
+                  Expanded(
+                    child: Slider(
+                      value: volume.toDouble(),
+                      min: 0,
+                      max: 200,
+                      divisions: 20,
+                      onChanged: (value) => state.setParticipantVolume(
+                        participant.socketId,
+                        value,
+                      ),
+                    ),
+                  ),
+                  SizedBox(
+                    width: 44,
+                    child: Text(
+                      '$volume%',
+                      textAlign: TextAlign.right,
+                      style: const TextStyle(color: WebCordColors.muted),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              FilledButton.icon(
+                onPressed: () => showUserProfileSheet(context, state, user),
+                icon: const Icon(Icons.badge_rounded),
+                label: const Text('Profile'),
+              ),
+              OutlinedButton.icon(
+                onPressed: () {
+                  Navigator.pop(context);
+                  state.openDirectUser(user);
+                },
+                icon: const Icon(Icons.chat_bubble_rounded),
+                label: const Text('Message'),
+              ),
+              if (state.user?.id != user.id && !state.isFriendUser(user.id))
+                OutlinedButton.icon(
+                  onPressed: () => state.sendFriendRequest(user.username),
+                  icon: const Icon(Icons.person_add_alt_1_rounded),
+                  label: const Text('Add friend'),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+Future<void> showUserProfileSheet(
+  BuildContext context,
+  WebCordState state,
+  PublicUser user,
+) {
+  return showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    useSafeArea: true,
+    backgroundColor: Colors.transparent,
+    builder: (context) => _MobileSheetFrame(
+      title: user.displayLabel,
+      icon: Icons.badge_rounded,
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 18),
+        children: [
+          UserProfileSummary(user: user, state: state, expanded: true),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              if (state.user?.id != user.id)
+                FilledButton.icon(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    state.openDirectUser(user);
+                  },
+                  icon: const Icon(Icons.chat_bubble_rounded),
+                  label: const Text('Message'),
+                ),
+              if (state.user?.id != user.id && !state.isFriendUser(user.id))
+                OutlinedButton.icon(
+                  onPressed: () => state.sendFriendRequest(user.username),
+                  icon: const Icon(Icons.person_add_alt_1_rounded),
+                  label: const Text('Add friend'),
+                ),
+            ],
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+class UserProfileSummary extends StatelessWidget {
+  const UserProfileSummary({
+    required this.user,
+    required this.state,
+    this.expanded = false,
+    super.key,
+  });
+
+  final PublicUser user;
+  final WebCordState state;
+  final bool expanded;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = WebCordPalette.of(context);
+    final accent = _parseHexColor(user.accentColor, palette.accent);
+    final trackUrl = user.favoriteTrackUrl;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: palette.panelSoft,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: palette.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ClipRRect(
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(8)),
+            child: SizedBox(
+              height: expanded ? 150 : 112,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [accent.withAlpha(210), palette.panelStrong],
+                      ),
+                      image: user.bannerUrl == null
+                          ? null
+                          : DecorationImage(
+                              image: NetworkImage(
+                                _resolveMediaUrl(user.bannerUrl!),
+                              ),
+                              fit: BoxFit.cover,
+                            ),
+                    ),
+                  ),
+                  Container(color: Colors.black.withAlpha(55)),
+                  Positioned(
+                    left: 14,
+                    right: 14,
+                    bottom: 12,
+                    child: Row(
+                      children: [
+                        UserAvatar(user: user, size: expanded ? 68 : 56),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                user.displayLabel,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w900,
+                                  fontSize: 18,
+                                ),
+                              ),
+                              Text(
+                                '@${user.username}',
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(color: Colors.white70),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  user.statusText.trim().isEmpty ? 'Online' : user.statusText,
+                  style: TextStyle(color: accent, fontWeight: FontWeight.w900),
+                ),
+                if (user.bio.trim().isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Text(user.bio),
+                ],
+                if (trackUrl != null && trackUrl.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  ProfileTrackPlayer(
+                    url: _resolveMediaUrl(trackUrl),
+                    title: user.favoriteTrack.trim().isEmpty
+                        ? user.favoriteTrackName ?? 'Profile track'
+                        : user.favoriteTrack,
+                  ),
+                ] else if (user.favoriteTrack.trim().isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Icon(Icons.music_note_rounded, color: palette.cyan),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          user.favoriteTrack,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontWeight: FontWeight.w800),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class ProfileTrackPlayer extends StatelessWidget {
+  const ProfileTrackPlayer({required this.url, required this.title, super.key});
+
+  final String url;
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    return VoiceMessagePlayer(url: url, title: title);
   }
 }
 
@@ -3434,6 +4361,41 @@ class UserAvatar extends StatelessWidget {
   }
 }
 
+class ConversationAvatar extends StatelessWidget {
+  const ConversationAvatar({
+    required this.conversation,
+    this.size = 36,
+    super.key,
+  });
+
+  final DirectConversation conversation;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!conversation.isGroup && conversation.user != null) {
+      return UserAvatar(user: conversation.user, size: size);
+    }
+    final palette = WebCordPalette.of(context);
+    final avatarUrl = conversation.avatarUrl;
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(8),
+        gradient: LinearGradient(colors: [palette.accent, palette.cyan]),
+        border: Border.all(color: palette.cyan.withAlpha(120)),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(7),
+        child: avatarUrl == null
+            ? Icon(Icons.groups_rounded, color: Colors.white, size: size * .54)
+            : Image.network(_resolveMediaUrl(avatarUrl), fit: BoxFit.cover),
+      ),
+    );
+  }
+}
+
 String _resolveMediaUrl(String value) {
   if (value.startsWith('http://') ||
       value.startsWith('https://') ||
@@ -3871,6 +4833,87 @@ Future<void> showCreateChannelDialog(
   controller.dispose();
   if (result != null && result.trim().isNotEmpty) {
     state.createChannel(result, kind);
+  }
+}
+
+Future<void> showCreateGroupDialog(
+  BuildContext context,
+  WebCordState state,
+) async {
+  final title = TextEditingController();
+  final selected = <int>{};
+  final result = await showDialog<bool>(
+    context: context,
+    builder: (context) => StatefulBuilder(
+      builder: (context, setDialogState) => AlertDialog(
+        backgroundColor: WebCordColors.panel,
+        title: const Text('Create group'),
+        content: SizedBox(
+          width: 420,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: title,
+                autofocus: true,
+                onChanged: (_) => setDialogState(() {}),
+                decoration: const InputDecoration(hintText: 'Group name'),
+              ),
+              const SizedBox(height: 12),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 320),
+                child: state.social.friends.isEmpty
+                    ? const EmptyLine('Add friends first')
+                    : ListView(
+                        shrinkWrap: true,
+                        children: [
+                          for (final friend in state.social.friends)
+                            CheckboxListTile(
+                              value: selected.contains(friend.user.id),
+                              onChanged: (value) {
+                                setDialogState(() {
+                                  if (value == true) {
+                                    selected.add(friend.user.id);
+                                  } else {
+                                    selected.remove(friend.user.id);
+                                  }
+                                });
+                              },
+                              secondary: UserAvatar(
+                                user: friend.user,
+                                size: 32,
+                              ),
+                              title: Text(friend.user.displayLabel),
+                              subtitle: Text('@${friend.user.username}'),
+                            ),
+                        ],
+                      ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: title.text.trim().isEmpty || selected.length < 2
+                ? null
+                : () => Navigator.pop(context, true),
+            child: const Text('Create'),
+          ),
+        ],
+      ),
+    ),
+  );
+  final groupTitle = title.text.trim();
+  title.dispose();
+  if (result == true && groupTitle.isNotEmpty && selected.length >= 2) {
+    await state.createGroupConversation(
+      title: groupTitle,
+      userIds: selected.toList(),
+    );
   }
 }
 
@@ -4889,8 +5932,7 @@ class SettingsDialog extends StatelessWidget {
                             children: [
                               Expanded(
                                 child: Text(
-                                  state.activeVoiceChannel?.name ??
-                                      'Voice room',
+                                  state.activeVoiceTitle,
                                   overflow: TextOverflow.ellipsis,
                                   style: const TextStyle(
                                     fontWeight: FontWeight.w900,
@@ -4979,7 +6021,8 @@ class _ProfileSettingsPanelState extends State<_ProfileSettingsPanel> {
     final signature =
         '${user.displayName}|${user.bio}|${user.statusText}|'
         '${user.favoriteTrack}|${user.accentColor}|'
-        '${user.avatarUrl}|${user.bannerUrl}';
+        '${user.avatarUrl}|${user.bannerUrl}|'
+        '${user.favoriteTrackUrl}|${user.favoriteTrackName}';
     final changed =
         force || _syncedUserId != user.id || _syncedSignature != signature;
     if (!changed) return;
@@ -5155,10 +6198,38 @@ class _ProfileSettingsPanelState extends State<_ProfileSettingsPanel> {
               controller: _favoriteTrack,
               maxLength: 120,
               decoration: const InputDecoration(
-                labelText: 'Favorite track',
+                labelText: 'Track title',
                 prefixIcon: Icon(Icons.music_note_rounded),
               ),
             ),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: busy ? null : state.uploadFavoriteTrack,
+                    icon: const Icon(Icons.library_music_rounded, size: 18),
+                    label: Text(
+                      user.favoriteTrackUrl == null
+                          ? 'Attach track'
+                          : 'Replace track',
+                    ),
+                  ),
+                ),
+                if (user.favoriteTrackUrl != null) ...[
+                  const SizedBox(width: 8),
+                  Icon(Icons.check_circle_rounded, color: palette.cyan),
+                ],
+              ],
+            ),
+            if (user.favoriteTrackUrl != null) ...[
+              const SizedBox(height: 8),
+              ProfileTrackPlayer(
+                url: _resolveMediaUrl(user.favoriteTrackUrl!),
+                title: _favoriteTrack.text.trim().isEmpty
+                    ? user.favoriteTrackName ?? 'Profile track'
+                    : _favoriteTrack.text.trim(),
+              ),
+            ],
             const SizedBox(height: 8),
             TextField(
               controller: _bio,

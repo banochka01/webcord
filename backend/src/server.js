@@ -4,6 +4,7 @@ import http from 'http';
 import cors from 'cors';
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import multer from 'multer';
 import { fileURLToPath } from 'node:url';
 import { Server } from 'socket.io';
@@ -49,11 +50,15 @@ const INLINE_UPLOAD_EXTENSIONS = new Set([
   '.gif',
   '.jpeg',
   '.jpg',
+  '.m4a',
   '.m4v',
+  '.mp3',
   '.mov',
   '.mp4',
   '.ogg',
+  '.oga',
   '.png',
+  '.wav',
   '.webm',
   '.webp'
 ]);
@@ -105,6 +110,8 @@ const upload = multer({
 });
 
 const voiceParticipants = new Map();
+const callSessions = new Map();
+const callParticipants = new Map();
 const rateLimitBuckets = new Map();
 const publicUserSelect = {
   id: true,
@@ -115,6 +122,8 @@ const publicUserSelect = {
   bio: true,
   statusText: true,
   favoriteTrack: true,
+  favoriteTrackUrl: true,
+  favoriteTrackName: true,
   accentColor: true
 };
 const authRateLimit = createRateLimiter({ windowMs: 60_000, max: 20, keyPrefix: 'auth' });
@@ -122,6 +131,7 @@ const messageRateLimitConfig = { windowMs: 10_000, max: 18, keyPrefix: 'message'
 const messageRateLimit = createRateLimiter(messageRateLimitConfig);
 const uploadRateLimit = createRateLimiter({ windowMs: 60_000, max: 20, keyPrefix: 'upload' });
 const ATTACHMENT_TYPES = new Set(['IMAGE', 'VIDEO', 'AUDIO', 'CIRCLE_VIDEO', 'FILE']);
+const STORY_MEDIA_TYPES = new Set(['IMAGE', 'VIDEO']);
 
 function normalizeUsername(value) {
   return String(value || '').trim().toLowerCase();
@@ -271,6 +281,8 @@ function serializePublicUser(user) {
     bio: user.bio || '',
     statusText: user.statusText || 'Online',
     favoriteTrack: user.favoriteTrack || '',
+    favoriteTrackUrl: user.favoriteTrackUrl || null,
+    favoriteTrackName: user.favoriteTrackName || null,
     accentColor: user.accentColor || '#7c5cff'
   };
 }
@@ -292,6 +304,14 @@ function sanitizeProfilePayload(body = {}) {
 
   if (Object.prototype.hasOwnProperty.call(body, 'favoriteTrack')) {
     data.favoriteTrack = String(body.favoriteTrack ?? '').trim().slice(0, 120);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'favoriteTrackUrl')) {
+    data.favoriteTrackUrl = body.favoriteTrackUrl ? String(body.favoriteTrackUrl).trim() : null;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'favoriteTrackName')) {
+    data.favoriteTrackName = String(body.favoriteTrackName ?? '').trim().slice(0, 160) || null;
   }
 
   if (Object.prototype.hasOwnProperty.call(body, 'accentColor')) {
@@ -352,7 +372,40 @@ function getFriendshipCounterpart(friendship, userId) {
 }
 
 function getConversationCounterpart(conversation, userId) {
-  return conversation.userOneId === userId ? conversation.userTwo : conversation.userOne;
+  if (conversation.type === 'GROUP') return null;
+  if (conversation.userOneId === userId) return conversation.userTwo;
+  if (conversation.userTwoId === userId) return conversation.userOne;
+  return conversation.members?.find((member) => member.userId !== userId)?.user || null;
+}
+
+function getConversationMembers(conversation) {
+  const members = conversation.members?.map((member) => member.user).filter(Boolean) || [];
+  if (members.length > 0) return members;
+  return [conversation.userOne, conversation.userTwo].filter(Boolean);
+}
+
+function getConversationMemberIds(conversation) {
+  const memberIds = conversation.members?.map((member) => member.userId).filter(Boolean) || [];
+  if (memberIds.length > 0) return [...new Set(memberIds.map(Number))];
+  return [conversation.userOneId, conversation.userTwoId].filter(Boolean).map(Number);
+}
+
+async function isConversationMember(conversationId, userId) {
+  const member = await prisma.directConversationMember.findUnique({
+    where: {
+      conversationId_userId: {
+        conversationId: Number(conversationId),
+        userId: Number(userId)
+      }
+    }
+  });
+  if (member) return true;
+
+  const conversation = await prisma.directConversation.findUnique({
+    where: { id: Number(conversationId) },
+    select: { userOneId: true, userTwoId: true }
+  });
+  return Boolean(conversation && [conversation.userOneId, conversation.userTwoId].includes(Number(userId)));
 }
 
 function serializeFriendRequest(request, currentUserId) {
@@ -381,11 +434,25 @@ function serializeFriendship(friendship, currentUserId) {
 function serializeDirectConversation(conversation, currentUserId) {
   const counterpart = getConversationCounterpart(conversation, currentUserId);
   const lastMessage = conversation.messages?.[0] || null;
+  const members = getConversationMembers(conversation).map(serializePublicUser).filter(Boolean);
+  const type = conversation.type || 'DIRECT';
+  const fallbackTitle = type === 'GROUP'
+    ? members
+        .filter((member) => member.id !== currentUserId)
+        .map((member) => member.displayName || member.username)
+        .slice(0, 4)
+        .join(', ')
+    : counterpart?.displayName || counterpart?.username || 'Direct message';
 
   return {
     id: conversation.id,
+    type,
+    title: conversation.title || fallbackTitle || 'Group',
+    avatarUrl: conversation.avatarUrl || null,
     updatedAt: conversation.updatedAt,
     user: serializePublicUser(counterpart),
+    members,
+    memberCount: members.length,
     lastMessage: lastMessage
       ? {
           id: lastMessage.id,
@@ -397,6 +464,31 @@ function serializeDirectConversation(conversation, currentUserId) {
         }
       : null
   };
+}
+
+function serializeStory(story, currentUserId) {
+  const views = story.views || [];
+  return {
+    id: story.id,
+    caption: story.caption || '',
+    mediaUrl: story.mediaUrl,
+    mediaType: story.mediaType || 'IMAGE',
+    createdAt: story.createdAt,
+    expiresAt: story.expiresAt,
+    author: serializePublicUser(story.author),
+    viewed: views.some((view) => view.viewerId === currentUserId),
+    viewCount: views.length
+  };
+}
+
+function normalizeStoryMediaType(value, mediaUrl = '') {
+  const raw = String(value || '').toUpperCase();
+  if (STORY_MEDIA_TYPES.has(raw)) return raw;
+  const source = String(mediaUrl || '').toLowerCase().split('?').first;
+  if (['.mp4', '.mov', '.m4v', '.webm', '.mkv', '.3gp'].some((ext) => source.endsWith(ext))) {
+    return 'VIDEO';
+  }
+  return 'IMAGE';
 }
 
 async function ensureBootstrapData() {
@@ -455,11 +547,21 @@ async function getSocialSnapshot(userId) {
     }),
     prisma.directConversation.findMany({
       where: {
-        OR: [{ userOneId: userId }, { userTwoId: userId }]
+        OR: [
+          { userOneId: userId },
+          { userTwoId: userId },
+          { members: { some: { userId } } }
+        ]
       },
       include: {
         userOne: { select: publicUserSelect },
         userTwo: { select: publicUserSelect },
+        members: {
+          include: {
+            user: { select: publicUserSelect }
+          },
+          orderBy: { joinedAt: 'asc' }
+        },
         messages: {
           orderBy: { createdAt: 'desc' },
           take: 1,
@@ -484,6 +586,72 @@ function emitSocialRefresh(userIds) {
   uniqueUserIds.forEach((userId) => {
     io.to(`user:${userId}`).emit('social:refresh');
   });
+}
+
+function serializeCallSession(call) {
+  if (!call) return null;
+  return {
+    id: call.id,
+    conversationId: call.conversationId,
+    title: call.title,
+    video: Boolean(call.video),
+    callerId: call.callerId,
+    memberIds: call.memberIds,
+    status: call.status,
+    createdAt: call.createdAt
+  };
+}
+
+function getCallRoomKey(callId) {
+  const value = String(callId || '').trim();
+  return value ? `call:${value}` : '';
+}
+
+function getCallParticipantList(roomKey) {
+  const participants = callParticipants.get(roomKey) || new Map();
+  return Array.from(participants.entries()).map(([socketId, participant]) => serializeVoiceParticipant(socketId, participant));
+}
+
+function leaveCallRoom(socket) {
+  const roomKey = socket.data.callRoomKey;
+  if (!roomKey) return;
+  const callId = socket.data.callId;
+
+  socket.leave(roomKey);
+
+  const participants = callParticipants.get(roomKey);
+  if (participants) {
+    participants.delete(socket.id);
+    if (participants.size === 0) {
+      callParticipants.delete(roomKey);
+      if (callId) callSessions.delete(callId);
+    }
+  }
+
+  socket.to(roomKey).emit('call-user-left', { socketId: socket.id, username: socket.user.username });
+  delete socket.data.callRoomKey;
+  delete socket.data.callId;
+}
+
+function emitCallSignal(socket, eventName, { callId, targetSocketId, ...payload }) {
+  const roomKey = getCallRoomKey(callId);
+  if (!roomKey || socket.data.callRoomKey !== roomKey) return;
+
+  const signalPayload = {
+    ...payload,
+    callId,
+    fromSocketId: socket.id,
+    targetSocketId
+  };
+
+  if (targetSocketId) {
+    const targetSocket = io.sockets.sockets.get(targetSocketId);
+    if (!targetSocket || targetSocket.data.callRoomKey !== roomKey) return;
+    io.to(targetSocketId).emit(eventName, signalPayload);
+    return;
+  }
+
+  socket.to(roomKey).emit(eventName, signalPayload);
 }
 
 async function createChannelMessage({ channelId, userId, content, attachmentUrl, attachmentType, attachmentName, replyToId }) {
@@ -532,10 +700,17 @@ async function createChannelMessage({ channelId, userId, content, attachmentUrl,
 
 async function createDirectConversationMessage({ conversationId, userId, content, attachmentUrl, attachmentType, attachmentName, replyToId }) {
   const conversation = await prisma.directConversation.findUnique({
-    where: { id: conversationId }
+    where: { id: conversationId },
+    include: {
+      members: {
+        include: {
+          user: { select: publicUserSelect }
+        }
+      }
+    }
   });
 
-  if (!conversation || ![conversation.userOneId, conversation.userTwoId].includes(userId)) {
+  if (!conversation || !getConversationMemberIds(conversation).includes(userId)) {
     return { conversation: null, message: null };
   }
 
@@ -809,6 +984,104 @@ app.patch('/api/me/profile', authMiddleware, async (req, res) => {
   }
 });
 
+app.get('/api/stories', authMiddleware, async (req, res) => {
+  try {
+    const now = new Date();
+    const friendRows = await prisma.friendship.findMany({
+      where: {
+        OR: [{ userOneId: req.user.userId }, { userTwoId: req.user.userId }]
+      },
+      select: { userOneId: true, userTwoId: true }
+    });
+    const visibleAuthorIds = [
+      req.user.userId,
+      ...friendRows.map((row) => row.userOneId === req.user.userId ? row.userTwoId : row.userOneId)
+    ];
+    const stories = await prisma.story.findMany({
+      where: {
+        expiresAt: { gt: now },
+        authorId: { in: [...new Set(visibleAuthorIds)] }
+      },
+      include: {
+        author: { select: publicUserSelect },
+        views: true
+      },
+      orderBy: [{ createdAt: 'desc' }]
+    });
+    return res.json(stories.map((story) => serializeStory(story, req.user.userId)));
+  } catch (error) {
+    console.error(error);
+    return sendApiError(res, 500, 'STORIES_FETCH_FAILED', 'Failed to fetch stories');
+  }
+});
+
+app.post('/api/stories', authMiddleware, async (req, res) => {
+  try {
+    const mediaUrl = String(req.body.mediaUrl || '').trim();
+    const caption = String(req.body.caption || '').trim().slice(0, 180);
+    const mediaType = normalizeStoryMediaType(req.body.mediaType, mediaUrl);
+    if (!mediaUrl) {
+      return sendApiError(res, 400, 'STORY_MEDIA_REQUIRED', 'Story media is required');
+    }
+
+    const story = await prisma.story.create({
+      data: {
+        authorId: req.user.userId,
+        mediaUrl,
+        mediaType,
+        caption,
+        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000)
+      },
+      include: {
+        author: { select: publicUserSelect },
+        views: true
+      }
+    });
+
+    io.to(`user:${req.user.userId}`).emit('stories:refresh');
+    return res.status(201).json(serializeStory(story, req.user.userId));
+  } catch (error) {
+    console.error(error);
+    return sendApiError(res, 500, 'STORY_CREATE_FAILED', 'Failed to create story');
+  }
+});
+
+app.post('/api/stories/:storyId/view', authMiddleware, async (req, res) => {
+  try {
+    const storyId = Number(req.params.storyId);
+    if (!storyId || Number.isNaN(storyId)) {
+      return sendApiError(res, 400, 'INVALID_STORY_ID', 'Invalid story id');
+    }
+
+    const story = await prisma.story.findFirst({
+      where: { id: storyId, expiresAt: { gt: new Date() } },
+      select: { id: true }
+    });
+    if (!story) {
+      return sendApiError(res, 404, 'STORY_NOT_FOUND', 'Story not found');
+    }
+
+    await prisma.storyView.upsert({
+      where: {
+        storyId_viewerId: {
+          storyId,
+          viewerId: req.user.userId
+        }
+      },
+      create: {
+        storyId,
+        viewerId: req.user.userId
+      },
+      update: { viewedAt: new Date() }
+    });
+
+    return res.json({ ok: true });
+  } catch (error) {
+    console.error(error);
+    return sendApiError(res, 500, 'STORY_VIEW_FAILED', 'Failed to mark story as viewed');
+  }
+});
+
 app.get('/api/social', authMiddleware, async (req, res) => {
   try {
     return res.json(await getSocialSnapshot(req.user.userId));
@@ -944,7 +1217,17 @@ app.post('/api/friends/respond', authMiddleware, async (req, res) => {
 
         await tx.directConversation.upsert({
           where: { userOneId_userTwoId: { userOneId, userTwoId } },
-          create: { userOneId, userTwoId },
+          create: {
+            type: 'DIRECT',
+            userOneId,
+            userTwoId,
+            members: {
+              create: [
+                { userId: userOneId },
+                { userId: userTwoId }
+              ]
+            }
+          },
           update: {}
         });
       }
@@ -983,11 +1266,27 @@ app.post('/api/dms/open', authMiddleware, async (req, res) => {
 
     const conversation = await prisma.directConversation.upsert({
       where: { userOneId_userTwoId: { userOneId, userTwoId } },
-      create: { userOneId, userTwoId },
+      create: {
+        type: 'DIRECT',
+        userOneId,
+        userTwoId,
+        members: {
+          create: [
+            { userId: userOneId },
+            { userId: userTwoId }
+          ]
+        }
+      },
       update: {},
       include: {
         userOne: { select: publicUserSelect },
         userTwo: { select: publicUserSelect },
+        members: {
+          include: {
+            user: { select: publicUserSelect }
+          },
+          orderBy: { joinedAt: 'asc' }
+        },
         messages: {
           orderBy: { createdAt: 'desc' },
           take: 1,
@@ -1006,6 +1305,196 @@ app.post('/api/dms/open', authMiddleware, async (req, res) => {
   }
 });
 
+app.post('/api/groups', authMiddleware, async (req, res) => {
+  try {
+    const currentUserId = req.user.userId;
+    const title = String(req.body.title || '').trim().slice(0, 80);
+    const avatarUrl = req.body.avatarUrl ? String(req.body.avatarUrl).trim() : null;
+    const requestedIds = Array.isArray(req.body.userIds)
+      ? req.body.userIds.map((value) => Number(value)).filter((value) => value && !Number.isNaN(value))
+      : [];
+    const memberIds = [...new Set([currentUserId, ...requestedIds])];
+
+    if (!title) {
+      return sendApiError(res, 400, 'GROUP_TITLE_REQUIRED', 'Group title is required');
+    }
+
+    if (memberIds.length < 3) {
+      return sendApiError(res, 400, 'GROUP_MEMBERS_REQUIRED', 'Choose at least two friends for a group');
+    }
+
+    if (memberIds.length > 50) {
+      return sendApiError(res, 400, 'GROUP_TOO_LARGE', 'Groups are limited to 50 members');
+    }
+
+    const requestedFriendIds = memberIds.filter((userId) => userId !== currentUserId);
+    const friendships = await prisma.friendship.findMany({
+      where: {
+        OR: requestedFriendIds.flatMap((friendId) => {
+          const [userOneId, userTwoId] = normalizeUserPair(currentUserId, friendId);
+          return [{ userOneId, userTwoId }];
+        })
+      }
+    });
+
+    if (friendships.length !== requestedFriendIds.length) {
+      return sendApiError(res, 403, 'GROUP_FRIENDS_ONLY', 'Groups can only include friends');
+    }
+
+    const conversation = await prisma.directConversation.create({
+      data: {
+        type: 'GROUP',
+        title,
+        avatarUrl,
+        ownerId: currentUserId,
+        members: {
+          create: memberIds.map((userId) => ({
+            userId,
+            role: userId === currentUserId ? 'OWNER' : 'MEMBER'
+          }))
+        }
+      },
+      include: {
+        userOne: { select: publicUserSelect },
+        userTwo: { select: publicUserSelect },
+        members: {
+          include: {
+            user: { select: publicUserSelect }
+          },
+          orderBy: { joinedAt: 'asc' }
+        },
+        messages: {
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+          include: {
+            author: { select: publicUserSelect }
+          }
+        }
+      }
+    });
+
+    emitSocialRefresh(memberIds);
+    return res.status(201).json(serializeDirectConversation(conversation, currentUserId));
+  } catch (error) {
+    console.error(error);
+    return sendCaughtApiError(res, error, 'GROUP_CREATE_FAILED', 'Failed to create group');
+  }
+});
+
+app.post('/api/dms/:conversationId/calls', authMiddleware, async (req, res) => {
+  try {
+    const conversationId = Number(req.params.conversationId);
+    if (!conversationId || Number.isNaN(conversationId)) {
+      return sendApiError(res, 400, 'INVALID_CONVERSATION_ID', 'Invalid conversation id');
+    }
+
+    const conversation = await prisma.directConversation.findUnique({
+      where: { id: conversationId },
+      include: {
+        userOne: { select: publicUserSelect },
+        userTwo: { select: publicUserSelect },
+        members: {
+          include: {
+            user: { select: publicUserSelect }
+          },
+          orderBy: { joinedAt: 'asc' }
+        },
+        messages: {
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+          include: {
+            author: { select: publicUserSelect }
+          }
+        }
+      }
+    });
+
+    if (!conversation || !getConversationMemberIds(conversation).includes(req.user.userId)) {
+      return sendApiError(res, 404, 'CONVERSATION_NOT_FOUND', 'Conversation not found');
+    }
+
+    const serialized = serializeDirectConversation(conversation, req.user.userId);
+    const call = {
+      id: crypto.randomUUID(),
+      conversationId,
+      title: serialized.title,
+      video: booleanFromPayload(req.body.video),
+      callerId: req.user.userId,
+      memberIds: getConversationMemberIds(conversation),
+      status: 'RINGING',
+      createdAt: new Date().toISOString()
+    };
+    callSessions.set(call.id, call);
+
+    const payload = serializeCallSession(call);
+    call.memberIds.forEach((userId) => {
+      io.to(`user:${userId}`).emit(userId === req.user.userId ? 'call:outgoing' : 'call:incoming', payload);
+    });
+
+    return res.status(201).json(payload);
+  } catch (error) {
+    console.error(error);
+    return sendApiError(res, 500, 'CALL_START_FAILED', 'Failed to start call');
+  }
+});
+
+app.post('/api/calls/:callId/respond', authMiddleware, async (req, res) => {
+  try {
+    const callId = String(req.params.callId || '').trim();
+    const action = String(req.body.action || '').toUpperCase();
+    const call = callSessions.get(callId);
+
+    if (!call || !call.memberIds.includes(req.user.userId)) {
+      return sendApiError(res, 404, 'CALL_NOT_FOUND', 'Call not found');
+    }
+
+    if (!['ACCEPT', 'DECLINE'].includes(action)) {
+      return sendApiError(res, 400, 'INVALID_CALL_ACTION', 'Invalid call action');
+    }
+
+    if (action === 'ACCEPT') {
+      call.status = 'ACTIVE';
+      callSessions.set(call.id, call);
+      const payload = serializeCallSession(call);
+      call.memberIds.forEach((userId) => io.to(`user:${userId}`).emit('call:accepted', payload));
+      return res.json(payload);
+    }
+
+    io.to(`user:${call.callerId}`).emit('call:declined', {
+      ...serializeCallSession(call),
+      declinedBy: req.user.userId
+    });
+    return res.json({ ok: true });
+  } catch (error) {
+    console.error(error);
+    return sendApiError(res, 500, 'CALL_RESPONSE_FAILED', 'Failed to respond to call');
+  }
+});
+
+app.post('/api/calls/:callId/end', authMiddleware, async (req, res) => {
+  try {
+    const callId = String(req.params.callId || '').trim();
+    const call = callSessions.get(callId);
+    if (!call || !call.memberIds.includes(req.user.userId)) {
+      return sendApiError(res, 404, 'CALL_NOT_FOUND', 'Call not found');
+    }
+
+    const payload = {
+      ...serializeCallSession(call),
+      endedBy: req.user.userId
+    };
+    call.memberIds.forEach((userId) => io.to(`user:${userId}`).emit('call:ended', payload));
+    const roomKey = getCallRoomKey(callId);
+    io.to(roomKey).emit('call:ended', payload);
+    callSessions.delete(callId);
+    callParticipants.delete(roomKey);
+    return res.json({ ok: true });
+  } catch (error) {
+    console.error(error);
+    return sendApiError(res, 500, 'CALL_END_FAILED', 'Failed to end call');
+  }
+});
+
 app.get('/api/dms/:conversationId/messages', authMiddleware, async (req, res) => {
   try {
     const conversationId = Number(req.params.conversationId);
@@ -1016,10 +1505,13 @@ app.get('/api/dms/:conversationId/messages', authMiddleware, async (req, res) =>
     }
 
     const conversation = await prisma.directConversation.findUnique({
-      where: { id: conversationId }
+      where: { id: conversationId },
+      include: {
+        members: true
+      }
     });
 
-    if (!conversation || ![conversation.userOneId, conversation.userTwoId].includes(currentUserId)) {
+    if (!conversation || !getConversationMemberIds(conversation).includes(currentUserId)) {
       return res.status(404).json({ error: 'Conversation not found' });
     }
 
@@ -1229,7 +1721,7 @@ app.post('/api/dms/:conversationId/messages', authMiddleware, messageRateLimit, 
       ...message,
       conversationId
     });
-    emitSocialRefresh([conversation.userOneId, conversation.userTwoId]);
+    emitSocialRefresh(getConversationMemberIds(conversation));
 
     return res.status(201).json({
       ...message,
@@ -1323,11 +1815,14 @@ app.patch('/api/dms/:conversationId/messages/:messageId', authMiddleware, messag
       return sendApiError(res, 400, 'MESSAGE_EMPTY', 'Message content is required');
     }
 
-    const conversation = await prisma.directConversation.findUnique({ where: { id: conversationId } });
+    const conversation = await prisma.directConversation.findUnique({
+      where: { id: conversationId },
+      include: { members: true }
+    });
     const existing = await prisma.directMessage.findUnique({ where: { id: messageId } });
     if (
       !conversation ||
-      ![conversation.userOneId, conversation.userTwoId].includes(req.user.userId) ||
+      !getConversationMemberIds(conversation).includes(req.user.userId) ||
       !existing ||
       existing.conversationId !== conversationId ||
       existing.authorId !== req.user.userId ||
@@ -1346,7 +1841,7 @@ app.patch('/api/dms/:conversationId/messages/:messageId', authMiddleware, messag
     });
 
     io.to(`dm:${conversationId}`).emit('direct-message:updated', { ...message, conversationId });
-    emitSocialRefresh([conversation.userOneId, conversation.userTwoId]);
+    emitSocialRefresh(getConversationMemberIds(conversation));
     return res.json({ ...message, conversationId });
   } catch (error) {
     console.error(error);
@@ -1363,11 +1858,14 @@ app.delete('/api/dms/:conversationId/messages/:messageId', authMiddleware, messa
       return sendApiError(res, 400, 'INVALID_MESSAGE_ID', 'Invalid message id');
     }
 
-    const conversation = await prisma.directConversation.findUnique({ where: { id: conversationId } });
+    const conversation = await prisma.directConversation.findUnique({
+      where: { id: conversationId },
+      include: { members: true }
+    });
     const existing = await prisma.directMessage.findUnique({ where: { id: messageId } });
     if (
       !conversation ||
-      ![conversation.userOneId, conversation.userTwoId].includes(req.user.userId) ||
+      !getConversationMemberIds(conversation).includes(req.user.userId) ||
       !existing ||
       existing.conversationId !== conversationId ||
       existing.authorId !== req.user.userId
@@ -1391,7 +1889,7 @@ app.delete('/api/dms/:conversationId/messages/:messageId', authMiddleware, messa
     });
 
     io.to(`dm:${conversationId}`).emit('direct-message:updated', { ...message, conversationId });
-    emitSocialRefresh([conversation.userOneId, conversation.userTwoId]);
+    emitSocialRefresh(getConversationMemberIds(conversation));
     return res.json({ ...message, conversationId });
   } catch (error) {
     console.error(error);
@@ -1463,6 +1961,7 @@ function serializeVoiceParticipant(socketId, participant = {}) {
     socketId,
     userId: participant.userId,
     username: participant.username,
+    user: serializePublicUser(participant.user),
     muted: Boolean(participant.muted),
     camera: Boolean(participant.camera),
     screen: Boolean(participant.screen),
@@ -1536,10 +2035,11 @@ io.on('connection', (socket) => {
       if (!parsedConversationId || Number.isNaN(parsedConversationId)) return;
 
       const conversation = await prisma.directConversation.findUnique({
-        where: { id: parsedConversationId }
+        where: { id: parsedConversationId },
+        include: { members: true }
       });
 
-      if (!conversation || ![conversation.userOneId, conversation.userTwoId].includes(socket.user.userId)) {
+      if (!conversation || !getConversationMemberIds(conversation).includes(socket.user.userId)) {
         return;
       }
 
@@ -1633,17 +2133,101 @@ io.on('connection', (socket) => {
         ...message,
         conversationId
       });
-      [conversation.userOneId, conversation.userTwoId].forEach((userId) => {
+      getConversationMemberIds(conversation).forEach((userId) => {
         io.to(`user:${userId}`).emit('direct-message:notify', {
           ...message,
           conversationId
         });
       });
-      emitSocialRefresh([conversation.userOneId, conversation.userTwoId]);
+      emitSocialRefresh(getConversationMemberIds(conversation));
     } catch (error) {
       console.error(error);
       socket.emit('socket-error', { code: error?.code, error: error?.message || 'Failed to send direct message' });
     }
+  });
+
+  socket.on('join-call', async ({ callId }) => {
+    try {
+      const parsedCallId = String(callId || '').trim();
+      const call = callSessions.get(parsedCallId);
+      if (!call || !call.memberIds.includes(socket.user.userId)) {
+        socket.emit('socket-error', { error: 'Call not found' });
+        return;
+      }
+
+      const participantUser = await prisma.user.findUnique({
+        where: { id: socket.user.userId },
+        select: publicUserSelect
+      });
+
+      leaveCallRoom(socket);
+
+      const roomKey = getCallRoomKey(parsedCallId);
+      socket.join(roomKey);
+      socket.emit('call-participants', {
+        callId: parsedCallId,
+        participants: getCallParticipantList(roomKey)
+      });
+
+      const participants = callParticipants.get(roomKey) || new Map();
+      participants.set(socket.id, {
+        userId: socket.user.userId,
+        username: socket.user.username,
+        user: participantUser,
+        muted: false,
+        camera: false,
+        screen: false,
+        speaking: false
+      });
+      callParticipants.set(roomKey, participants);
+      socket.data.callRoomKey = roomKey;
+      socket.data.callId = parsedCallId;
+      call.status = 'ACTIVE';
+      callSessions.set(call.id, call);
+
+      socket.to(roomKey).emit('call-user-joined', {
+        callId: parsedCallId,
+        participant: serializeVoiceParticipant(socket.id, participants.get(socket.id))
+      });
+    } catch (error) {
+      console.error(error);
+      socket.emit('socket-error', { error: 'Failed to join call' });
+    }
+  });
+
+  socket.on('leave-call', () => leaveCallRoom(socket));
+
+  socket.on('call-state', (payload = {}) => {
+    const roomKey = socket.data.callRoomKey;
+    const callId = socket.data.callId;
+    if (!roomKey || !callId) return;
+
+    const participants = callParticipants.get(roomKey);
+    const participant = participants?.get(socket.id);
+    if (!participants || !participant) return;
+
+    participant.muted = booleanFromPayload(payload.muted);
+    participant.camera = booleanFromPayload(payload.camera);
+    participant.screen = booleanFromPayload(payload.screen);
+    participant.speaking = booleanFromPayload(payload.speaking);
+    participants.set(socket.id, participant);
+
+    io.to(roomKey).emit('call-state', {
+      callId,
+      participant: serializeVoiceParticipant(socket.id, participant)
+    });
+  });
+
+  socket.on('call-offer', ({ callId, offer, targetSocketId }) => {
+    emitCallSignal(socket, 'call-offer', { callId, offer, targetSocketId });
+  });
+
+  socket.on('call-answer', ({ callId, answer, targetSocketId }) => {
+    emitCallSignal(socket, 'call-answer', { callId, answer, targetSocketId });
+  });
+
+  socket.on('call-ice-candidate', ({ callId, candidate, targetSocketId }) => {
+    emitCallSignal(socket, 'call-ice-candidate', { callId, candidate, targetSocketId });
   });
 
   socket.on('join-voice', async ({ channelId }) => {
@@ -1661,6 +2245,11 @@ io.on('connection', (socket) => {
         return;
       }
 
+      const participantUser = await prisma.user.findUnique({
+        where: { id: socket.user.userId },
+        select: publicUserSelect
+      });
+
       leaveVoiceRoom(socket);
 
       const roomKey = getVoiceRoomKey(parsedChannelId);
@@ -1671,6 +2260,7 @@ io.on('connection', (socket) => {
       participants.set(socket.id, {
         userId: socket.user.userId,
         username: socket.user.username,
+        user: participantUser,
         muted: false,
         camera: false,
         screen: false,
@@ -1717,7 +2307,10 @@ io.on('connection', (socket) => {
     emitVoiceSignal(socket, 'voice-ice-candidate', { channelId, candidate, targetSocketId });
   });
 
-  socket.on('disconnect', () => leaveVoiceRoom(socket));
+  socket.on('disconnect', () => {
+    leaveCallRoom(socket);
+    leaveVoiceRoom(socket);
+  });
 });
 
 await prisma.$connect();

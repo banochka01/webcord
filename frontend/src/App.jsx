@@ -124,6 +124,19 @@ function getUsernameTag(user) {
   return user?.username ? `@${user.username}` : '@webcord';
 }
 
+function getConversationTitle(conversation = {}) {
+  if (conversation.type === 'GROUP') return conversation.title || 'Group chat';
+  return getDisplayName(conversation.user);
+}
+
+function getConversationSubtitle(conversation = {}) {
+  if (conversation.type === 'GROUP') {
+    const count = Number(conversation.memberCount || conversation.members?.length || 0);
+    return `${count || 1} members`;
+  }
+  return getUsernameTag(conversation.user);
+}
+
 function normalizeProfileAccent(value) {
   const next = String(value || '').trim();
   return /^#[0-9a-fA-F]{6}$/.test(next) ? next.toLowerCase() : DEFAULT_PROFILE_ACCENT;
@@ -1500,7 +1513,7 @@ export default function App() {
   const filteredConversations = social.conversations.filter((conversation) => {
     const query = dmSearch.trim().toLowerCase();
     if (!query) return true;
-    return `${getDisplayName(conversation.user)} ${conversation.user?.username || ''} ${conversation.user?.statusText || ''} ${conversation.lastMessage?.content || ''} ${conversation.lastMessage?.attachmentName || ''}`.toLowerCase().includes(query);
+    return `${getConversationTitle(conversation)} ${getConversationSubtitle(conversation)} ${conversation.user?.username || ''} ${conversation.user?.statusText || ''} ${conversation.lastMessage?.content || ''} ${conversation.lastMessage?.attachmentName || ''}`.toLowerCase().includes(query);
   });
   const incomingRequests = social.requests.filter((item) => item.direction === 'INCOMING' && item.status === 'PENDING');
   const outgoingRequests = social.requests.filter((item) => item.direction === 'OUTGOING' && item.status === 'PENDING');
@@ -3157,7 +3170,7 @@ export default function App() {
               <section className="sidebar-card">
                 <p className="section-label">Direct messages</p>
                 <input value={dmSearch} onChange={(e) => setDmSearch(e.target.value)} placeholder="Search DMs" />
-                {social.conversations.length === 0 ? <p className="muted">Accept a friend request to unlock DMs.</p> : filteredConversations.map((conversation) => <button key={conversation.id} className={String(conversation.id) === String(dmConversationId) ? 'channel-btn active conversation-btn' : 'channel-btn conversation-btn'} type="button" onClick={() => selectConversation(conversation.id)}><strong>{getDisplayName(conversation.user)}</strong><span>{getUsernameTag(conversation.user)} - {conversation.lastMessage?.content || conversation.lastMessage?.attachmentName || 'Start talking'}</span></button>)}
+                {social.conversations.length === 0 ? <p className="muted">Accept a friend request to unlock DMs.</p> : filteredConversations.map((conversation) => <button key={conversation.id} className={String(conversation.id) === String(dmConversationId) ? 'channel-btn active conversation-btn' : 'channel-btn conversation-btn'} type="button" onClick={() => selectConversation(conversation.id)}><strong>{getConversationTitle(conversation)}</strong><span>{getConversationSubtitle(conversation)} - {conversation.lastMessage?.content || conversation.lastMessage?.attachmentName || 'Start talking'}</span></button>)}
                 {social.conversations.length > 0 && filteredConversations.length === 0 ? <p className="muted">No DMs match this search.</p> : null}
               </section>
               <section className="sidebar-card">
@@ -3239,7 +3252,7 @@ export default function App() {
               </section>
               <section className="dashboard-card">
                 <p className="section-label">Direct conversations</p>
-                {social.conversations.length === 0 ? <p className="muted">No conversations yet.</p> : social.conversations.map((conversation) => <button key={conversation.id} className="channel-btn conversation-btn" type="button" onClick={() => selectConversation(conversation.id)}><strong>{getDisplayName(conversation.user)}</strong><span>{getUsernameTag(conversation.user)} - {conversation.lastMessage?.content || conversation.lastMessage?.attachmentName || 'Conversation ready'}</span></button>)}
+                {social.conversations.length === 0 ? <p className="muted">No conversations yet.</p> : social.conversations.map((conversation) => <button key={conversation.id} className="channel-btn conversation-btn" type="button" onClick={() => selectConversation(conversation.id)}><strong>{getConversationTitle(conversation)}</strong><span>{getConversationSubtitle(conversation)} - {conversation.lastMessage?.content || conversation.lastMessage?.attachmentName || 'Conversation ready'}</span></button>)}
               </section>
             </div>
           ) : (

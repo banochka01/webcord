@@ -33,6 +33,7 @@ class VoiceVideoFeed {
     required this.renderer,
     this.local = false,
     this.screen = false,
+    this.speaking = false,
   });
 
   final String id;
@@ -40,6 +41,7 @@ class VoiceVideoFeed {
   final RTCVideoRenderer renderer;
   final bool local;
   final bool screen;
+  final bool speaking;
 }
 
 class VoiceQualityStats {
@@ -98,6 +100,7 @@ class WebCordState extends ChangeNotifier {
   final Map<String, RTCPeerConnection> _peers = {};
   final Map<String, List<RTCIceCandidate>> _pendingIceCandidates = {};
   final Map<String, MediaStream> _remoteStreams = {};
+  final Map<String, int> _participantVolumes = {};
   final Map<String, RTCVideoRenderer> remoteRenderers = {};
   List<Map<String, dynamic>> _iceServers = const [
     {'urls': 'stun:stun.l.google.com:19302'},
@@ -117,6 +120,7 @@ class WebCordState extends ChangeNotifier {
   SocialSnapshot social = const SocialSnapshot();
   List<ChatMessage> messages = [];
   List<VoiceParticipant> voiceParticipants = [];
+  List<StoryItem> stories = [];
   List<ClientMediaDevice> mediaDevices = [];
   final Set<int> unreadChannelIds = {};
   final Set<int> unreadConversationIds = {};
@@ -126,6 +130,8 @@ class WebCordState extends ChangeNotifier {
   int? selectedVoiceChannelId;
   int? selectedConversationId;
   AttachmentUpload? pendingAttachment;
+  CallSession? activeCall;
+  CallSession? incomingCall;
   AppThemeMode themeMode = AppThemeMode.nebula;
   String selectedMicDeviceId = '';
   String selectedOutputDeviceId = '';
@@ -185,6 +191,7 @@ class WebCordState extends ChangeNotifier {
           renderer: localScreenRenderer,
           local: true,
           screen: true,
+          speaking: voiceQuality.speaking,
         ),
       );
     }
@@ -195,6 +202,7 @@ class WebCordState extends ChangeNotifier {
           label: 'You',
           renderer: localCameraRenderer,
           local: true,
+          speaking: voiceQuality.speaking,
         ),
       );
     }
@@ -203,8 +211,9 @@ class WebCordState extends ChangeNotifier {
       feeds.add(
         VoiceVideoFeed(
           id: entry.key,
-          label: participant?.username ?? 'Participant',
+          label: participant?.displayLabel ?? 'Participant',
           renderer: entry.value,
+          speaking: participant?.speaking ?? false,
         ),
       );
     }
@@ -219,6 +228,9 @@ class WebCordState extends ChangeNotifier {
 
   Channel? get activeTextChannel => _findChannel(selectedTextChannelId);
   Channel? get activeVoiceChannel => _findChannel(selectedVoiceChannelId);
+  bool get inDirectCall => activeCall != null;
+  String get activeVoiceTitle =>
+      activeCall?.title ?? activeVoiceChannel?.name ?? 'Voice room';
 
   DirectConversation? get activeConversation {
     for (final conversation in social.conversations) {
@@ -227,10 +239,24 @@ class WebCordState extends ChangeNotifier {
     return null;
   }
 
+  bool isFriendUser(int userId) {
+    return social.friends.any((friend) => friend.user.id == userId);
+  }
+
+  Friendship? friendshipForUser(int userId) {
+    for (final friend in social.friends) {
+      if (friend.user.id == userId) return friend;
+    }
+    return null;
+  }
+
   String get title {
     if (workspace == WorkspaceKind.friends) return 'Friends';
+    if (workspace == WorkspaceKind.calls) return 'Calls';
+    if (workspace == WorkspaceKind.stories) return 'Stories';
+    if (workspace == WorkspaceKind.profile) return 'Profile';
     if (workspace == WorkspaceKind.direct) {
-      return '@ ${activeConversation?.user.displayLabel ?? 'Direct messages'}';
+      return activeConversation?.displayTitle ?? 'Direct messages';
     }
     return '# ${activeTextChannel?.name ?? 'lobby'}';
   }
@@ -238,6 +264,17 @@ class WebCordState extends ChangeNotifier {
   String get subtitle {
     if (workspace == WorkspaceKind.friends) {
       return '${social.friends.length} friends, ${social.requests.where((r) => r.isPending).length} requests';
+    }
+    if (workspace == WorkspaceKind.calls) {
+      return activeCall == null
+          ? 'Private and group calls'
+          : 'In $activeVoiceTitle';
+    }
+    if (workspace == WorkspaceKind.stories) {
+      return '${stories.length} active stories';
+    }
+    if (workspace == WorkspaceKind.profile) {
+      return user?.statusText ?? 'Edit your WebCord identity';
     }
     if (workspace == WorkspaceKind.direct) {
       return 'Private messages synced through WebCord';
@@ -318,6 +355,9 @@ class WebCordState extends ChangeNotifier {
     social = const SocialSnapshot();
     messages = [];
     voiceParticipants = [];
+    stories = [];
+    activeCall = null;
+    incomingCall = null;
     unreadChannelIds.clear();
     unreadConversationIds.clear();
     voiceJoined = false;
@@ -383,6 +423,7 @@ class WebCordState extends ChangeNotifier {
 
     _connectSocket(currentToken);
     unawaited(refreshMediaDevices());
+    unawaited(refreshStories());
     if (workspace == WorkspaceKind.direct && selectedConversationId != null) {
       await loadDirectMessages(selectedConversationId!);
     } else {
@@ -399,6 +440,18 @@ class WebCordState extends ChangeNotifier {
         _validConversationId(selectedConversationId) ??
         social.conversations.firstOrNull?.id;
     notifyListeners();
+  }
+
+  Future<void> refreshStories() async {
+    final currentToken = token;
+    if (currentToken == null) return;
+    try {
+      stories = await api.stories(currentToken);
+      notifyListeners();
+    } catch (exception) {
+      error = '$exception';
+      notifyListeners();
+    }
   }
 
   Future<void> loadChannelMessages(int? channelId) async {
@@ -425,6 +478,15 @@ class WebCordState extends ChangeNotifier {
     } else if (next == WorkspaceKind.direct && selectedConversationId != null) {
       await loadDirectMessages(selectedConversationId!);
       _joinRooms();
+    } else if (next == WorkspaceKind.stories) {
+      await refreshStories();
+      messages = [];
+      notifyListeners();
+    } else if (next == WorkspaceKind.calls ||
+        next == WorkspaceKind.profile ||
+        next == WorkspaceKind.friends) {
+      messages = [];
+      notifyListeners();
     } else {
       messages = [];
       notifyListeners();
@@ -442,7 +504,7 @@ class WebCordState extends ChangeNotifier {
   Future<void> selectVoiceChannel(int channelId) async {
     selectedVoiceChannelId = channelId;
     await _store?.setInt(_voiceChannelKey, channelId);
-    if (voiceJoined) {
+    if (voiceJoined && activeCall == null) {
       _socket?.emit('join-voice', {'channelId': channelId});
       voiceStatus = 'Joining ${activeVoiceChannel?.name ?? 'voice'}';
       notifyListeners();
@@ -578,6 +640,8 @@ class WebCordState extends ChangeNotifier {
         bannerUrl: kind == ProfileAssetKind.banner
             ? uploaded.url
             : currentUser.bannerUrl,
+        favoriteTrackUrl: currentUser.favoriteTrackUrl,
+        favoriteTrackName: currentUser.favoriteTrackName,
       );
     } catch (exception) {
       error = '$exception';
@@ -595,9 +659,12 @@ class WebCordState extends ChangeNotifier {
     required String accentColor,
     String? avatarUrl,
     String? bannerUrl,
+    String? favoriteTrackUrl,
+    String? favoriteTrackName,
   }) async {
     final currentToken = token;
     if (currentToken == null || profileSaving) return;
+    final currentUser = user;
 
     profileSaving = true;
     error = null;
@@ -613,12 +680,55 @@ class WebCordState extends ChangeNotifier {
         accentColor: _normalizeAccentColor(accentColor),
         avatarUrl: avatarUrl,
         bannerUrl: bannerUrl,
+        favoriteTrackUrl: favoriteTrackUrl ?? currentUser?.favoriteTrackUrl,
+        favoriteTrackName: favoriteTrackName ?? currentUser?.favoriteTrackName,
       );
       social = await api.social(currentToken);
     } catch (exception) {
       error = '$exception';
     } finally {
       profileSaving = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> uploadFavoriteTrack() async {
+    final currentToken = token;
+    final currentUser = user;
+    if (currentToken == null || currentUser == null || profileAssetUploading) {
+      return;
+    }
+
+    try {
+      final path = await NativeBridge.pickFile();
+      if (path == null) return;
+      if (!_looksLikeAudioFile(path)) {
+        error = 'Choose an audio file for profile track';
+        notifyListeners();
+        return;
+      }
+
+      profileAssetUploading = true;
+      notifyListeners();
+
+      final uploaded = await api.upload(currentToken, File(path));
+      await saveProfile(
+        displayName: currentUser.displayName ?? '',
+        bio: currentUser.bio,
+        statusText: currentUser.statusText,
+        favoriteTrack: currentUser.favoriteTrack.trim().isEmpty
+            ? _fileDisplayName(path)
+            : currentUser.favoriteTrack,
+        accentColor: currentUser.accentColor,
+        avatarUrl: currentUser.avatarUrl,
+        bannerUrl: currentUser.bannerUrl,
+        favoriteTrackUrl: uploaded.url,
+        favoriteTrackName: uploaded.name,
+      );
+    } catch (exception) {
+      error = '$exception';
+    } finally {
+      profileAssetUploading = false;
       notifyListeners();
     }
   }
@@ -682,12 +792,16 @@ class WebCordState extends ChangeNotifier {
   }
 
   Future<void> openDirect(Friendship friend) async {
+    await openDirectUser(friend.user);
+  }
+
+  Future<void> openDirectUser(PublicUser targetUser) async {
     final currentToken = token;
     if (currentToken == null) return;
     await _runBusy(() async {
       final conversation = await api.openDirectConversation(
         token: currentToken,
-        userId: friend.user.id,
+        userId: targetUser.id,
       );
       final conversations = [...social.conversations];
       final index = conversations.indexWhere(
@@ -705,6 +819,195 @@ class WebCordState extends ChangeNotifier {
       );
       await selectConversation(conversation.id);
     });
+  }
+
+  Future<void> createGroupConversation({
+    required String title,
+    required List<int> userIds,
+  }) async {
+    final currentToken = token;
+    if (currentToken == null || title.trim().isEmpty || userIds.length < 2) {
+      return;
+    }
+
+    await _runBusy(() async {
+      final conversation = await api.createGroupConversation(
+        token: currentToken,
+        title: title.trim(),
+        userIds: userIds,
+      );
+      final conversations = [...social.conversations]
+        ..removeWhere((item) => item.id == conversation.id)
+        ..insert(0, conversation);
+      social = SocialSnapshot(
+        friends: social.friends,
+        requests: social.requests,
+        conversations: conversations,
+      );
+      await selectConversation(conversation.id);
+    });
+  }
+
+  Future<void> createStoryFromFile({String caption = ''}) async {
+    final currentToken = token;
+    if (currentToken == null || uploading) return;
+
+    try {
+      final path = await NativeBridge.pickFile();
+      if (path == null) return;
+      if (!_looksLikeStoryFile(path)) {
+        error = 'Choose an image or video for stories';
+        notifyListeners();
+        return;
+      }
+
+      uploading = true;
+      notifyListeners();
+      final uploaded = await api.upload(currentToken, File(path));
+      if (uploaded.type != 'IMAGE' && uploaded.type != 'VIDEO') {
+        error = 'Stories support photos and videos';
+        return;
+      }
+      final story = await api.createStory(
+        token: currentToken,
+        mediaUrl: uploaded.url,
+        mediaType: uploaded.type,
+        caption: caption.trim(),
+      );
+      stories = [story, ...stories.where((item) => item.id != story.id)];
+    } catch (exception) {
+      error = '$exception';
+    } finally {
+      uploading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> markStoryViewed(StoryItem story) async {
+    final currentToken = token;
+    if (currentToken == null || story.viewed) return;
+    try {
+      await api.markStoryViewed(token: currentToken, storyId: story.id);
+      stories = [
+        for (final item in stories)
+          item.id == story.id
+              ? StoryItem(
+                  id: item.id,
+                  caption: item.caption,
+                  mediaUrl: item.mediaUrl,
+                  kind: item.kind,
+                  author: item.author,
+                  createdAt: item.createdAt,
+                  expiresAt: item.expiresAt,
+                  viewed: true,
+                  viewCount: item.viewCount,
+                )
+              : item,
+      ];
+      notifyListeners();
+    } catch (_) {}
+  }
+
+  Future<void> startDirectCall(
+    DirectConversation conversation, {
+    bool video = false,
+  }) async {
+    final currentToken = token;
+    if (currentToken == null || socketStatus != 'connected') {
+      error = 'Realtime socket is not connected yet';
+      notifyListeners();
+      return;
+    }
+
+    await _runBusy(() async {
+      final call = await api.startCall(
+        token: currentToken,
+        conversationId: conversation.id,
+        video: video,
+      );
+      await _joinCallMedia(call);
+      if (video && !cameraEnabled) {
+        await _startCamera();
+      }
+    });
+  }
+
+  Future<void> acceptIncomingCall() async {
+    final currentToken = token;
+    final call = incomingCall;
+    if (currentToken == null || call == null) return;
+
+    await _runBusy(() async {
+      final accepted = await api.respondCall(
+        token: currentToken,
+        callId: call.id,
+        accept: true,
+      );
+      incomingCall = null;
+      await _joinCallMedia(accepted.id.isEmpty ? call : accepted);
+    });
+  }
+
+  Future<void> declineIncomingCall() async {
+    final currentToken = token;
+    final call = incomingCall;
+    if (currentToken == null || call == null) return;
+
+    await _runBusy(() async {
+      await api.respondCall(
+        token: currentToken,
+        callId: call.id,
+        accept: false,
+      );
+      incomingCall = null;
+    });
+  }
+
+  Future<void> endActiveCall() async {
+    final currentToken = token;
+    final call = activeCall;
+    if (currentToken != null && call != null) {
+      await api
+          .endCall(token: currentToken, callId: call.id)
+          .catchError((_) {});
+    }
+    await _cleanupVoice(emitLeave: true);
+  }
+
+  Future<void> _joinCallMedia(CallSession call) async {
+    if (call.id.isEmpty) return;
+    if (voiceJoined) {
+      await _cleanupVoice(emitLeave: true, notify: false);
+    }
+
+    try {
+      mediaBusy = true;
+      activeCall = call;
+      error = null;
+      voiceStatus = 'Connecting call...';
+      notifyListeners();
+
+      await _prepareNativeVoiceAudio();
+      _localVoiceStream = await navigator.mediaDevices.getUserMedia({
+        'audio': _audioConstraints(),
+        'video': false,
+      });
+      await _applyLocalAudioSettings();
+      await refreshMediaDevices();
+
+      voiceJoined = true;
+      micMuted = false;
+      voiceStatus = 'Call connected';
+      _socket?.emit('join-call', {'callId': call.id});
+      _startVoiceStats();
+      _emitVoiceState();
+    } catch (exception) {
+      await _cleanupVoice(emitLeave: false);
+      error = _mediaError(exception, 'Could not access the microphone');
+    } finally {
+      mediaBusy = false;
+      notifyListeners();
+    }
   }
 
   Future<void> joinOrLeaveVoice() async {
@@ -800,6 +1103,18 @@ class WebCordState extends ChangeNotifier {
     outputVolume = value.round().clamp(0, 200).toInt();
     await _store?.setInt(_outputVolumeKey, outputVolume);
     await _applyRemoteAudioSettings();
+    notifyListeners();
+  }
+
+  int participantVolume(String socketId) =>
+      _participantVolumes[socketId] ?? 100;
+
+  Future<void> setParticipantVolume(String socketId, double value) async {
+    _participantVolumes[socketId] = value.round().clamp(0, 200).toInt();
+    final renderer = remoteRenderers[socketId];
+    if (renderer != null) {
+      await _applyRendererAudioSettings(socketId, renderer);
+    }
     notifyListeners();
   }
 
@@ -1197,11 +1512,20 @@ class WebCordState extends ChangeNotifier {
     await _addStreamTracksToPeer(peer, _screenStream);
 
     peer.onIceCandidate = (candidate) {
-      _socket?.emit('voice-ice-candidate', {
-        'channelId': selectedVoiceChannelId,
-        'candidate': candidate.toMap(),
-        'targetSocketId': socketId,
-      });
+      final call = activeCall;
+      if (call != null) {
+        _socket?.emit('call-ice-candidate', {
+          'callId': call.id,
+          'candidate': candidate.toMap(),
+          'targetSocketId': socketId,
+        });
+      } else {
+        _socket?.emit('voice-ice-candidate', {
+          'channelId': selectedVoiceChannelId,
+          'candidate': candidate.toMap(),
+          'targetSocketId': socketId,
+        });
+      }
     };
     peer.onTrack = (event) {
       final streams = event.streams;
@@ -1237,9 +1561,10 @@ class WebCordState extends ChangeNotifier {
     String socketId, {
     bool iceRestart = false,
   }) async {
+    final call = activeCall;
     if (!voiceJoined ||
         _localVoiceStream == null ||
-        selectedVoiceChannelId == null) {
+        (call == null && selectedVoiceChannelId == null)) {
       return;
     }
     final peer = await _getOrCreatePeer(socketId);
@@ -1248,11 +1573,19 @@ class WebCordState extends ChangeNotifier {
     );
     await peer.setLocalDescription(offer);
     final localDescription = await peer.getLocalDescription();
-    _socket?.emit('voice-offer', {
-      'channelId': selectedVoiceChannelId,
-      'offer': localDescription?.toMap() ?? offer.toMap(),
-      'targetSocketId': socketId,
-    });
+    if (call != null) {
+      _socket?.emit('call-offer', {
+        'callId': call.id,
+        'offer': localDescription?.toMap() ?? offer.toMap(),
+        'targetSocketId': socketId,
+      });
+    } else {
+      _socket?.emit('voice-offer', {
+        'channelId': selectedVoiceChannelId,
+        'offer': localDescription?.toMap() ?? offer.toMap(),
+        'targetSocketId': socketId,
+      });
+    }
   }
 
   Future<void> _handleVoiceOffer(dynamic payload) async {
@@ -1275,11 +1608,20 @@ class WebCordState extends ChangeNotifier {
       final answer = _tuneOpusDescription(await peer.createAnswer());
       await peer.setLocalDescription(answer);
       final localDescription = await peer.getLocalDescription();
-      _socket?.emit('voice-answer', {
-        'channelId': selectedVoiceChannelId,
-        'answer': localDescription?.toMap() ?? answer.toMap(),
-        'targetSocketId': socketId,
-      });
+      final callId = '${payload['callId'] ?? activeCall?.id ?? ''}';
+      if (callId.isNotEmpty) {
+        _socket?.emit('call-answer', {
+          'callId': callId,
+          'answer': localDescription?.toMap() ?? answer.toMap(),
+          'targetSocketId': socketId,
+        });
+      } else {
+        _socket?.emit('voice-answer', {
+          'channelId': selectedVoiceChannelId,
+          'answer': localDescription?.toMap() ?? answer.toMap(),
+          'targetSocketId': socketId,
+        });
+      }
     } catch (exception) {
       error = _mediaError(exception, 'Could not answer voice call');
       await _closePeer(socketId);
@@ -1605,12 +1947,7 @@ class WebCordState extends ChangeNotifier {
     _remoteStreams[socketId] = stream;
     final renderer = await _remoteRenderer(socketId);
     renderer.srcObject = stream;
-    if (selectedOutputDeviceId.isNotEmpty) {
-      try {
-        await renderer.audioOutput(selectedOutputDeviceId);
-      } catch (_) {}
-    }
-    await renderer.setVolume(outputVolume / 100).catchError((_) {});
+    await _applyRendererAudioSettings(socketId, renderer);
     voiceStatus = 'Voice media connected';
     notifyListeners();
   }
@@ -1628,21 +1965,36 @@ class WebCordState extends ChangeNotifier {
   }
 
   Future<void> _applyRemoteAudioSettings() async {
-    for (final renderer in remoteRenderers.values) {
-      if (selectedOutputDeviceId.isNotEmpty) {
-        try {
-          await renderer.audioOutput(selectedOutputDeviceId);
-        } catch (_) {}
-      }
-      await renderer.setVolume(outputVolume / 100).catchError((_) {});
+    for (final entry in remoteRenderers.entries) {
+      await _applyRendererAudioSettings(entry.key, entry.value);
     }
+  }
+
+  Future<void> _applyRendererAudioSettings(
+    String socketId,
+    RTCVideoRenderer renderer,
+  ) async {
+    if (selectedOutputDeviceId.isNotEmpty) {
+      try {
+        await renderer.audioOutput(selectedOutputDeviceId);
+      } catch (_) {}
+    }
+    final volume = (outputVolume / 100) * (participantVolume(socketId) / 100);
+    await renderer.setVolume(volume.clamp(0.0, 4.0)).catchError((_) {});
   }
 
   Future<void> _cleanupVoice({
     required bool emitLeave,
     bool notify = true,
   }) async {
-    if (emitLeave) _socket?.emit('leave-voice');
+    final callToLeave = activeCall;
+    if (emitLeave) {
+      if (callToLeave != null) {
+        _socket?.emit('leave-call', {'callId': callToLeave.id});
+      } else {
+        _socket?.emit('leave-voice');
+      }
+    }
     _voiceStatsTimer?.cancel();
     _voiceStatsTimer = null;
     _lastVoiceStatsAt = null;
@@ -1663,10 +2015,12 @@ class WebCordState extends ChangeNotifier {
       await renderer.dispose();
     }
     remoteRenderers.clear();
+    _participantVolumes.clear();
     voiceJoined = false;
     micMuted = false;
     cameraEnabled = false;
     screenSharing = false;
+    activeCall = null;
     voiceParticipants = [];
     voiceStatus = 'Voice idle';
     voiceQuality = const VoiceQualityStats.idle();
@@ -1684,6 +2038,7 @@ class WebCordState extends ChangeNotifier {
     }
     _pendingIceCandidates.remove(socketId);
     _remoteStreams.remove(socketId);
+    _participantVolumes.remove(socketId);
     final renderer = remoteRenderers.remove(socketId);
     if (renderer != null) {
       renderer.srcObject = null;
@@ -1823,6 +2178,127 @@ class WebCordState extends ChangeNotifier {
       ..on('social:refresh', (_) {
         unawaited(refreshSocial());
       })
+      ..on('stories:refresh', (_) {
+        unawaited(refreshStories());
+      })
+      ..on('call:incoming', (payload) {
+        if (payload is Map) {
+          final call = CallSession.fromJson(Map<String, dynamic>.from(payload));
+          if (activeCall?.id != call.id) {
+            incomingCall = call;
+            notifyListeners();
+          }
+        }
+      })
+      ..on('call:outgoing', (payload) {
+        if (payload is Map) {
+          activeCall = CallSession.fromJson(Map<String, dynamic>.from(payload));
+          notifyListeners();
+        }
+      })
+      ..on('call:accepted', (payload) {
+        if (payload is Map) {
+          final call = CallSession.fromJson(Map<String, dynamic>.from(payload));
+          if (activeCall?.id == call.id) {
+            activeCall = call;
+            voiceStatus = 'Call accepted';
+            notifyListeners();
+          }
+        }
+      })
+      ..on('call:declined', (payload) {
+        if (payload is Map) {
+          final callId = '${payload['id'] ?? ''}';
+          if (activeCall?.id == callId) {
+            voiceStatus = 'Call declined';
+            unawaited(_cleanupVoice(emitLeave: true));
+          }
+        }
+      })
+      ..on('call:ended', (payload) {
+        if (payload is Map) {
+          final callId = '${payload['id'] ?? ''}';
+          if (incomingCall?.id == callId) incomingCall = null;
+          if (activeCall?.id == callId) {
+            voiceStatus = 'Call ended';
+            unawaited(_cleanupVoice(emitLeave: false));
+          } else {
+            notifyListeners();
+          }
+        }
+      })
+      ..on('call-participants', (payload) {
+        if (payload is Map) {
+          final participants = payload['participants'];
+          if (participants is List) {
+            voiceParticipants = participants
+                .whereType<Map>()
+                .map(
+                  (item) => VoiceParticipant.fromJson(
+                    Map<String, dynamic>.from(item),
+                  ),
+                )
+                .toList();
+            voiceStatus = voiceParticipants.isEmpty
+                ? 'Call connected. Waiting for others.'
+                : 'Call connected with ${voiceParticipants.length} peer(s)';
+            if (voiceJoined && _localVoiceStream != null) {
+              for (final participant in voiceParticipants) {
+                unawaited(_createPeerAndOffer(participant.socketId));
+              }
+            }
+            notifyListeners();
+          }
+        }
+      })
+      ..on('call-user-joined', (payload) {
+        if (payload is Map && payload['participant'] is Map) {
+          final participant = VoiceParticipant.fromJson(
+            Map<String, dynamic>.from(payload['participant'] as Map),
+          );
+          final next = [...voiceParticipants]
+            ..removeWhere((item) => item.socketId == participant.socketId)
+            ..add(participant);
+          voiceParticipants = next;
+          voiceStatus = '${participant.displayLabel} joined call';
+          if (voiceJoined && _localVoiceStream != null) {
+            unawaited(_createPeerAndOffer(participant.socketId));
+          }
+          notifyListeners();
+        }
+      })
+      ..on('call-user-left', (payload) {
+        if (payload is Map) {
+          final socketId = '${payload['socketId'] ?? ''}';
+          voiceParticipants = voiceParticipants
+              .where((item) => item.socketId != socketId)
+              .toList();
+          voiceStatus = '${payload['username'] ?? 'Participant'} left call';
+          unawaited(_closePeer(socketId));
+          notifyListeners();
+        }
+      })
+      ..on('call-state', (payload) {
+        if (payload is Map && payload['participant'] is Map) {
+          final participant = VoiceParticipant.fromJson(
+            Map<String, dynamic>.from(payload['participant'] as Map),
+          );
+          voiceParticipants = [
+            for (final item in voiceParticipants)
+              item.socketId == participant.socketId ? participant : item,
+          ];
+          notifyListeners();
+        }
+      })
+      ..on('call-offer', (payload) {
+        unawaited(_handleVoiceOffer(payload));
+      })
+      ..on('call-answer', (payload) {
+        unawaited(_handleVoiceAnswer(payload));
+      })
+      ..on('call-ice-candidate', (payload) {
+        unawaited(_handleVoiceIceCandidate(payload));
+      })
       ..on('voice-participants', (payload) {
         if (payload is List) {
           voiceParticipants = payload
@@ -1903,8 +2379,7 @@ class WebCordState extends ChangeNotifier {
   }
 
   void _emitVoiceState() {
-    _socket?.emit('voice-state', {
-      'channelId': selectedVoiceChannelId,
+    final payload = {
       'muted': micMuted,
       'camera': cameraEnabled,
       'screen': screenSharing,
@@ -1912,6 +2387,15 @@ class WebCordState extends ChangeNotifier {
       'noiseSuppression': noiseSuppressionEnabled,
       'inputVolume': inputVolume,
       'outputVolume': outputVolume,
+    };
+    final call = activeCall;
+    if (call != null) {
+      _socket?.emit('call-state', {'callId': call.id, ...payload});
+      return;
+    }
+    _socket?.emit('voice-state', {
+      'channelId': selectedVoiceChannelId,
+      ...payload,
     });
   }
 
@@ -1927,7 +2411,9 @@ class WebCordState extends ChangeNotifier {
         'conversationId': selectedConversationId,
       });
     }
-    if (voiceJoined && selectedVoiceChannelId != null) {
+    if (voiceJoined && activeCall != null) {
+      socket.emit('join-call', {'callId': activeCall!.id});
+    } else if (voiceJoined && selectedVoiceChannelId != null) {
       socket.emit('join-voice', {'channelId': selectedVoiceChannelId});
     }
   }
@@ -2048,6 +2534,34 @@ class WebCordState extends ChangeNotifier {
         lower.endsWith('.bmp') ||
         lower.endsWith('.heic') ||
         lower.endsWith('.heif');
+  }
+
+  bool _looksLikeAudioFile(String path) {
+    final lower = path.toLowerCase();
+    return lower.endsWith('.mp3') ||
+        lower.endsWith('.m4a') ||
+        lower.endsWith('.aac') ||
+        lower.endsWith('.ogg') ||
+        lower.endsWith('.oga') ||
+        lower.endsWith('.opus') ||
+        lower.endsWith('.wav') ||
+        lower.endsWith('.flac');
+  }
+
+  bool _looksLikeStoryFile(String path) {
+    final lower = path.toLowerCase();
+    return _looksLikeImageFile(path) ||
+        lower.endsWith('.mp4') ||
+        lower.endsWith('.mov') ||
+        lower.endsWith('.m4v') ||
+        lower.endsWith('.webm') ||
+        lower.endsWith('.3gp');
+  }
+
+  String _fileDisplayName(String path) {
+    final normalized = path.replaceAll('\\', '/');
+    final value = normalized.split('/').last.trim();
+    return value.isEmpty ? 'Profile track' : value;
   }
 
   String _normalizeAccentColor(String value) {

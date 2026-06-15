@@ -1,6 +1,10 @@
 enum ChannelKind { text, voice }
 
-enum WorkspaceKind { server, friends, direct }
+enum WorkspaceKind { server, friends, direct, calls, stories, profile }
+
+enum ConversationKind { direct, group }
+
+enum StoryKind { image, video }
 
 class PublicUser {
   const PublicUser({
@@ -12,6 +16,8 @@ class PublicUser {
     this.bio = '',
     this.statusText = 'Online',
     this.favoriteTrack = '',
+    this.favoriteTrackUrl,
+    this.favoriteTrackName,
     this.accentColor = '#7c5cff',
   });
 
@@ -23,6 +29,8 @@ class PublicUser {
   final String bio;
   final String statusText;
   final String favoriteTrack;
+  final String? favoriteTrackUrl;
+  final String? favoriteTrackName;
   final String accentColor;
 
   String get displayLabel {
@@ -41,6 +49,8 @@ class PublicUser {
       bio: '${data['bio'] ?? ''}',
       statusText: '${data['statusText'] ?? 'Online'}',
       favoriteTrack: '${data['favoriteTrack'] ?? ''}',
+      favoriteTrackUrl: _asNullableString(data['favoriteTrackUrl']),
+      favoriteTrackName: _asNullableString(data['favoriteTrackName']),
       accentColor: '${data['accentColor'] ?? '#7c5cff'}',
     );
   }
@@ -193,18 +203,50 @@ class Friendship {
 class DirectConversation {
   const DirectConversation({
     required this.id,
-    required this.user,
+    required this.kind,
+    required this.title,
+    this.user,
+    this.avatarUrl,
+    this.members = const [],
+    this.memberCount = 0,
     this.lastMessage,
   });
 
   final int id;
-  final PublicUser user;
+  final ConversationKind kind;
+  final String title;
+  final PublicUser? user;
+  final String? avatarUrl;
+  final List<PublicUser> members;
+  final int memberCount;
   final ChatMessage? lastMessage;
 
+  bool get isGroup => kind == ConversationKind.group;
+  String get displayTitle => isGroup ? title : user?.displayLabel ?? title;
+  String get subtitleLabel =>
+      isGroup ? '$memberCount members' : user?.statusText ?? 'Direct message';
+
   factory DirectConversation.fromJson(Map<String, dynamic> json) {
+    final rawType = '${json['type'] ?? 'DIRECT'}'.toUpperCase();
+    final members = _asList(json['members']).map(PublicUser.fromJson).toList();
+    final user = json['user'] is Map<String, dynamic>
+        ? PublicUser.fromJson(json['user'] as Map<String, dynamic>?)
+        : null;
     return DirectConversation(
       id: _asInt(json['id']),
-      user: PublicUser.fromJson(json['user'] as Map<String, dynamic>?),
+      kind: rawType == 'GROUP'
+          ? ConversationKind.group
+          : ConversationKind.direct,
+      title:
+          _asNullableString(json['title']) ??
+          user?.displayLabel ??
+          'Direct message',
+      user: user,
+      avatarUrl: _asNullableString(json['avatarUrl']),
+      members: members,
+      memberCount: _asInt(json['memberCount']) == 0
+          ? members.length
+          : _asInt(json['memberCount']),
       lastMessage: json['lastMessage'] is Map<String, dynamic>
           ? ChatMessage.fromJson(json['lastMessage'] as Map<String, dynamic>)
           : null,
@@ -269,6 +311,83 @@ class BootstrapData {
   }
 }
 
+class StoryItem {
+  const StoryItem({
+    required this.id,
+    required this.caption,
+    required this.mediaUrl,
+    required this.kind,
+    required this.author,
+    required this.createdAt,
+    required this.expiresAt,
+    this.viewed = false,
+    this.viewCount = 0,
+  });
+
+  final int id;
+  final String caption;
+  final String mediaUrl;
+  final StoryKind kind;
+  final PublicUser author;
+  final DateTime createdAt;
+  final DateTime expiresAt;
+  final bool viewed;
+  final int viewCount;
+
+  bool get isVideo => kind == StoryKind.video;
+
+  factory StoryItem.fromJson(Map<String, dynamic> json) {
+    final rawType = '${json['mediaType'] ?? 'IMAGE'}'.toUpperCase();
+    return StoryItem(
+      id: _asInt(json['id']),
+      caption: '${json['caption'] ?? ''}',
+      mediaUrl: '${json['mediaUrl'] ?? ''}',
+      kind: rawType == 'VIDEO' ? StoryKind.video : StoryKind.image,
+      author: PublicUser.fromJson(json['author'] as Map<String, dynamic>?),
+      createdAt: _asDate(json['createdAt']),
+      expiresAt: _asDate(json['expiresAt']),
+      viewed: _asBool(json['viewed']),
+      viewCount: _asInt(json['viewCount']),
+    );
+  }
+}
+
+class CallSession {
+  const CallSession({
+    required this.id,
+    required this.conversationId,
+    required this.title,
+    required this.callerId,
+    this.memberIds = const [],
+    this.video = false,
+    this.status = 'RINGING',
+  });
+
+  final String id;
+  final int conversationId;
+  final String title;
+  final int callerId;
+  final List<int> memberIds;
+  final bool video;
+  final String status;
+
+  factory CallSession.fromJson(Map<String, dynamic> json) {
+    return CallSession(
+      id: '${json['id'] ?? ''}',
+      conversationId: _asInt(json['conversationId']),
+      title: '${json['title'] ?? 'Call'}',
+      callerId: _asInt(json['callerId']),
+      memberIds:
+          (json['memberIds'] is List ? json['memberIds'] as List : const [])
+              .map(_asInt)
+              .where((id) => id > 0)
+              .toList(),
+      video: _asBool(json['video']),
+      status: '${json['status'] ?? 'RINGING'}',
+    );
+  }
+}
+
 class AttachmentUpload {
   const AttachmentUpload({
     required this.url,
@@ -294,6 +413,7 @@ class VoiceParticipant {
     required this.socketId,
     required this.userId,
     required this.username,
+    this.user,
     this.muted = false,
     this.camera = false,
     this.screen = false,
@@ -303,16 +423,22 @@ class VoiceParticipant {
   final String socketId;
   final int userId;
   final String username;
+  final PublicUser? user;
   final bool muted;
   final bool camera;
   final bool screen;
   final bool speaking;
+
+  String get displayLabel => user?.displayLabel ?? username;
 
   factory VoiceParticipant.fromJson(Map<String, dynamic> json) {
     return VoiceParticipant(
       socketId: '${json['socketId'] ?? ''}',
       userId: _asInt(json['userId']),
       username: '${json['username'] ?? 'Participant'}',
+      user: json['user'] is Map<String, dynamic>
+          ? PublicUser.fromJson(json['user'] as Map<String, dynamic>?)
+          : null,
       muted: _asBool(json['muted']),
       camera: _asBool(json['camera']),
       screen: _asBool(json['screen']),

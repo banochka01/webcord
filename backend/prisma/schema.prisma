@@ -26,6 +26,16 @@ enum FriendRequestStatus {
   DECLINED
 }
 
+enum DirectConversationType {
+  DIRECT
+  GROUP
+}
+
+enum StoryMediaType {
+  IMAGE
+  VIDEO
+}
+
 model User {
   id                      Int                 @id @default(autoincrement())
   username                String              @unique
@@ -36,6 +46,8 @@ model User {
   bio                     String              @default("")
   statusText              String              @default("Online")
   favoriteTrack           String              @default("")
+  favoriteTrackUrl        String?
+  favoriteTrackName       String?
   accentColor             String              @default("#7c5cff")
   messages                Message[]
   directMessages          DirectMessage[]
@@ -45,6 +57,10 @@ model User {
   friendshipsRight        Friendship[]        @relation("FriendshipRightUser")
   directConversationsLeft DirectConversation[] @relation("DirectConversationLeftUser")
   directConversationsRight DirectConversation[] @relation("DirectConversationRightUser")
+  ownedDirectConversations DirectConversation[] @relation("DirectConversationOwner")
+  directConversationMemberships DirectConversationMember[]
+  stories                 Story[]
+  storyViews              StoryView[]
   createdAt               DateTime            @default(now())
 }
 
@@ -118,16 +134,37 @@ model Friendship {
 
 model DirectConversation {
   id         Int             @id @default(autoincrement())
-  userOneId  Int
-  userTwoId  Int
+  type       DirectConversationType @default(DIRECT)
+  title      String?
+  avatarUrl  String?
+  ownerId    Int?
+  userOneId  Int?
+  userTwoId  Int?
   createdAt  DateTime        @default(now())
   updatedAt  DateTime        @updatedAt
-  userOne    User            @relation("DirectConversationLeftUser", fields: [userOneId], references: [id], onDelete: Cascade)
-  userTwo    User            @relation("DirectConversationRightUser", fields: [userTwoId], references: [id], onDelete: Cascade)
+  owner      User?           @relation("DirectConversationOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  userOne    User?           @relation("DirectConversationLeftUser", fields: [userOneId], references: [id], onDelete: Cascade)
+  userTwo    User?           @relation("DirectConversationRightUser", fields: [userTwoId], references: [id], onDelete: Cascade)
+  members    DirectConversationMember[]
   messages   DirectMessage[]
 
   @@unique([userOneId, userTwoId])
   @@index([updatedAt])
+  @@index([type, updatedAt])
+  @@index([ownerId])
+}
+
+model DirectConversationMember {
+  id             Int                @id @default(autoincrement())
+  conversationId Int
+  userId         Int
+  role           String             @default("MEMBER")
+  joinedAt       DateTime           @default(now())
+  conversation   DirectConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user           User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, userId])
+  @@index([userId])
 }
 
 model DirectMessage {
@@ -151,4 +188,31 @@ model DirectMessage {
   @@index([conversationId, createdAt])
   @@index([authorId])
   @@index([conversationId, readAt])
+}
+
+model Story {
+  id        Int            @id @default(autoincrement())
+  caption   String         @default("")
+  mediaUrl  String
+  mediaType StoryMediaType @default(IMAGE)
+  authorId  Int
+  createdAt DateTime       @default(now())
+  expiresAt DateTime
+  author    User           @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  views     StoryView[]
+
+  @@index([expiresAt])
+  @@index([authorId, createdAt])
+}
+
+model StoryView {
+  id       Int      @id @default(autoincrement())
+  storyId  Int
+  viewerId Int
+  viewedAt DateTime @default(now())
+  story    Story    @relation(fields: [storyId], references: [id], onDelete: Cascade)
+  viewer   User     @relation(fields: [viewerId], references: [id], onDelete: Cascade)
+
+  @@unique([storyId, viewerId])
+  @@index([viewerId])
 }

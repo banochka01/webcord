@@ -93,6 +93,8 @@ class WebCordApi {
     String? displayName,
     String? avatarUrl,
     String? bannerUrl,
+    String? favoriteTrackUrl,
+    String? favoriteTrackName,
   }) async {
     final json = await _send(
       'PATCH',
@@ -103,6 +105,8 @@ class WebCordApi {
         'bio': bio,
         'statusText': statusText,
         'favoriteTrack': favoriteTrack,
+        'favoriteTrackUrl': favoriteTrackUrl,
+        'favoriteTrackName': favoriteTrackName,
         'accentColor': accentColor,
         'avatarUrl': avatarUrl,
         'bannerUrl': bannerUrl,
@@ -275,6 +279,94 @@ class WebCordApi {
       body: {'userId': userId},
     );
     return DirectConversation.fromJson(json);
+  }
+
+  Future<DirectConversation> createGroupConversation({
+    required String token,
+    required String title,
+    required List<int> userIds,
+    String? avatarUrl,
+  }) async {
+    final json = await _send(
+      'POST',
+      '/groups',
+      token: token,
+      body: {
+        'title': title,
+        'userIds': userIds,
+        if (avatarUrl != null) 'avatarUrl': avatarUrl,
+      },
+    );
+    return DirectConversation.fromJson(json);
+  }
+
+  Future<CallSession> startCall({
+    required String token,
+    required int conversationId,
+    bool video = false,
+  }) async {
+    final json = await _send(
+      'POST',
+      '/dms/$conversationId/calls',
+      token: token,
+      body: {'video': video},
+    );
+    return CallSession.fromJson(json);
+  }
+
+  Future<CallSession> respondCall({
+    required String token,
+    required String callId,
+    required bool accept,
+  }) async {
+    final json = await _send(
+      'POST',
+      '/calls/$callId/respond',
+      token: token,
+      body: {'action': accept ? 'ACCEPT' : 'DECLINE'},
+    );
+    if (json is Map<String, dynamic>) return CallSession.fromJson(json);
+    return CallSession(
+      id: callId,
+      conversationId: 0,
+      title: 'Call',
+      callerId: 0,
+    );
+  }
+
+  Future<void> endCall({required String token, required String callId}) async {
+    await _send('POST', '/calls/$callId/end', token: token);
+  }
+
+  Future<List<StoryItem>> stories(String token) async {
+    final data = await _send('GET', '/stories', token: token);
+    if (data is! List) return const [];
+    return data
+        .whereType<Map>()
+        .map((item) => StoryItem.fromJson(Map<String, dynamic>.from(item)))
+        .toList();
+  }
+
+  Future<StoryItem> createStory({
+    required String token,
+    required String mediaUrl,
+    required String mediaType,
+    String caption = '',
+  }) async {
+    final json = await _send(
+      'POST',
+      '/stories',
+      token: token,
+      body: {'mediaUrl': mediaUrl, 'mediaType': mediaType, 'caption': caption},
+    );
+    return StoryItem.fromJson(json);
+  }
+
+  Future<void> markStoryViewed({
+    required String token,
+    required int storyId,
+  }) async {
+    await _send('POST', '/stories/$storyId/view', token: token);
   }
 
   Future<AttachmentUpload> upload(String token, File file) async {
