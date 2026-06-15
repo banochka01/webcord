@@ -31,6 +31,9 @@ services:
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
       CLIENT_URL: ${CLIENT_URL:-https://webcordes.ru}
       ADMIN_USERNAMES: ${ADMIN_USERNAMES:-}
+      TURN_URLS: ${TURN_URLS:-}
+      TURN_USERNAME: ${TURN_USERNAME:-}
+      TURN_CREDENTIAL: ${TURN_CREDENTIAL:-}
       UPLOAD_DIR: /app/uploads
     volumes:
       - backend_uploads:/app/uploads

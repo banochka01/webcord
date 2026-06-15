@@ -41,6 +41,8 @@ const PRESETS = {
 };
 
 const DEFAULT_THEME = PRESETS.Webcord;
+const DEFAULT_PROFILE_ACCENT = '#7c5cff';
+const PROFILE_ACCENTS = ['#7c5cff', '#4f8cff', '#31e4d1', '#ff6b8a', '#f2b84b', '#63d471'];
 const EMPTY_SOCIAL = { friends: [], requests: [], conversations: [] };
 const DEFAULT_CLIENT_SETTINGS = {
   notificationsEnabled: true,
@@ -111,6 +113,42 @@ function getNativeBridge() {
         unlisteners.forEach((unlisten) => unlisten?.());
       };
     }
+  };
+}
+
+function getDisplayName(user) {
+  return user?.displayName?.trim() || user?.username || 'User';
+}
+
+function getUsernameTag(user) {
+  return user?.username ? `@${user.username}` : '@webcord';
+}
+
+function normalizeProfileAccent(value) {
+  const next = String(value || '').trim();
+  return /^#[0-9a-fA-F]{6}$/.test(next) ? next.toLowerCase() : DEFAULT_PROFILE_ACCENT;
+}
+
+function getProfileStyle(profile = {}) {
+  return { '--profile-accent': normalizeProfileAccent(profile.accentColor) };
+}
+
+function getProfileBannerStyle(profile = {}) {
+  return {
+    ...getProfileStyle(profile),
+    backgroundImage: profile.bannerUrl ? `url(${getAttachmentUrl(profile.bannerUrl)})` : undefined
+  };
+}
+
+function createProfileDraft(user = {}) {
+  return {
+    displayName: user.displayName || '',
+    bio: user.bio || '',
+    avatarUrl: user.avatarUrl || '',
+    bannerUrl: user.bannerUrl || '',
+    statusText: user.statusText || 'Online',
+    favoriteTrack: user.favoriteTrack || '',
+    accentColor: normalizeProfileAccent(user.accentColor)
   };
 }
 const EmojiPicker = lazy(async () => {
@@ -283,6 +321,49 @@ function getMediaErrorMessage(error, fallback) {
     return 'The media device is already in use';
   }
   return fallback;
+}
+
+const AUDIO_RECORDER_MIME_TYPES = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus'];
+const VIDEO_RECORDER_MIME_TYPES = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'];
+
+function getSupportedRecorderMimeType(candidates) {
+  if (!window.MediaRecorder?.isTypeSupported) return '';
+  return candidates.find((candidate) => window.MediaRecorder.isTypeSupported(candidate)) || '';
+}
+
+function getAttachmentKind(message = {}) {
+  const type = String(message.attachmentType || '').toUpperCase();
+  const name = String(message.attachmentName || message.attachmentUrl || '').toLowerCase();
+
+  if (type === 'IMAGE') return 'IMAGE';
+  if (type === 'AUDIO') return 'AUDIO';
+  if (type === 'CIRCLE_VIDEO') return 'CIRCLE_VIDEO';
+  if (type === 'VIDEO') {
+    return /circle-video|round-video|video-note|video_message|video-message|webcord-circle/.test(name)
+      ? 'CIRCLE_VIDEO'
+      : 'VIDEO';
+  }
+  if (/\.(png|jpe?g|gif|webp|avif)$/i.test(name)) return 'IMAGE';
+  if (/\.(mp3|m4a|ogg|oga|wav|webm)$/i.test(name) && /voice|audio/.test(name)) return 'AUDIO';
+  if (/\.(mp4|webm|mov|m4v)$/i.test(name)) return /circle|round|note/.test(name) ? 'CIRCLE_VIDEO' : 'VIDEO';
+  return 'FILE';
+}
+
+function getAttachmentBadge(kind) {
+  return {
+    IMAGE: 'IMG',
+    VIDEO: 'VID',
+    AUDIO: 'VOICE',
+    CIRCLE_VIDEO: 'CIRCLE',
+    FILE: 'FILE'
+  }[kind] || 'FILE';
+}
+
+function formatShortDuration(seconds) {
+  const value = Math.max(0, Number(seconds) || 0);
+  const minutes = Math.floor(value / 60).toString().padStart(2, '0');
+  const rest = Math.floor(value % 60).toString().padStart(2, '0');
+  return `${minutes}:${rest}`;
 }
 
 function tuneOpusDescription(description) {
@@ -476,6 +557,10 @@ function LandingPage({
               <DownloadIcon />
               <span>Загрузить для Windows</span>
             </button>
+            <button className="landing-cta landing-cta-download" type="button" onClick={handleDownload}>
+              <DownloadIcon />
+              <span>Загрузить для Android</span>
+            </button>
             <button className="landing-cta landing-cta-browser" type="button" onClick={() => openAuth('login')}>
               <BrowserIcon />
               <span>Открыть WebCord в браузере</span>
@@ -570,7 +655,7 @@ function LandingPage({
         </article>
         <article id="safety">
           <strong>Темный клиент</strong>
-          <span>Адаптивный интерфейс, PWA, desktop и мобильные сборки.</span>
+          <span>Единый темный стиль, desktop-клиент, Android-сборка и браузерный доступ.</span>
         </article>
         <article id="support">
           <strong>Голосовые комнаты</strong>
@@ -606,7 +691,83 @@ function LandingPage({
   );
 }
 
-function MessageItem({ message, currentUserId, workspace, onAvatarClick, onReply, onEdit, onDelete }) {
+function MessageAttachment({ message, onOpenMedia }) {
+  if (!message.attachmentUrl) return null;
+
+  const kind = getAttachmentKind(message);
+  const url = getAttachmentUrl(message.attachmentUrl);
+  const title = message.attachmentName || 'Attachment';
+
+  if (kind === 'IMAGE') {
+    return (
+      <button className="message-media-button" type="button" onClick={() => onOpenMedia?.(message)}>
+        <img className="message-media" src={url} alt={title} />
+      </button>
+    );
+  }
+
+  if (kind === 'VIDEO') {
+    return (
+      <button className="message-media-button" type="button" onClick={() => onOpenMedia?.(message)}>
+        <video className="message-media" muted playsInline preload="metadata" src={url} />
+        <span className="media-play-chip">Play video</span>
+      </button>
+    );
+  }
+
+  if (kind === 'CIRCLE_VIDEO') {
+    return (
+      <button className="circle-video-message" type="button" onClick={() => onOpenMedia?.(message)} aria-label={`Open ${title}`}>
+        <video muted playsInline preload="metadata" src={url} />
+        <span className="media-play-chip">Circle</span>
+      </button>
+    );
+  }
+
+  if (kind === 'AUDIO') {
+    return (
+      <div className="voice-message">
+        <span className="voice-message-icon">♪</span>
+        <div className="voice-message-body">
+          <strong>{title}</strong>
+          <audio controls preload="metadata" src={url} />
+        </div>
+      </div>
+    );
+  }
+
+  return <a className="file-link" href={url} download>{title}</a>;
+}
+
+function MediaViewer({ message, onClose }) {
+  if (!message?.attachmentUrl) return null;
+
+  const kind = getAttachmentKind(message);
+  const url = getAttachmentUrl(message.attachmentUrl);
+  const title = message.attachmentName || 'Attachment';
+
+  return (
+    <div className="media-viewer-backdrop" role="dialog" aria-modal="true" onClick={onClose}>
+      <div className={kind === 'CIRCLE_VIDEO' ? 'media-viewer-card circle' : 'media-viewer-card'} onClick={(event) => event.stopPropagation()}>
+        <div className="media-viewer-top">
+          <strong>{title}</strong>
+          <button className="icon-btn" type="button" onClick={onClose}>x</button>
+        </div>
+        <div className="media-viewer-stage">
+          {kind === 'IMAGE' ? <img src={url} alt={title} /> : null}
+          {kind === 'VIDEO' ? <video controls autoPlay playsInline src={url} /> : null}
+          {kind === 'CIRCLE_VIDEO' ? <div className="media-circle-frame"><video controls autoPlay playsInline src={url} /></div> : null}
+          {kind === 'AUDIO' ? <audio controls autoPlay src={url} /> : null}
+        </div>
+        <div className="media-viewer-actions">
+          <a className="ghost-btn" href={url} download>Download</a>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MessageItem({ message, currentUserId, workspace, onAvatarClick, onReply, onEdit, onDelete, onOpenMedia }) {
   const isOwn = String(message.author?.id) === String(currentUserId);
   const isDeleted = Boolean(message.deletedAt);
   const statusText = workspace === 'dm' && isOwn
@@ -618,10 +779,10 @@ function MessageItem({ message, currentUserId, workspace, onAvatarClick, onReply
   return (
     <div className={isOwn ? 'message-card own' : 'message-card'}>
       <div className="message-meta">
-        <button className="avatar-chip avatar-button" type="button" onClick={() => onAvatarClick?.(message.author)}>
-          {message.author?.avatarUrl ? <img src={getAttachmentUrl(message.author.avatarUrl)} alt={message.author?.username || 'user'} /> : (message.author?.username || '?').slice(0, 1).toUpperCase()}
+        <button className="avatar-chip avatar-button" type="button" style={getProfileStyle(message.author)} onClick={() => onAvatarClick?.(message.author)}>
+          {message.author?.avatarUrl ? <img src={getAttachmentUrl(message.author.avatarUrl)} alt={getDisplayName(message.author)} /> : getDisplayName(message.author).slice(0, 1).toUpperCase()}
         </button>
-        <strong>{message.author?.username || 'unknown'}</strong>
+        <strong>{getDisplayName(message.author)}</strong>
         <span>{new Date(message.createdAt).toLocaleString()}{message.editedAt ? ' · edited' : ''}{statusText ? ` · ${statusText}` : ''}</span>
         <div className="message-actions">
           {!isDeleted ? <button type="button" onClick={() => onReply?.(message)}>Reply</button> : null}
@@ -631,45 +792,83 @@ function MessageItem({ message, currentUserId, workspace, onAvatarClick, onReply
       </div>
       {message.replyTo ? (
         <button className="reply-snippet" type="button" onClick={() => onReply?.(message.replyTo)}>
-          <strong>{message.replyTo.author?.username || 'Reply'}</strong>
+          <strong>{getDisplayName(message.replyTo.author) || 'Reply'}</strong>
           <span>{message.replyTo.deletedAt ? 'Deleted message' : message.replyTo.content || message.replyTo.attachmentName || 'Attachment'}</span>
         </button>
       ) : null}
       {isDeleted ? <p className="muted deleted-message">Message deleted</p> : message.content ? <p>{message.content}</p> : null}
-      {!isDeleted && message.attachmentType === 'IMAGE' ? <img className="message-media" src={getAttachmentUrl(message.attachmentUrl)} alt={message.attachmentName || 'image'} /> : null}
-      {!isDeleted && message.attachmentType === 'VIDEO' ? <video className="message-media" controls src={getAttachmentUrl(message.attachmentUrl)} /> : null}
-      {!isDeleted && message.attachmentType === 'FILE' ? <a className="file-link" href={getAttachmentUrl(message.attachmentUrl)} download>{message.attachmentName || 'file'}</a> : null}
+      {!isDeleted ? <MessageAttachment message={message} onOpenMedia={onOpenMedia} /> : null}
     </div>
   );
 }
 
 function UserProfileModal({ open, profile, relationshipLabel, canAddFriend, onAddFriend, onClose }) {
   if (!open || !profile) return null;
+  const displayName = getDisplayName(profile);
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal-card profile-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="profile-banner" style={{ backgroundImage: profile.bannerUrl ? `url(${getAttachmentUrl(profile.bannerUrl)})` : undefined }} />
+        <div className="profile-banner" style={getProfileBannerStyle(profile)} />
         <div className="profile-modal-body">
           <div className="profile-avatar-wrap">
-            <span className="profile-avatar large">
-              {profile.avatarUrl ? <img src={getAttachmentUrl(profile.avatarUrl)} alt={profile.username || 'user'} /> : (profile.username || '?').slice(0, 1).toUpperCase()}
-            </span>
+            <UserAvatar user={profile} label={displayName} className="large" />
           </div>
 
           <div className="modal-header">
             <div>
-              <h3>{profile.username}</h3>
+              <div className="profile-title-row">
+                <h3>{displayName}</h3>
+                <span className="profile-accent-dot" style={getProfileStyle(profile)} />
+              </div>
+              <p className="profile-username">{getUsernameTag(profile)}</p>
+              <p className="profile-status-line">{profile.statusText || 'Online'}</p>
               <p className="muted">{profile.bio || 'No bio yet.'}</p>
             </div>
             <button className="icon-btn" type="button" onClick={onClose}>x</button>
           </div>
+
+          {profile.favoriteTrack ? (
+            <div className="profile-track">
+              <span>Track</span>
+              <strong>{profile.favoriteTrack}</strong>
+            </div>
+          ) : null}
 
           <div className="viewer-actions">
             <span className="request-pill">{relationshipLabel}</span>
             {canAddFriend ? <button type="button" onClick={onAddFriend}>Add friend</button> : null}
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function ProfileAccentPicker({ value, onChange }) {
+  const normalized = normalizeProfileAccent(value);
+
+  return (
+    <div className="profile-accent-field">
+      <span>Accent color</span>
+      <div className="profile-accent-row">
+        {PROFILE_ACCENTS.map((accent) => (
+          <button
+            key={accent}
+            className={normalized === accent ? 'accent-swatch active' : 'accent-swatch'}
+            type="button"
+            title={accent}
+            aria-label={`Use accent ${accent}`}
+            style={{ background: accent }}
+            onClick={() => onChange(accent)}
+          />
+        ))}
+        <input
+          className="profile-accent-input"
+          type="color"
+          value={normalized}
+          onChange={(event) => onChange(event.target.value)}
+        />
       </div>
     </div>
   );
@@ -688,20 +887,20 @@ function ProfileModal({
   onSave
 }) {
   if (!open) return null;
+  const previewUser = { ...user, ...draft, accentColor: normalizeProfileAccent(draft.accentColor) };
+  const displayName = getDisplayName(previewUser);
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal-card profile-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="profile-banner" style={{ backgroundImage: draft.bannerUrl ? `url(${getAttachmentUrl(draft.bannerUrl)})` : undefined }}>
+        <div className="profile-banner" style={getProfileBannerStyle(previewUser)}>
           <button className="ghost-btn floating-action" type="button" onClick={onUploadBanner}>
             {bannerUploading ? 'Uploading...' : 'Change banner'}
           </button>
         </div>
         <div className="profile-modal-body">
           <div className="profile-avatar-wrap">
-            <span className="profile-avatar large">
-              {draft.avatarUrl ? <img src={getAttachmentUrl(draft.avatarUrl)} alt={user?.username || 'user'} /> : (user?.username || '?').slice(0, 1).toUpperCase()}
-            </span>
+            <UserAvatar user={previewUser} label={displayName} className="large" />
             <button className="ghost-btn" type="button" onClick={onUploadAvatar}>
               {avatarUploading ? 'Uploading...' : 'Change avatar'}
             </button>
@@ -710,12 +909,16 @@ function ProfileModal({
           <div className="modal-header">
             <div>
               <h3>Profile Studio</h3>
-              <p className="muted">Avatar, banner and bio are synced from the backend.</p>
+              <p className="muted">Profile identity, media and personalization are synced from the backend.</p>
             </div>
             <button className="icon-btn" type="button" onClick={onClose}>x</button>
           </div>
 
           <div className="channel-form">
+            <input value={draft.displayName} onChange={(e) => onChange({ ...draft, displayName: e.target.value.slice(0, 40) })} placeholder="Display name" maxLength={40} />
+            <input value={draft.statusText} onChange={(e) => onChange({ ...draft, statusText: e.target.value.slice(0, 80) })} placeholder="Status" maxLength={80} />
+            <input value={draft.favoriteTrack} onChange={(e) => onChange({ ...draft, favoriteTrack: e.target.value.slice(0, 120) })} placeholder="Favorite track" maxLength={120} />
+            <ProfileAccentPicker value={draft.accentColor} onChange={(accentColor) => onChange({ ...draft, accentColor })} />
             <textarea className="profile-bio" value={draft.bio} onChange={(e) => onChange({ ...draft, bio: e.target.value.slice(0, 280) })} placeholder="Write a short bio" rows={5} />
             <p className="muted">{draft.bio.length}/280</p>
           </div>
@@ -731,10 +934,10 @@ function ProfileModal({
 }
 
 function UserAvatar({ user, label, className = '' }) {
-  const displayLabel = label || user?.username || 'User';
+  const displayLabel = label || getDisplayName(user);
 
   return (
-    <span className={`profile-avatar ${className}`}>
+    <span className={`profile-avatar ${className}`} style={getProfileStyle(user)}>
       {user?.avatarUrl ? <img src={getAttachmentUrl(user.avatarUrl)} alt={displayLabel} /> : displayLabel.slice(0, 1).toUpperCase()}
     </span>
   );
@@ -854,7 +1057,7 @@ function DesktopTitleBar({ user, onOpenSettings, onWindowAction }) {
       <div className="titlebar-drag" data-tauri-drag-region>
         <span className="titlebar-mark"><BrandLogo /></span>
         <span className="titlebar-name">WebCord</span>
-        <span className="titlebar-channel">{user?.username ? `@${user.username}` : 'Desktop'}</span>
+        <span className="titlebar-channel">{user ? getDisplayName(user) : 'Desktop'}</span>
       </div>
       <div className="titlebar-actions">
         <button type="button" title="Settings" aria-label="Settings" onClick={onOpenSettings}>⚙</button>
@@ -905,6 +1108,9 @@ function SettingsModal({
   onLogout
 }) {
   if (!open) return null;
+  const accountName = getDisplayName(user);
+  const draftProfile = { ...user, ...draft, accentColor: normalizeProfileAccent(draft?.accentColor) };
+  const draftName = getDisplayName(draftProfile);
 
   const navItems = [
     ['account', 'Account'],
@@ -922,8 +1128,8 @@ function SettingsModal({
         <div className="settings-user-card">
           <UserAvatar user={user} className="settings-user-avatar" />
           <div>
-            <strong>{user?.username || 'WebCord user'}</strong>
-            <span>{user?.bio || 'Customize your client'}</span>
+            <strong>{accountName}</strong>
+            <span>{user?.statusText || user?.bio || 'Customize your client'}</span>
           </div>
         </div>
         <div className="settings-search">Settings</div>
@@ -942,18 +1148,22 @@ function SettingsModal({
         {activeSection === 'account' ? (
           <div className="settings-page">
             <h2>My Account</h2>
-            <div className="account-hero" style={{ backgroundImage: user?.bannerUrl ? `url(${getAttachmentUrl(user.bannerUrl)})` : undefined }}>
+            <div className="account-hero" style={getProfileBannerStyle(user)}>
               <UserAvatar user={user} className="account-avatar" />
               <div>
-                <h3>{user?.username}</h3>
-                <p>{user?.bio || 'No bio yet.'}</p>
+                <h3>{accountName}</h3>
+                <p className="profile-username">{getUsernameTag(user)}</p>
+                <p>{user?.statusText || 'Online'}</p>
+                {user?.favoriteTrack ? <p className="profile-track-inline">{user.favoriteTrack}</p> : null}
               </div>
               <button type="button" onClick={() => onSectionChange('profile')}>Edit Profile</button>
             </div>
             <div className="settings-card-list">
               <div className="settings-row"><span>Username</span><strong>{user?.username}</strong></div>
-              <div className="settings-row"><span>Display name</span><strong>{user?.displayName || user?.username}</strong></div>
+              <div className="settings-row"><span>Display name</span><strong>{accountName}</strong></div>
               <div className="settings-row"><span>Status</span><strong>{user?.statusText || 'Online'}</strong></div>
+              <div className="settings-row"><span>Favorite track</span><strong>{user?.favoriteTrack || 'Not set'}</strong></div>
+              <div className="settings-row"><span>Accent</span><strong className="settings-accent-value"><i style={{ background: normalizeProfileAccent(user?.accentColor) }} />{normalizeProfileAccent(user?.accentColor)}</strong></div>
             </div>
           </div>
         ) : null}
@@ -963,14 +1173,29 @@ function SettingsModal({
             <h2>Profile</h2>
             <div className="profile-editor">
               <div className="profile-preview">
-                <div className="profile-banner" style={{ backgroundImage: draft.bannerUrl ? `url(${getAttachmentUrl(draft.bannerUrl)})` : undefined }} />
+                <div className="profile-banner" style={getProfileBannerStyle(draftProfile)} />
                 <div className="profile-preview-body">
-                  <UserAvatar user={{ ...user, avatarUrl: draft.avatarUrl }} className="account-avatar" />
-                  <h3>{user?.username}</h3>
+                  <UserAvatar user={draftProfile} className="account-avatar" />
+                  <div className="profile-title-row">
+                    <h3>{draftName}</h3>
+                    <span className="profile-accent-dot" style={getProfileStyle(draftProfile)} />
+                  </div>
+                  <span className="profile-username">{getUsernameTag(user)}</span>
+                  <p className="profile-status-line">{draft.statusText || 'Online'}</p>
+                  {draft.favoriteTrack ? (
+                    <div className="profile-track compact">
+                      <span>Track</span>
+                      <strong>{draft.favoriteTrack}</strong>
+                    </div>
+                  ) : null}
                   <p>{draft.bio || 'Write a short bio so friends know what you are up to.'}</p>
                 </div>
               </div>
               <div className="settings-form-grid">
+                <label>Display name<input value={draft.displayName} onChange={(e) => onDraftChange({ ...draft, displayName: e.target.value.slice(0, 40) })} maxLength={40} placeholder={user?.username || 'WebCord user'} /></label>
+                <label>Status<input value={draft.statusText} onChange={(e) => onDraftChange({ ...draft, statusText: e.target.value.slice(0, 80) })} maxLength={80} placeholder="Online" /></label>
+                <label>Favorite track<input value={draft.favoriteTrack} onChange={(e) => onDraftChange({ ...draft, favoriteTrack: e.target.value.slice(0, 120) })} maxLength={120} placeholder="Artist - Track" /></label>
+                <ProfileAccentPicker value={draft.accentColor} onChange={(accentColor) => onDraftChange({ ...draft, accentColor })} />
                 <label>Bio<textarea value={draft.bio} onChange={(e) => onDraftChange({ ...draft, bio: e.target.value.slice(0, 280) })} rows={5} /></label>
                 <div className="settings-actions-row">
                   <button type="button" onClick={onUploadAvatar}>{avatarUploading ? 'Uploading...' : 'Change Avatar'}</button>
@@ -1036,7 +1261,7 @@ function SettingsModal({
           </div>
         ) : null}
 
-        {activeSection === 'privacy' ? <StaticSettingsPage title="Privacy" rows={['Friend requests use the existing backend flow.', 'Profile popovers expose username, avatar, banner and bio.', 'No extra tracking settings are stored by this client.']} /> : null}
+        {activeSection === 'privacy' ? <StaticSettingsPage title="Privacy" rows={['Friend requests use the existing backend flow.', 'Profile cards expose username, display name, avatar, banner, bio, status, favorite track and accent.', 'No extra tracking settings are stored by this client.']} /> : null}
         {activeSection === 'notifications' ? (
           <div className="settings-page">
             <h2>Notifications</h2>
@@ -1195,9 +1420,13 @@ export default function App() {
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [settingsSection, setSettingsSection] = useState('account');
   const [viewedProfile, setViewedProfile] = useState(null);
+  const [viewedMedia, setViewedMedia] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [bannerUploading, setBannerUploading] = useState(false);
+  const [voiceRecording, setVoiceRecording] = useState(false);
+  const [circleRecording, setCircleRecording] = useState(false);
+  const [recordingElapsed, setRecordingElapsed] = useState(0);
   const [voiceJoined, setVoiceJoined] = useState(false);
   const [micMuted, setMicMuted] = useState(false);
   const [screenSharing, setScreenSharing] = useState(false);
@@ -1216,12 +1445,13 @@ export default function App() {
   const [participantVolumes, setParticipantVolumes] = useState({});
   const [voiceParticipants, setVoiceParticipants] = useState({});
   const [remoteStreams, setRemoteStreams] = useState({});
+  const [voiceIceServers, setVoiceIceServers] = useState(getIceServers());
   const [error, setError] = useState('');
   const [networkOnline, setNetworkOnline] = useState(() => navigator.onLine !== false);
   const [socketStatus, setSocketStatus] = useState(() => (navigator.onLine === false ? 'offline' : 'disconnected'));
   const [lastRealtimeSync, setLastRealtimeSync] = useState(null);
   const [theme, setTheme] = useState(() => JSON.parse(localStorage.getItem(KEYS.theme) || 'null') || DEFAULT_THEME);
-  const [profileDraft, setProfileDraft] = useState({ bio: '', avatarUrl: '', bannerUrl: '' });
+  const [profileDraft, setProfileDraft] = useState(() => createProfileDraft());
   const [isDesktopShell] = useState(() => IS_TAURI_CLIENT || /\b(Electron|WebCordTauri)\b/i.test(navigator.userAgent) || Boolean(window.webcordDesktop || window.webcordWindow || window.electronAPI));
   const [currentPath, setCurrentPath] = useState(() => normalizeAppPath());
   const [adminOverview, setAdminOverview] = useState(null);
@@ -1238,6 +1468,12 @@ export default function App() {
   const screenStreamRef = useRef(null);
   const cameraStreamRef = useRef(null);
   const voiceAudioContextRef = useRef(null);
+  const messageRecorderRef = useRef(null);
+  const messageRecordingChunksRef = useRef([]);
+  const messageRecordingStreamRef = useRef(null);
+  const messageRecordingKindRef = useRef('');
+  const messageRecordingCancelledRef = useRef(false);
+  const messageRecordingTimerRef = useRef(null);
   const remoteAudioRef = useRef({});
   const remoteStreamsRef = useRef({});
   const cameraPreviewStreamRef = useRef(null);
@@ -1264,18 +1500,18 @@ export default function App() {
   const filteredConversations = social.conversations.filter((conversation) => {
     const query = dmSearch.trim().toLowerCase();
     if (!query) return true;
-    return `${conversation.user?.username || ''} ${conversation.lastMessage?.content || ''} ${conversation.lastMessage?.attachmentName || ''}`.toLowerCase().includes(query);
+    return `${getDisplayName(conversation.user)} ${conversation.user?.username || ''} ${conversation.user?.statusText || ''} ${conversation.lastMessage?.content || ''} ${conversation.lastMessage?.attachmentName || ''}`.toLowerCase().includes(query);
   });
   const incomingRequests = social.requests.filter((item) => item.direction === 'INCOMING' && item.status === 'PENDING');
   const outgoingRequests = social.requests.filter((item) => item.direction === 'OUTGOING' && item.status === 'PENDING');
   const peerConfig = useMemo(
     () => ({
-      iceServers: getIceServers(),
+      iceServers: voiceIceServers,
       iceCandidatePoolSize: 4,
       bundlePolicy: 'max-bundle',
       rtcpMuxPolicy: 'require'
     }),
-    []
+    [voiceIceServers]
   );
 
   useEffect(() => {
@@ -1342,14 +1578,14 @@ export default function App() {
     cameraPreviewStreamRef.current?.getTracks?.().forEach((track) => track.stop());
   }, []);
 
+  useEffect(() => () => {
+    cleanupMessageRecording({ cancel: true });
+  }, []);
+
   useEffect(() => {
     if (user) {
       localStorage.setItem('webcord_user', JSON.stringify(user));
-      setProfileDraft({
-        bio: user.bio || '',
-        avatarUrl: user.avatarUrl || '',
-        bannerUrl: user.bannerUrl || ''
-      });
+      setProfileDraft(createProfileDraft(user));
     }
   }, [user]);
 
@@ -1541,7 +1777,7 @@ export default function App() {
       if (scope.type === 'channel' && String(message.channelId) === scope.id) {
         setMessages((prev) => mergeMessage(prev, message));
         if (String(message.author?.id) !== String(user?.id)) {
-          showClientNotification(message.author?.username || 'WebCord', message.content || message.attachmentName || 'New message');
+          showClientNotification(getDisplayName(message.author), message.content || message.attachmentName || 'New message');
         }
       }
     });
@@ -1557,7 +1793,7 @@ export default function App() {
         setMessages((prev) => mergeMessage(prev, message));
         if (String(message.author?.id) !== String(user?.id)) {
           if (document.hidden || workspaceRef.current !== 'dm') setUnreadCount((count) => count + 1);
-          showClientNotification(message.author?.username || 'Direct message', message.content || message.attachmentName || 'New direct message');
+          showClientNotification(getDisplayName(message.author), message.content || message.attachmentName || 'New direct message');
         }
       }
     });
@@ -1640,6 +1876,10 @@ export default function App() {
       }
     });
     socket.on('voice-user-left', ({ socketId }) => closePeer(socketId));
+    socket.on('voice-state', (participant) => {
+      if (!participant?.socketId) return;
+      setVoiceParticipants((prev) => ({ ...prev, [participant.socketId]: participant }));
+    });
 
     return () => {
       setSocketStatus('disconnected');
@@ -1821,6 +2061,13 @@ export default function App() {
 
   async function bootstrapApp() {
     const data = await apiFetch('/bootstrap', {}, token);
+    apiFetch('/voice/ice-servers', {}, token)
+      .then((payload) => {
+        if (Array.isArray(payload?.iceServers) && payload.iceServers.length > 0) {
+          setVoiceIceServers(payload.iceServers);
+        }
+      })
+      .catch(() => {});
     if (data.currentUser) setUser(data.currentUser);
     setGuild(data.guild);
     setChannels(data.channels);
@@ -1858,14 +2105,19 @@ export default function App() {
   }
 
   async function saveProfile(nextDraft = profileDraft) {
+    const cleanDraft = createProfileDraft({ ...user, ...nextDraft, accentColor: normalizeProfileAccent(nextDraft.accentColor) });
     const nextUser = await apiFetch(
       '/me/profile',
       {
         method: 'PATCH',
         body: JSON.stringify({
-          bio: nextDraft.bio,
-          avatarUrl: nextDraft.avatarUrl || null,
-          bannerUrl: nextDraft.bannerUrl || null
+          displayName: cleanDraft.displayName,
+          bio: cleanDraft.bio,
+          statusText: cleanDraft.statusText,
+          favoriteTrack: cleanDraft.favoriteTrack,
+          accentColor: cleanDraft.accentColor,
+          avatarUrl: cleanDraft.avatarUrl || null,
+          bannerUrl: cleanDraft.bannerUrl || null
         })
       },
       token
@@ -2022,6 +2274,144 @@ export default function App() {
       await refreshSocialData();
     } catch (err) {
       setError(err.message);
+    }
+  }
+
+  function stopMessageRecordingTimer() {
+    if (messageRecordingTimerRef.current) {
+      window.clearInterval(messageRecordingTimerRef.current);
+      messageRecordingTimerRef.current = null;
+    }
+  }
+
+  function stopMessageRecordingStream() {
+    messageRecordingStreamRef.current?.getTracks?.().forEach((track) => track.stop());
+    messageRecordingStreamRef.current = null;
+  }
+
+  function cleanupMessageRecording({ cancel = false } = {}) {
+    messageRecordingCancelledRef.current = cancel;
+    const recorder = messageRecorderRef.current;
+
+    if (recorder && recorder.state !== 'inactive') {
+      recorder.stop();
+      return;
+    }
+
+    stopMessageRecordingTimer();
+    stopMessageRecordingStream();
+    messageRecorderRef.current = null;
+    messageRecordingChunksRef.current = [];
+    messageRecordingKindRef.current = '';
+    setVoiceRecording(false);
+    setCircleRecording(false);
+    setRecordingElapsed(0);
+  }
+
+  async function uploadRecordedAttachment(blob, kind) {
+    if (!blob?.size) {
+      setError('Recorded media was empty');
+      return;
+    }
+
+    const fileName = kind === 'circle'
+      ? `webcord-circle-video-${Date.now()}.webm`
+      : `webcord-voice-message-${Date.now()}.webm`;
+
+    try {
+      setUploading(true);
+      const formData = new FormData();
+      formData.append('file', blob, fileName);
+      setPendingAttachment(await apiFetch('/upload', { method: 'POST', body: formData }, token));
+      pushToast(kind === 'circle' ? 'Video circle attached' : 'Voice message attached');
+    } catch (err) {
+      reportError(err, 'Could not upload recorded media');
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function startMessageRecording(kind) {
+    if (!token) return;
+    if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+      setError('Recording is not supported in this browser');
+      return;
+    }
+    if (pendingAttachment) {
+      setError('Send or remove the current attachment before recording another one');
+      return;
+    }
+    if (editingMessage) {
+      setError('Finish editing before recording media');
+      return;
+    }
+
+    const activeRecorder = messageRecorderRef.current;
+    if (activeRecorder && activeRecorder.state !== 'inactive') {
+      cleanupMessageRecording();
+      return;
+    }
+
+    try {
+      setError('');
+      const audio = {
+        ...VOICE_AUDIO_CONSTRAINTS,
+        ...(clientSettings.micDeviceId ? { deviceId: { exact: clientSettings.micDeviceId } } : {})
+      };
+      const video = {
+        width: { ideal: 720 },
+        height: { ideal: 720 },
+        aspectRatio: { ideal: 1 },
+        facingMode: 'user',
+        ...(clientSettings.cameraDeviceId ? { deviceId: { exact: clientSettings.cameraDeviceId } } : {})
+      };
+      const stream = await navigator.mediaDevices.getUserMedia(kind === 'circle' ? { audio, video } : { audio, video: false });
+      const mimeType = kind === 'circle'
+        ? getSupportedRecorderMimeType(VIDEO_RECORDER_MIME_TYPES)
+        : getSupportedRecorderMimeType(AUDIO_RECORDER_MIME_TYPES);
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+
+      messageRecordingChunksRef.current = [];
+      messageRecordingStreamRef.current = stream;
+      messageRecorderRef.current = recorder;
+      messageRecordingKindRef.current = kind;
+      messageRecordingCancelledRef.current = false;
+
+      recorder.ondataavailable = (event) => {
+        if (event.data?.size) messageRecordingChunksRef.current.push(event.data);
+      };
+
+      recorder.onstop = async () => {
+        const chunks = messageRecordingChunksRef.current;
+        const cancelled = messageRecordingCancelledRef.current;
+        const recordedKind = messageRecordingKindRef.current;
+        const type = recorder.mimeType || (recordedKind === 'circle' ? 'video/webm' : 'audio/webm');
+
+        stopMessageRecordingTimer();
+        stopMessageRecordingStream();
+        messageRecorderRef.current = null;
+        messageRecordingChunksRef.current = [];
+        messageRecordingKindRef.current = '';
+        setVoiceRecording(false);
+        setCircleRecording(false);
+
+        if (!cancelled && chunks.length > 0) {
+          await uploadRecordedAttachment(new Blob(chunks, { type }), recordedKind);
+        }
+
+        setRecordingElapsed(0);
+      };
+
+      recorder.start(1000);
+      setRecordingElapsed(0);
+      setVoiceRecording(kind === 'voice');
+      setCircleRecording(kind === 'circle');
+      messageRecordingTimerRef.current = window.setInterval(() => {
+        setRecordingElapsed((value) => value + 1);
+      }, 1000);
+    } catch (err) {
+      cleanupMessageRecording({ cancel: true });
+      reportError(err, kind === 'circle' ? 'Could not record a video circle' : 'Could not record a voice message');
     }
   }
 
@@ -2349,6 +2739,7 @@ export default function App() {
       Object.values(peersRef.current).forEach((peer) => addStreamTracksToPeer(peer, displayStream));
       setScreenSharing(true);
       setVoiceStatus('Screen sharing');
+      emitVoiceState({ screen: true });
       await renegotiatePeers();
     } catch (err) {
       screenStreamRef.current = null;
@@ -2366,6 +2757,7 @@ export default function App() {
     screenStreamRef.current = null;
     setScreenSharing(false);
     setVoiceStatus('Screen sharing stopped');
+    emitVoiceState({ screen: false });
     await renegotiatePeers();
   }
 
@@ -2398,6 +2790,7 @@ export default function App() {
       Object.values(peersRef.current).forEach((peer) => addStreamTracksToPeer(peer, cameraStream));
       setCameraEnabled(true);
       setVoiceStatus('Camera on');
+      emitVoiceState({ camera: true });
       await renegotiatePeers();
     } catch (err) {
       cameraStreamRef.current = null;
@@ -2415,7 +2808,19 @@ export default function App() {
     cameraStreamRef.current = null;
     setCameraEnabled(false);
     setVoiceStatus('Camera off');
+    emitVoiceState({ camera: false });
     await renegotiatePeers();
+  }
+
+  function emitVoiceState(overrides = {}) {
+    socketRef.current?.emit('voice-state', {
+      channelId: Number(voiceChannelIdRef.current),
+      muted: micMuted,
+      camera: cameraEnabled,
+      screen: screenSharing,
+      speaking: false,
+      ...overrides
+    });
   }
 
   function toggleCamera() {
@@ -2495,6 +2900,7 @@ export default function App() {
       setVoiceJoined(true);
       setVoiceStatus(noiseSuppressionEnabled ? 'Noise suppression active' : 'Voice connected');
       socketRef.current?.emit('join-voice', { channelId: Number(voiceChannelId) });
+      window.setTimeout(() => emitVoiceState({ muted: false }), 0);
     } catch {
       cleanupVoice({ emitLeave: false });
       setError('Could not access the microphone');
@@ -2512,6 +2918,7 @@ export default function App() {
       track.enabled = !nextMuted;
     });
     setMicMuted(nextMuted);
+    emitVoiceState({ muted: nextMuted });
   }
 
   async function testCamera() {
@@ -2554,7 +2961,7 @@ export default function App() {
     workspace === 'friends'
       ? 'Friends'
       : workspace === 'dm'
-        ? `@ ${activeConversation?.user?.username || 'Direct messages'}`
+        ? (activeConversation?.user ? getDisplayName(activeConversation.user) : 'Direct messages')
         : activeTextChannel
           ? `# ${activeTextChannel.name}`
           : 'Server chat';
@@ -2566,7 +2973,7 @@ export default function App() {
   const voiceStageParticipants = [
     {
       socketId: 'self',
-      username: user?.username || 'You',
+      username: getDisplayName(user),
       user,
       muted: micMuted,
       status: screenSharing ? 'Sharing screen' : cameraEnabled ? 'Camera on' : micMuted ? 'Microphone muted' : 'Speaking ready'
@@ -2668,8 +3075,8 @@ export default function App() {
         <aside className={mobileSidebarOpen ? 'sidebar mobile-open' : 'sidebar'}>
           <div className="mobile-telegram-header">
             <div className="mobile-telegram-brand">
-              <span className="mobile-telegram-avatar">
-                {user?.avatarUrl ? <img src={getAttachmentUrl(user.avatarUrl)} alt={user?.username || 'user'} /> : (user?.username || '?').slice(0, 1).toUpperCase()}
+              <span className="mobile-telegram-avatar" style={getProfileStyle(user)}>
+                {user?.avatarUrl ? <img src={getAttachmentUrl(user.avatarUrl)} alt={getDisplayName(user)} /> : getDisplayName(user).slice(0, 1).toUpperCase()}
               </span>
               <div>
                 <strong><BrandLogo className="inline-brand-logo" /> WebCord</strong>
@@ -2679,14 +3086,14 @@ export default function App() {
             <button className="icon-btn" type="button" title="Appearance" aria-label="Appearance" onClick={() => { setSettingsSection('appearance'); setShowSettingsModal(true); }}>⚙</button>
           </div>
 
-          <div className="profile-card" style={{ backgroundImage: user?.bannerUrl ? `url(${getAttachmentUrl(user.bannerUrl)})` : undefined }}>
+          <div className="profile-card" style={getProfileBannerStyle(user)}>
             <div className="profile-card-overlay">
-              <span className="profile-avatar">
-                {user?.avatarUrl ? <img src={getAttachmentUrl(user.avatarUrl)} alt={user?.username || 'user'} /> : (user?.username || '?').slice(0, 1).toUpperCase()}
-              </span>
+              <UserAvatar user={user} />
               <div className="profile-copy">
-                <strong>{user?.username}</strong>
-                <p className="muted">{user?.bio || 'Set your bio, avatar and banner.'}</p>
+                <strong>{getDisplayName(user)}</strong>
+                <span className="profile-username">{getUsernameTag(user)}</span>
+                <p className="profile-status-line">{user?.statusText || 'Online'}</p>
+                {user?.favoriteTrack ? <p className="profile-track-inline">{user.favoriteTrack}</p> : null}
               </div>
               <button className="ghost-btn" type="button" onClick={() => { setSettingsSection('profile'); setShowSettingsModal(true); }}>Edit profile</button>
             </div>
@@ -2696,7 +3103,7 @@ export default function App() {
             <div>
               <span className="hero-badge brand-badge"><BrandLogo /> Live Workspace</span>
               <h2>WebCord</h2>
-              <p className="muted">{guild?.name || 'Workspace'} - {user?.username}</p>
+              <p className="muted">{guild?.name || 'Workspace'} - {getDisplayName(user)}</p>
             </div>
             <button className="icon-btn" type="button" title="Appearance" aria-label="Appearance" onClick={() => { setSettingsSection('appearance'); setShowSettingsModal(true); }}>⚙</button>
           </div>
@@ -2736,11 +3143,11 @@ export default function App() {
               </section>
               <section className="sidebar-card">
                 <p className="section-label">Incoming requests</p>
-                {incomingRequests.length === 0 ? <p className="muted">No pending invites.</p> : incomingRequests.map((request) => <div key={request.id} className="friend-row"><strong>{request.user?.username}</strong><div className="inline-actions"><button type="button" onClick={() => handleFriendRequest(request.id, 'ACCEPT')}>Accept</button><button className="ghost-btn" type="button" onClick={() => handleFriendRequest(request.id, 'DECLINE')}>Decline</button></div></div>)}
+                {incomingRequests.length === 0 ? <p className="muted">No pending invites.</p> : incomingRequests.map((request) => <div key={request.id} className="friend-row"><div className="friend-identity"><strong>{getDisplayName(request.user)}</strong><span>{getUsernameTag(request.user)}</span></div><div className="inline-actions"><button type="button" onClick={() => handleFriendRequest(request.id, 'ACCEPT')}>Accept</button><button className="ghost-btn" type="button" onClick={() => handleFriendRequest(request.id, 'DECLINE')}>Decline</button></div></div>)}
               </section>
               <section className="sidebar-card">
                 <p className="section-label">Outgoing requests</p>
-                {outgoingRequests.length === 0 ? <p className="muted">Nothing pending.</p> : outgoingRequests.map((request) => <div key={request.id} className="friend-row compact"><strong>{request.user?.username}</strong><span className="request-pill">Pending</span></div>)}
+                {outgoingRequests.length === 0 ? <p className="muted">Nothing pending.</p> : outgoingRequests.map((request) => <div key={request.id} className="friend-row compact"><div className="friend-identity"><strong>{getDisplayName(request.user)}</strong><span>{getUsernameTag(request.user)}</span></div><span className="request-pill">Pending</span></div>)}
               </section>
             </div>
           ) : null}
@@ -2750,12 +3157,12 @@ export default function App() {
               <section className="sidebar-card">
                 <p className="section-label">Direct messages</p>
                 <input value={dmSearch} onChange={(e) => setDmSearch(e.target.value)} placeholder="Search DMs" />
-                {social.conversations.length === 0 ? <p className="muted">Accept a friend request to unlock DMs.</p> : filteredConversations.map((conversation) => <button key={conversation.id} className={String(conversation.id) === String(dmConversationId) ? 'channel-btn active conversation-btn' : 'channel-btn conversation-btn'} type="button" onClick={() => selectConversation(conversation.id)}><strong>@ {conversation.user?.username}</strong><span>{conversation.lastMessage?.content || conversation.lastMessage?.attachmentName || 'Start talking'}</span></button>)}
+                {social.conversations.length === 0 ? <p className="muted">Accept a friend request to unlock DMs.</p> : filteredConversations.map((conversation) => <button key={conversation.id} className={String(conversation.id) === String(dmConversationId) ? 'channel-btn active conversation-btn' : 'channel-btn conversation-btn'} type="button" onClick={() => selectConversation(conversation.id)}><strong>{getDisplayName(conversation.user)}</strong><span>{getUsernameTag(conversation.user)} - {conversation.lastMessage?.content || conversation.lastMessage?.attachmentName || 'Start talking'}</span></button>)}
                 {social.conversations.length > 0 && filteredConversations.length === 0 ? <p className="muted">No DMs match this search.</p> : null}
               </section>
               <section className="sidebar-card">
                 <p className="section-label">Friends</p>
-                {social.friends.length === 0 ? <p className="muted">No friends yet.</p> : social.friends.map((friend) => <div key={friend.id} className="friend-row"><strong>{friend.user?.username}</strong><button type="button" onClick={() => openConversation(friend.user.id)}>Open DM</button></div>)}
+                {social.friends.length === 0 ? <p className="muted">No friends yet.</p> : social.friends.map((friend) => <div key={friend.id} className="friend-row"><div className="friend-identity"><strong>{getDisplayName(friend.user)}</strong><span>{getUsernameTag(friend.user)}</span></div><button type="button" onClick={() => openConversation(friend.user.id)}>Open DM</button></div>)}
               </section>
             </div>
           ) : null}
@@ -2828,29 +3235,49 @@ export default function App() {
             <div className="dashboard-grid">
               <section className="dashboard-card">
                 <p className="section-label">Friends</p>
-                {social.friends.length === 0 ? <p className="muted">Your friend list is empty.</p> : social.friends.map((friend) => <div key={friend.id} className="friend-row"><strong>{friend.user?.username}</strong><button type="button" onClick={() => openConversation(friend.user.id)}>Message</button></div>)}
+                {social.friends.length === 0 ? <p className="muted">Your friend list is empty.</p> : social.friends.map((friend) => <div key={friend.id} className="friend-row"><div className="friend-identity"><strong>{getDisplayName(friend.user)}</strong><span>{getUsernameTag(friend.user)}</span></div><button type="button" onClick={() => openConversation(friend.user.id)}>Message</button></div>)}
               </section>
               <section className="dashboard-card">
                 <p className="section-label">Direct conversations</p>
-                {social.conversations.length === 0 ? <p className="muted">No conversations yet.</p> : social.conversations.map((conversation) => <button key={conversation.id} className="channel-btn conversation-btn" type="button" onClick={() => selectConversation(conversation.id)}><strong>@ {conversation.user?.username}</strong><span>{conversation.lastMessage?.content || conversation.lastMessage?.attachmentName || 'Conversation ready'}</span></button>)}
+                {social.conversations.length === 0 ? <p className="muted">No conversations yet.</p> : social.conversations.map((conversation) => <button key={conversation.id} className="channel-btn conversation-btn" type="button" onClick={() => selectConversation(conversation.id)}><strong>{getDisplayName(conversation.user)}</strong><span>{getUsernameTag(conversation.user)} - {conversation.lastMessage?.content || conversation.lastMessage?.attachmentName || 'Conversation ready'}</span></button>)}
               </section>
             </div>
           ) : (
             <>
               <div className="messages" ref={messagesRef} onScroll={handleMessagesScroll}>
-                {messages.length === 0 ? <div className="empty-state"><h3>{workspace === 'dm' ? 'No direct messages yet' : 'No messages yet'}</h3><p className="muted">{workspace === 'dm' ? 'This thread is ready.' : 'Start the conversation in this channel.'}</p></div> : messages.map((message) => <MessageItem key={message.id} message={message} workspace={workspace} currentUserId={user?.id} onAvatarClick={setViewedProfile} onReply={beginReply} onEdit={beginEdit} onDelete={deleteMessage} />)}
+                {messages.length === 0 ? <div className="empty-state"><h3>{workspace === 'dm' ? 'No direct messages yet' : 'No messages yet'}</h3><p className="muted">{workspace === 'dm' ? 'This thread is ready.' : 'Start the conversation in this channel.'}</p></div> : messages.map((message) => <MessageItem key={message.id} message={message} workspace={workspace} currentUserId={user?.id} onAvatarClick={setViewedProfile} onReply={beginReply} onEdit={beginEdit} onDelete={deleteMessage} onOpenMedia={setViewedMedia} />)}
                 <div ref={endRef} />
               </div>
               <form className="message-form composer" onSubmit={sendMessage}>
                 {replyTarget || editingMessage ? (
                   <div className="composer-context">
-                    <span>{editingMessage ? 'Editing message' : `Replying to ${replyTarget?.author?.username || 'message'}`}</span>
+                    <span>{editingMessage ? 'Editing message' : `Replying to ${getDisplayName(replyTarget?.author)}`}</span>
                     <strong>{editingMessage?.content || replyTarget?.content || replyTarget?.attachmentName || 'Attachment'}</strong>
                     <button className="icon-btn" type="button" onClick={cancelComposerContext}>x</button>
                   </div>
                 ) : null}
-                <input ref={fileInputRef} type="file" onChange={handleFileSelect} hidden />
+                <input ref={fileInputRef} type="file" accept="image/*,video/*,audio/*,.webm,.ogg,.mp3,.m4a,.wav" onChange={handleFileSelect} hidden />
                 <button className="icon-btn composer-btn" type="button" onClick={() => fileInputRef.current?.click()}>+</button>
+                <button
+                  className={voiceRecording ? 'icon-btn composer-btn recording' : 'icon-btn composer-btn'}
+                  type="button"
+                  title={voiceRecording ? 'Stop voice recording' : 'Record voice message'}
+                  aria-label={voiceRecording ? 'Stop voice recording' : 'Record voice message'}
+                  disabled={uploading || circleRecording || (!!pendingAttachment && !voiceRecording) || Boolean(editingMessage)}
+                  onClick={() => (voiceRecording ? cleanupMessageRecording() : startMessageRecording('voice'))}
+                >
+                  {voiceRecording ? '■' : 'mic'}
+                </button>
+                <button
+                  className={circleRecording ? 'icon-btn composer-btn recording' : 'icon-btn composer-btn'}
+                  type="button"
+                  title={circleRecording ? 'Stop video circle' : 'Record video circle'}
+                  aria-label={circleRecording ? 'Stop video circle' : 'Record video circle'}
+                  disabled={uploading || voiceRecording || (!!pendingAttachment && !circleRecording) || Boolean(editingMessage)}
+                  onClick={() => (circleRecording ? cleanupMessageRecording() : startMessageRecording('circle'))}
+                >
+                  {circleRecording ? '■' : 'cam'}
+                </button>
                 <div className="emoji-wrapper">
                   <button className="icon-btn composer-btn" type="button" onClick={() => setShowEmojiPicker((prev) => !prev)}>:)</button>
                   {showEmojiPicker ? (
@@ -2870,9 +3297,17 @@ export default function App() {
           <div className="panel-footer">
             {pendingAttachment ? (
               <div className="attachment-preview">
-                <span className="attachment-dot">{pendingAttachment.type === 'IMAGE' ? 'IMG' : pendingAttachment.type === 'VIDEO' ? 'VID' : 'FILE'}</span>
+                <span className="attachment-dot">{getAttachmentBadge(getAttachmentKind({ attachmentType: pendingAttachment.type, attachmentName: pendingAttachment.name, attachmentUrl: pendingAttachment.url }))}</span>
                 <p className="muted">Attached: {pendingAttachment.name}</p>
                 <button className="icon-btn" type="button" aria-label="Remove attachment" title="Remove attachment" onClick={() => setPendingAttachment(null)}>×</button>
+              </div>
+            ) : null}
+            {voiceRecording || circleRecording ? (
+              <div className="recording-preview">
+                <span className="recording-dot" />
+                <strong>{circleRecording ? 'Recording video circle' : 'Recording voice'}</strong>
+                <span>{formatShortDuration(recordingElapsed)}</span>
+                <button className="ghost-btn" type="button" onClick={() => cleanupMessageRecording({ cancel: true })}>Cancel</button>
               </div>
             ) : null}
             {uploading ? <p className="muted">Uploading...</p> : null}
@@ -2913,8 +3348,8 @@ export default function App() {
             <div className="activity-card">
               <UserAvatar user={user} />
               <div>
-                <strong>{user?.username}</strong>
-                <span>{voiceJoined ? `In ${activeVoiceChannel?.name || 'voice'}` : 'Browsing WebCord'}</span>
+                <strong>{getDisplayName(user)}</strong>
+                <span>{voiceJoined ? `In ${activeVoiceChannel?.name || 'voice'}` : (user?.statusText || 'Browsing WebCord')}</span>
               </div>
             </div>
           </section>
@@ -2924,8 +3359,8 @@ export default function App() {
               <button key={friend.id} className="activity-card interactive" type="button" onClick={() => openConversation(friend.user.id)}>
                 <UserAvatar user={friend.user} />
                 <div>
-                  <strong>{friend.user?.username}</strong>
-                  <span>Open direct message</span>
+                  <strong>{getDisplayName(friend.user)}</strong>
+                  <span>{friend.user?.statusText || getUsernameTag(friend.user)}</span>
                 </div>
               </button>
             ))}
@@ -2987,6 +3422,7 @@ export default function App() {
         onAddFriend={() => handleAddFriendFromProfile().catch((err) => setError(err.message))}
         onClose={() => setViewedProfile(null)}
       />
+      <MediaViewer message={viewedMedia} onClose={() => setViewedMedia(null)} />
     </>
   );
 }

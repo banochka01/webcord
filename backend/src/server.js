@@ -27,6 +27,12 @@ const ADMIN_USERNAMES = new Set(
     .map((username) => normalizeUsername(username))
     .filter(Boolean)
 );
+const TURN_URLS = String(process.env.TURN_URLS || process.env.TURN_URL || '')
+  .split(',')
+  .map((url) => url.trim())
+  .filter(Boolean);
+const TURN_USERNAME = String(process.env.TURN_USERNAME || '').trim();
+const TURN_CREDENTIAL = String(process.env.TURN_CREDENTIAL || '').trim();
 const BLOCKED_UPLOAD_EXTENSIONS = new Set(['.cjs', '.htm', '.html', '.js', '.mjs', '.svg', '.xhtml', '.xml']);
 const BLOCKED_UPLOAD_MIME_TYPES = new Set([
   'application/javascript',
@@ -103,14 +109,19 @@ const rateLimitBuckets = new Map();
 const publicUserSelect = {
   id: true,
   username: true,
+  displayName: true,
   avatarUrl: true,
   bannerUrl: true,
-  bio: true
+  bio: true,
+  statusText: true,
+  favoriteTrack: true,
+  accentColor: true
 };
 const authRateLimit = createRateLimiter({ windowMs: 60_000, max: 20, keyPrefix: 'auth' });
 const messageRateLimitConfig = { windowMs: 10_000, max: 18, keyPrefix: 'message' };
 const messageRateLimit = createRateLimiter(messageRateLimitConfig);
 const uploadRateLimit = createRateLimiter({ windowMs: 60_000, max: 20, keyPrefix: 'upload' });
+const ATTACHMENT_TYPES = new Set(['IMAGE', 'VIDEO', 'AUDIO', 'CIRCLE_VIDEO', 'FILE']);
 
 function normalizeUsername(value) {
   return String(value || '').trim().toLowerCase();
@@ -120,10 +131,47 @@ function isAdminUsername(username) {
   return ADMIN_USERNAMES.has(normalizeUsername(username));
 }
 
-function getAttachmentType(mimeType = '') {
+function getVoiceIceServers() {
+  const servers = [{ urls: 'stun:stun.l.google.com:19302' }];
+
+  if (TURN_URLS.length > 0) {
+    servers.push(
+      TURN_USERNAME || TURN_CREDENTIAL
+        ? { urls: TURN_URLS, username: TURN_USERNAME, credential: TURN_CREDENTIAL }
+        : { urls: TURN_URLS }
+    );
+  }
+
+  return servers;
+}
+
+function booleanFromPayload(value) {
+  return value === true || value === 'true' || value === 1 || value === '1';
+}
+
+function looksCircleVideoName(fileName = '') {
+  const source = String(fileName || '').toLowerCase();
+  return (
+    source.includes('circle-video') ||
+    source.includes('round-video') ||
+    source.includes('video-note') ||
+    source.includes('video_message') ||
+    source.includes('video-message') ||
+    source.includes('webcord-circle')
+  );
+}
+
+function getAttachmentType(mimeType = '', fileName = '') {
   if (mimeType.startsWith('image/')) return 'IMAGE';
-  if (mimeType.startsWith('video/')) return 'VIDEO';
+  if (mimeType.startsWith('audio/')) return 'AUDIO';
+  if (mimeType.startsWith('video/')) return looksCircleVideoName(fileName) ? 'CIRCLE_VIDEO' : 'VIDEO';
   return 'FILE';
+}
+
+function normalizeAttachmentType(value) {
+  if (!value) return null;
+  const normalized = String(value).trim().toUpperCase();
+  return ATTACHMENT_TYPES.has(normalized) ? normalized : null;
 }
 
 function sendApiError(res, status, code, error) {
@@ -212,6 +260,56 @@ function sendCaughtApiError(res, error, fallbackCode, fallbackMessage) {
   return sendApiError(res, 500, fallbackCode, fallbackMessage);
 }
 
+function serializePublicUser(user) {
+  if (!user) return null;
+  return {
+    id: user.id,
+    username: user.username,
+    displayName: user.displayName || null,
+    avatarUrl: user.avatarUrl || null,
+    bannerUrl: user.bannerUrl || null,
+    bio: user.bio || '',
+    statusText: user.statusText || 'Online',
+    favoriteTrack: user.favoriteTrack || '',
+    accentColor: user.accentColor || '#7c5cff'
+  };
+}
+
+function sanitizeProfilePayload(body = {}) {
+  const data = {};
+
+  if (Object.prototype.hasOwnProperty.call(body, 'bio')) {
+    data.bio = String(body.bio ?? '').trim().slice(0, 280);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'displayName')) {
+    data.displayName = String(body.displayName ?? '').trim().slice(0, 40) || null;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'statusText')) {
+    data.statusText = String(body.statusText ?? 'Online').trim().slice(0, 80) || 'Online';
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'favoriteTrack')) {
+    data.favoriteTrack = String(body.favoriteTrack ?? '').trim().slice(0, 120);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'accentColor')) {
+    const accentColor = String(body.accentColor || '').trim();
+    data.accentColor = /^#[0-9a-fA-F]{6}$/.test(accentColor) ? accentColor : '#7c5cff';
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'avatarUrl')) {
+    data.avatarUrl = body.avatarUrl ? String(body.avatarUrl).trim() : null;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'bannerUrl')) {
+    data.bannerUrl = body.bannerUrl ? String(body.bannerUrl).trim() : null;
+  }
+
+  return data;
+}
+
 async function adminMiddleware(req, res, next) {
   try {
     if (ADMIN_USERNAMES.size === 0) {
@@ -267,7 +365,7 @@ function serializeFriendRequest(request, currentUserId) {
     createdAt: request.createdAt,
     updatedAt: request.updatedAt,
     direction: incoming ? 'INCOMING' : 'OUTGOING',
-    user: counterpart ? { id: counterpart.id, username: counterpart.username, avatarUrl: counterpart.avatarUrl, bannerUrl: counterpart.bannerUrl, bio: counterpart.bio } : null
+    user: serializePublicUser(counterpart)
   };
 }
 
@@ -276,7 +374,7 @@ function serializeFriendship(friendship, currentUserId) {
   return {
     id: friendship.id,
     createdAt: friendship.createdAt,
-    user: counterpart ? { id: counterpart.id, username: counterpart.username, avatarUrl: counterpart.avatarUrl, bannerUrl: counterpart.bannerUrl, bio: counterpart.bio } : null
+    user: serializePublicUser(counterpart)
   };
 }
 
@@ -287,7 +385,7 @@ function serializeDirectConversation(conversation, currentUserId) {
   return {
     id: conversation.id,
     updatedAt: conversation.updatedAt,
-    user: counterpart ? { id: counterpart.id, username: counterpart.username, avatarUrl: counterpart.avatarUrl, bannerUrl: counterpart.bannerUrl, bio: counterpart.bio } : null,
+    user: serializePublicUser(counterpart),
     lastMessage: lastMessage
       ? {
           id: lastMessage.id,
@@ -295,7 +393,7 @@ function serializeDirectConversation(conversation, currentUserId) {
           attachmentType: lastMessage.attachmentType,
           attachmentName: lastMessage.attachmentName,
           createdAt: lastMessage.createdAt,
-          author: lastMessage.author ? { id: lastMessage.author.id, username: lastMessage.author.username, avatarUrl: lastMessage.author.avatarUrl } : null
+          author: serializePublicUser(lastMessage.author)
         }
       : null
   };
@@ -391,7 +489,7 @@ function emitSocialRefresh(userIds) {
 async function createChannelMessage({ channelId, userId, content, attachmentUrl, attachmentType, attachmentName, replyToId }) {
   const channel = await prisma.channel.findUnique({
     where: { id: channelId },
-    select: { id: true, type: true }
+    select: { id: true, type: true, guildId: true }
   });
 
   if (!channel || channel.type !== 'TEXT') {
@@ -409,7 +507,7 @@ async function createChannelMessage({ channelId, userId, content, attachmentUrl,
     }
   }
 
-  return prisma.message.create({
+  const message = await prisma.message.create({
     data: {
       channelId,
       content,
@@ -428,6 +526,8 @@ async function createChannelMessage({ channelId, userId, content, attachmentUrl,
       }
     }
   });
+
+  return { ...message, guildId: channel.guildId };
 }
 
 async function createDirectConversationMessage({ conversationId, userId, content, attachmentUrl, attachmentType, attachmentName, replyToId }) {
@@ -520,6 +620,10 @@ app.get('/api/health', (_req, res) => {
   res.json({ ok: true, voiceRooms: voiceParticipants.size });
 });
 
+app.get('/api/voice/ice-servers', authMiddleware, (_req, res) => {
+  res.json({ iceServers: getVoiceIceServers() });
+});
+
 app.post('/api/auth/register', authRateLimit, async (req, res) => {
   try {
     const username = String(req.body.username || '').trim();
@@ -549,13 +653,7 @@ app.post('/api/auth/register', authRateLimit, async (req, res) => {
 
     return res.status(201).json({
       token: signToken(user),
-      user: {
-        id: user.id,
-        username: user.username,
-        avatarUrl: user.avatarUrl,
-        bannerUrl: user.bannerUrl,
-        bio: user.bio
-      }
+      user: serializePublicUser(user)
     });
   } catch (error) {
     console.error(error);
@@ -581,13 +679,7 @@ app.post('/api/auth/login', authRateLimit, async (req, res) => {
 
     return res.json({
       token: signToken(user),
-      user: {
-        id: user.id,
-        username: user.username,
-        avatarUrl: user.avatarUrl,
-        bannerUrl: user.bannerUrl,
-        bio: user.bio
-      }
+      user: serializePublicUser(user)
     });
   } catch (error) {
     console.error(error);
@@ -676,7 +768,7 @@ app.get('/api/bootstrap', authMiddleware, async (req, res) => {
       guild,
       channels,
       social,
-      currentUser,
+      currentUser: serializePublicUser(currentUser),
       defaults: {
         textChannelId: textChannel.id,
         voiceChannelId: voiceChannel.id
@@ -694,7 +786,7 @@ app.get('/api/me/profile', authMiddleware, async (req, res) => {
       where: { id: req.user.userId },
       select: publicUserSelect
     });
-    return res.json(currentUser);
+    return res.json(serializePublicUser(currentUser));
   } catch (error) {
     console.error(error);
     return res.status(500).json({ error: 'Failed to fetch profile' });
@@ -703,25 +795,14 @@ app.get('/api/me/profile', authMiddleware, async (req, res) => {
 
 app.patch('/api/me/profile', authMiddleware, async (req, res) => {
   try {
-    const bio = String(req.body.bio ?? '').trim().slice(0, 280);
-    const data = { bio };
-
-    if (Object.prototype.hasOwnProperty.call(req.body, 'avatarUrl')) {
-      data.avatarUrl = req.body.avatarUrl ? String(req.body.avatarUrl).trim() : null;
-    }
-
-    if (Object.prototype.hasOwnProperty.call(req.body, 'bannerUrl')) {
-      data.bannerUrl = req.body.bannerUrl ? String(req.body.bannerUrl).trim() : null;
-    }
-
     const currentUser = await prisma.user.update({
       where: { id: req.user.userId },
-      data,
+      data: sanitizeProfilePayload(req.body),
       select: publicUserSelect
     });
 
     emitSocialRefresh([req.user.userId]);
-    return res.json(currentUser);
+    return res.json(serializePublicUser(currentUser));
   } catch (error) {
     console.error(error);
     return res.status(500).json({ error: 'Failed to update profile' });
@@ -1073,7 +1154,7 @@ app.post('/api/messages', authMiddleware, messageRateLimit, async (req, res) => 
     const channelId = Number(req.body.channelId);
     const content = String(req.body.content || '').trim();
     const attachmentUrl = req.body.attachmentUrl || null;
-    const attachmentType = req.body.attachmentType || null;
+    const attachmentType = normalizeAttachmentType(req.body.attachmentType);
     const attachmentName = req.body.attachmentName || null;
     const replyToId = parseOptionalPositiveInt(req.body.replyToId);
 
@@ -1115,7 +1196,7 @@ app.post('/api/dms/:conversationId/messages', authMiddleware, messageRateLimit, 
     const conversationId = Number(req.params.conversationId);
     const content = String(req.body.content || '').trim();
     const attachmentUrl = req.body.attachmentUrl || null;
-    const attachmentType = req.body.attachmentType || null;
+    const attachmentType = normalizeAttachmentType(req.body.attachmentType);
     const attachmentName = req.body.attachmentName || null;
     const replyToId = parseOptionalPositiveInt(req.body.replyToId);
 
@@ -1325,7 +1406,7 @@ app.post('/api/upload', authMiddleware, uploadRateLimit, upload.single('file'), 
 
   return res.status(201).json({
     url: `/uploads/${req.file.filename}`,
-    type: getAttachmentType(req.file.mimetype),
+    type: getAttachmentType(req.file.mimetype, req.file.originalname || req.file.filename),
     name: req.file.originalname
   });
 });
@@ -1374,11 +1455,19 @@ function getVoiceRoomKey(channelId) {
 
 function getVoiceParticipantList(roomKey) {
   const participants = voiceParticipants.get(roomKey) || new Map();
-  return Array.from(participants.entries()).map(([socketId, participant]) => ({
+  return Array.from(participants.entries()).map(([socketId, participant]) => serializeVoiceParticipant(socketId, participant));
+}
+
+function serializeVoiceParticipant(socketId, participant = {}) {
+  return {
     socketId,
     userId: participant.userId,
-    username: participant.username
-  }));
+    username: participant.username,
+    muted: Boolean(participant.muted),
+    camera: Boolean(participant.camera),
+    screen: Boolean(participant.screen),
+    speaking: Boolean(participant.speaking)
+  };
 }
 
 function leaveVoiceRoom(socket) {
@@ -1473,7 +1562,7 @@ io.on('connection', (socket) => {
       const channelId = Number(payload.channelId);
       const content = String(payload.content || '').trim();
       const attachmentUrl = payload.attachmentUrl || null;
-      const attachmentType = payload.attachmentType || null;
+      const attachmentType = normalizeAttachmentType(payload.attachmentType);
       const attachmentName = payload.attachmentName || null;
       const replyToId = parseOptionalPositiveInt(payload.replyToId);
 
@@ -1500,6 +1589,7 @@ io.on('connection', (socket) => {
       }
 
       io.to(`channel:${channelId}`).emit('new-message', message);
+      if (message.guildId) io.to(`guild:${message.guildId}`).emit('guild-message:new', message);
     } catch (error) {
       console.error(error);
       socket.emit('socket-error', { code: error?.code, error: error?.message || 'Failed to send message' });
@@ -1513,7 +1603,7 @@ io.on('connection', (socket) => {
       const conversationId = Number(payload.conversationId);
       const content = String(payload.content || '').trim();
       const attachmentUrl = payload.attachmentUrl || null;
-      const attachmentType = payload.attachmentType || null;
+      const attachmentType = normalizeAttachmentType(payload.attachmentType);
       const attachmentName = payload.attachmentName || null;
       const replyToId = parseOptionalPositiveInt(payload.replyToId);
 
@@ -1542,6 +1632,12 @@ io.on('connection', (socket) => {
       io.to(`dm:${conversationId}`).emit('direct-message:new', {
         ...message,
         conversationId
+      });
+      [conversation.userOneId, conversation.userTwoId].forEach((userId) => {
+        io.to(`user:${userId}`).emit('direct-message:notify', {
+          ...message,
+          conversationId
+        });
       });
       emitSocialRefresh([conversation.userOneId, conversation.userTwoId]);
     } catch (error) {
@@ -1574,15 +1670,15 @@ io.on('connection', (socket) => {
       const participants = voiceParticipants.get(roomKey) || new Map();
       participants.set(socket.id, {
         userId: socket.user.userId,
-        username: socket.user.username
+        username: socket.user.username,
+        muted: false,
+        camera: false,
+        screen: false,
+        speaking: false
       });
       voiceParticipants.set(roomKey, participants);
 
-      socket.to(roomKey).emit('voice-user-joined', {
-        socketId: socket.id,
-        userId: socket.user.userId,
-        username: socket.user.username
-      });
+      socket.to(roomKey).emit('voice-user-joined', serializeVoiceParticipant(socket.id, participants.get(socket.id)));
       socket.data.voiceRoomKey = roomKey;
     } catch (error) {
       console.error(error);
@@ -1591,6 +1687,23 @@ io.on('connection', (socket) => {
   });
 
   socket.on('leave-voice', () => leaveVoiceRoom(socket));
+
+  socket.on('voice-state', (payload = {}) => {
+    const roomKey = socket.data.voiceRoomKey;
+    if (!roomKey) return;
+
+    const participants = voiceParticipants.get(roomKey);
+    const participant = participants?.get(socket.id);
+    if (!participants || !participant) return;
+
+    participant.muted = booleanFromPayload(payload.muted);
+    participant.camera = booleanFromPayload(payload.camera);
+    participant.screen = booleanFromPayload(payload.screen);
+    participant.speaking = booleanFromPayload(payload.speaking);
+    participants.set(socket.id, participant);
+
+    io.to(roomKey).emit('voice-state', serializeVoiceParticipant(socket.id, participant));
+  });
 
   socket.on('voice-offer', ({ channelId, offer, targetSocketId }) => {
     emitVoiceSignal(socket, 'voice-offer', { channelId, offer, targetSocketId });

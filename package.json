@@ -22,6 +22,13 @@
     "desktop:electron:start": "npm.cmd --prefix frontend run build && npm.cmd --prefix desktop start",
     "desktop:electron:pack": "npm.cmd --prefix desktop run pack",
     "desktop:electron:build": "npm.cmd --prefix desktop run build",
+    "native:doctor": "powershell -ExecutionPolicy Bypass -File scripts/flutter-native.ps1 doctor -v",
+    "native:analyze": "powershell -ExecutionPolicy Bypass -File scripts/flutter-native.ps1 analyze",
+    "native:test": "powershell -ExecutionPolicy Bypass -File scripts/flutter-native.ps1 test",
+    "native:android:debug": "powershell -ExecutionPolicy Bypass -File scripts/flutter-native.ps1 build apk --debug --dart-define=WEBCORD_API_URL=https://webcordes.ru/api",
+    "native:android:release": "powershell -ExecutionPolicy Bypass -File scripts/flutter-native.ps1 build apk --release --dart-define=WEBCORD_API_URL=https://webcordes.ru/api",
+    "native:windows:release": "powershell -ExecutionPolicy Bypass -File scripts/flutter-native.ps1 build windows --release --dart-define=WEBCORD_API_URL=https://webcordes.ru/api",
+    "native:release": "npm.cmd run native:android:release && npm.cmd run native:windows:release",
     "clients:release": "npm.cmd run android:release:apk && npm.cmd run desktop:build"
   },
   "dependencies": {

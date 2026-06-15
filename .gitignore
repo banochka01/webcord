@@ -2,6 +2,9 @@
 *.env
 !.env.example
 
+.codex-remote-attachments/
+releases/
+
 node_modules/
 dist/
 build/
