@@ -1,0 +1,10 @@
+CREATE TYPE "UserRole" AS ENUM ('USER', 'ADMIN', 'OWNER');
+
+ALTER TABLE "User"
+  ADD COLUMN "role" "UserRole" NOT NULL DEFAULT 'USER';
+
+ALTER TABLE "Guild"
+  ADD COLUMN "description" TEXT NOT NULL DEFAULT '',
+  ADD COLUMN "iconUrl" TEXT,
+  ADD COLUMN "bannerUrl" TEXT,
+  ADD COLUMN "accentColor" TEXT NOT NULL DEFAULT '#7c5cff';

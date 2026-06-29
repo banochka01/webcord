@@ -19,6 +19,9 @@ class PublicUser {
     this.favoriteTrackUrl,
     this.favoriteTrackName,
     this.accentColor = '#7c5cff',
+    this.role = 'USER',
+    this.isAdmin = false,
+    this.canManageRoles = false,
   });
 
   final int id;
@@ -32,6 +35,12 @@ class PublicUser {
   final String? favoriteTrackUrl;
   final String? favoriteTrackName;
   final String accentColor;
+  final String role;
+  final bool isAdmin;
+  final bool canManageRoles;
+
+  bool get canManageChannels =>
+      isAdmin || role.toUpperCase() == 'ADMIN' || role.toUpperCase() == 'OWNER';
 
   String get displayLabel {
     final value = displayName?.trim();
@@ -52,6 +61,9 @@ class PublicUser {
       favoriteTrackUrl: _asNullableString(data['favoriteTrackUrl']),
       favoriteTrackName: _asNullableString(data['favoriteTrackName']),
       accentColor: '${data['accentColor'] ?? '#7c5cff'}',
+      role: '${data['role'] ?? 'USER'}',
+      isAdmin: data['isAdmin'] == true,
+      canManageRoles: data['canManageRoles'] == true,
     );
   }
 }
@@ -71,13 +83,31 @@ class AuthSession {
 }
 
 class Guild {
-  const Guild({required this.id, required this.name});
+  const Guild({
+    required this.id,
+    required this.name,
+    this.description = '',
+    this.iconUrl,
+    this.bannerUrl,
+    this.accentColor = '#7c5cff',
+  });
 
   final int id;
   final String name;
+  final String description;
+  final String? iconUrl;
+  final String? bannerUrl;
+  final String accentColor;
 
   factory Guild.fromJson(Map<String, dynamic> json) {
-    return Guild(id: _asInt(json['id']), name: '${json['name'] ?? 'WebCord'}');
+    return Guild(
+      id: _asInt(json['id']),
+      name: '${json['name'] ?? 'WebCord'}',
+      description: '${json['description'] ?? ''}',
+      iconUrl: _asNullableString(json['iconUrl']),
+      bannerUrl: _asNullableString(json['bannerUrl']),
+      accentColor: '${json['accentColor'] ?? '#7c5cff'}',
+    );
   }
 }
 

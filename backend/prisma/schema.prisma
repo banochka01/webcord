@@ -36,10 +36,17 @@ enum StoryMediaType {
   VIDEO
 }
 
+enum UserRole {
+  USER
+  ADMIN
+  OWNER
+}
+
 model User {
   id                      Int                 @id @default(autoincrement())
   username                String              @unique
   password                String
+  role                    UserRole            @default(USER)
   displayName             String?
   avatarUrl               String?
   bannerUrl               String?
@@ -65,10 +72,14 @@ model User {
 }
 
 model Guild {
-  id        Int       @id @default(autoincrement())
-  name      String
-  channels  Channel[]
-  createdAt DateTime  @default(now())
+  id          Int       @id @default(autoincrement())
+  name        String
+  description String    @default("")
+  iconUrl     String?
+  bannerUrl   String?
+  accentColor String    @default("#7c5cff")
+  channels    Channel[]
+  createdAt   DateTime  @default(now())
 }
 
 model Channel {

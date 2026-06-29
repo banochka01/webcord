@@ -153,6 +153,14 @@ function getProfileBannerStyle(profile = {}) {
   };
 }
 
+function getGuildCoverStyle(guild = {}) {
+  const accent = normalizeProfileAccent(guild.accentColor);
+  return {
+    '--guild-accent': accent,
+    backgroundImage: guild.bannerUrl ? `url(${getAttachmentUrl(guild.bannerUrl)})` : undefined
+  };
+}
+
 function createProfileDraft(user = {}) {
   return {
     displayName: user.displayName || '',
@@ -163,6 +171,19 @@ function createProfileDraft(user = {}) {
     favoriteTrack: user.favoriteTrack || '',
     accentColor: normalizeProfileAccent(user.accentColor)
   };
+}
+
+function normalizeUserRole(value) {
+  const role = String(value || 'USER').trim().toUpperCase();
+  return ['USER', 'ADMIN', 'OWNER'].includes(role) ? role : 'USER';
+}
+
+function canManageChannels(user) {
+  return ['ADMIN', 'OWNER'].includes(normalizeUserRole(user?.role)) || Boolean(user?.isAdmin);
+}
+
+function canManageUserRoles(user) {
+  return normalizeUserRole(user?.role) === 'OWNER' || Boolean(user?.canManageRoles);
 }
 const EmojiPicker = lazy(async () => {
   const [{ default: Picker }, { default: data }] = await Promise.all([
@@ -389,7 +410,7 @@ function tuneOpusDescription(description) {
   const payloadType = lines[opusLineIndex].match(/^a=rtpmap:(\d+)/)?.[1];
   if (!payloadType) return description;
 
-  const fmtpValue = 'minptime=10;useinbandfec=1;usedtx=1;maxaveragebitrate=32000;stereo=0;sprop-stereo=0';
+  const fmtpValue = 'minptime=10;useinbandfec=1;usedtx=0;maxaveragebitrate=64000;maxplaybackrate=48000;stereo=0;sprop-stereo=0';
   const fmtpIndex = lines.findIndex((line) => line.startsWith(`a=fmtp:${payloadType}`));
 
   if (fmtpIndex >= 0) {
@@ -456,7 +477,7 @@ function ThemeModal({ open, theme, onClose, onThemeChange, onReset }) {
             <h3>Theme Studio</h3>
             <p className="muted">Colors apply instantly.</p>
           </div>
-          <button className="icon-btn" type="button" onClick={onClose}>x</button>
+          <button className="icon-btn" type="button" aria-label="Close" title="Close" onClick={onClose}><AppIcon name="close" /></button>
         </div>
 
         <div className="preset-grid">
@@ -504,6 +525,46 @@ function BrowserIcon() {
       <path d="M4 9h16" />
       <path d="M8 7h.01M11 7h.01" />
       <path d="M9 14h6" />
+    </svg>
+  );
+}
+
+const APP_ICONS = {
+  arrowLeft: <><path d="m15 18-6-6 6-6" /><path d="M9 12h12" /></>,
+  browser: <><rect x="4" y="5" width="16" height="14" rx="3" /><path d="M4 9h16" /><path d="M8 7h.01M11 7h.01" /><path d="M9 14h6" /></>,
+  camera: <><path d="M15 10.5 20 7v10l-5-3.5" /><rect x="4" y="6" width="11" height="12" rx="2" /></>,
+  cameraOff: <><path d="m3 3 18 18" /><path d="M15 10.5 20 7v9.2" /><path d="M13.2 18H6a2 2 0 0 1-2-2V8.8" /><path d="M8.8 6H13a2 2 0 0 1 2 2v2.2" /></>,
+  close: <><path d="M18 6 6 18" /><path d="m6 6 12 12" /></>,
+  expand: <><path d="M8 3H5a2 2 0 0 0-2 2v3" /><path d="M16 3h3a2 2 0 0 1 2 2v3" /><path d="M8 21H5a2 2 0 0 1-2-2v-3" /><path d="M16 21h3a2 2 0 0 0 2-2v-3" /></>,
+  hash: <><path d="M5 9h14" /><path d="M5 15h14" /><path d="M10 3 8 21" /><path d="m16 3-2 18" /></>,
+  menu: <><path d="M4 7h16" /><path d="M4 12h16" /><path d="M4 17h16" /></>,
+  mic: <><path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z" /><path d="M19 10v2a7 7 0 0 1-14 0v-2" /><path d="M12 19v3" /></>,
+  micOff: <><path d="m3 3 18 18" /><path d="M9 9v3a3 3 0 0 0 5.1 2.1" /><path d="M15 9.3V6a3 3 0 0 0-5.1-2.1" /><path d="M19 10v2a7 7 0 0 1-.7 3" /><path d="M5 10v2a7 7 0 0 0 10 6.3" /><path d="M12 19v3" /></>,
+  minus: <path d="M5 12h14" />,
+  paperclip: <><path d="m21.4 11.6-8.6 8.6a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 1 1 5.7 5.7L10 17.4a2 2 0 0 1-2.8-2.8l8.6-8.6" /></>,
+  phone: <><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19 19 0 0 1-8.3-3 18.7 18.7 0 0 1-5.8-5.8 19 19 0 0 1-3-8.3A2 2 0 0 1 4.7 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8.7 9.8a15 15 0 0 0 5.5 5.5l1.2-1.2a2 2 0 0 1 2.1-.5c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2Z" /></>,
+  phoneOff: <><path d="m3 3 18 18" /><path d="M14.5 14.5a15 15 0 0 1-5.8-5.8" /><path d="M8.7 9.8 7.5 11A2 2 0 0 0 7 13.1a19 19 0 0 0 8.3 8.3 2 2 0 0 0 2.1-.5l1.2-1.2" /><path d="M5.8 2H4.7a2 2 0 0 0-2 2.2 19 19 0 0 0 3 8.3" /><path d="M16.3 14.3c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2v1.1" /></>,
+  plus: <><path d="M12 5v14" /><path d="M5 12h14" /></>,
+  screen: <><rect x="3" y="4" width="18" height="13" rx="2" /><path d="m9 11 3-3 3 3" /><path d="M12 8v7" /><path d="M8 21h8" /></>,
+  send: <><path d="m22 2-7 20-4-9-9-4 20-7Z" /><path d="M22 2 11 13" /></>,
+  settings: <><circle cx="12" cy="12" r="3.4" /><path d="M19.4 15a1.8 1.8 0 0 0 .4 2l.1.1a2.1 2.1 0 0 1-3 3l-.1-.1a1.8 1.8 0 0 0-2-.4 1.8 1.8 0 0 0-1.1 1.7V22h-3.4v-.7a1.8 1.8 0 0 0-1.1-1.7 1.8 1.8 0 0 0-2 .4l-.1.1a2.1 2.1 0 0 1-3-3l.1-.1a1.8 1.8 0 0 0 .4-2 1.8 1.8 0 0 0-1.7-1.1H2v-3.4h.7a1.8 1.8 0 0 0 1.7-1.1 1.8 1.8 0 0 0-.4-2l-.1-.1a2.1 2.1 0 0 1 3-3l.1.1a1.8 1.8 0 0 0 2 .4 1.8 1.8 0 0 0 1.1-1.7V2h3.4v.7a1.8 1.8 0 0 0 1.1 1.7 1.8 1.8 0 0 0 2-.4l.1-.1a2.1 2.1 0 0 1 3 3l-.1.1a1.8 1.8 0 0 0-.4 2 1.8 1.8 0 0 0 1.7 1.1H22v3.4h-.7a1.8 1.8 0 0 0-1.9 1.5Z" /></>,
+  shrink: <><path d="M8 3v3a2 2 0 0 1-2 2H3" /><path d="M21 8h-3a2 2 0 0 1-2-2V3" /><path d="M3 16h3a2 2 0 0 1 2 2v3" /><path d="M16 21v-3a2 2 0 0 1 2-2h3" /></>,
+  smile: <><circle cx="12" cy="12" r="9" /><path d="M8 14s1.4 2 4 2 4-2 4-2" /><path d="M9 9h.01" /><path d="M15 9h.01" /></>,
+  stop: <rect x="7" y="7" width="10" height="10" rx="2" />,
+  wave: <><path d="M4 12h2" /><path d="M8 8v8" /><path d="M12 5v14" /><path d="M16 8v8" /><path d="M20 12h-2" /></>
+};
+
+function AppIcon({ name, size = 20, className = '' }) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={className ? `app-icon ${className}` : 'app-icon'}
+      viewBox="0 0 24 24"
+      width={size}
+      height={size}
+      focusable="false"
+    >
+      {APP_ICONS[name] || APP_ICONS.wave}
     </svg>
   );
 }
@@ -685,7 +746,7 @@ function LandingPage({
           <form className="auth-card landing-auth-card" onSubmit={onSubmit} onClick={(event) => event.stopPropagation()}>
             <div className="landing-auth-top">
               <span className="hero-badge brand-badge"><BrandLogo /> WebCord</span>
-              <button className="landing-auth-close" type="button" aria-label="Закрыть форму входа" onClick={() => setAuthOpen(false)}>x</button>
+              <button className="landing-auth-close" type="button" aria-label="Закрыть форму входа" onClick={() => setAuthOpen(false)}><AppIcon name="close" /></button>
             </div>
             <h2>{mode === 'login' ? 'Добро пожаловать обратно' : 'Создать аккаунт'}</h2>
             <p className="muted">{mode === 'login' ? 'Войдите, чтобы перейти к каналам и друзьям.' : 'Зарегистрируйтесь и сразу откройте свой WebCord.'}</p>
@@ -740,7 +801,7 @@ function MessageAttachment({ message, onOpenMedia }) {
   if (kind === 'AUDIO') {
     return (
       <div className="voice-message">
-        <span className="voice-message-icon">♪</span>
+        <span className="voice-message-icon"><AppIcon name="wave" size={18} /></span>
         <div className="voice-message-body">
           <strong>{title}</strong>
           <audio controls preload="metadata" src={url} />
@@ -764,7 +825,7 @@ function MediaViewer({ message, onClose }) {
       <div className={kind === 'CIRCLE_VIDEO' ? 'media-viewer-card circle' : 'media-viewer-card'} onClick={(event) => event.stopPropagation()}>
         <div className="media-viewer-top">
           <strong>{title}</strong>
-          <button className="icon-btn" type="button" onClick={onClose}>x</button>
+          <button className="icon-btn" type="button" aria-label="Close" title="Close" onClick={onClose}><AppIcon name="close" /></button>
         </div>
         <div className="media-viewer-stage">
           {kind === 'IMAGE' ? <img src={url} alt={title} /> : null}
@@ -838,7 +899,7 @@ function UserProfileModal({ open, profile, relationshipLabel, canAddFriend, onAd
               <p className="profile-status-line">{profile.statusText || 'Online'}</p>
               <p className="muted">{profile.bio || 'No bio yet.'}</p>
             </div>
-            <button className="icon-btn" type="button" onClick={onClose}>x</button>
+            <button className="icon-btn" type="button" aria-label="Close" title="Close" onClick={onClose}><AppIcon name="close" /></button>
           </div>
 
           {profile.favoriteTrack ? (
@@ -924,7 +985,7 @@ function ProfileModal({
               <h3>Profile Studio</h3>
               <p className="muted">Profile identity, media and personalization are synced from the backend.</p>
             </div>
-            <button className="icon-btn" type="button" onClick={onClose}>x</button>
+            <button className="icon-btn" type="button" aria-label="Close" title="Close" onClick={onClose}><AppIcon name="close" /></button>
           </div>
 
           <div className="channel-form">
@@ -1014,11 +1075,11 @@ function VoiceStage({
         </div>
         <div className="voice-actions">
           <span className="live-pill">Noise {noiseSuppressionEnabled ? 'on' : 'off'}</span>
-          <button type="button" onClick={onToggleMic}>{micMuted ? 'Unmute' : 'Mute'}</button>
-          <button type="button" onClick={onToggleScreen}>{screenSharing ? 'Stop share' : 'Share'}</button>
-          <button type="button" onClick={onToggleCamera}>{cameraEnabled ? 'Camera off' : 'Camera'}</button>
-          <button type="button" onClick={onToggleExpanded}>{expanded ? 'Compact' : 'Expand'}</button>
-          <button className="danger" type="button" onClick={onLeave}>Leave</button>
+          <button type="button" onClick={onToggleMic}><AppIcon name={micMuted ? 'micOff' : 'mic'} size={16} />{micMuted ? 'Unmute' : 'Mute'}</button>
+          <button type="button" onClick={onToggleScreen}><AppIcon name="screen" size={16} />{screenSharing ? 'Stop share' : 'Share'}</button>
+          <button type="button" onClick={onToggleCamera}><AppIcon name={cameraEnabled ? 'cameraOff' : 'camera'} size={16} />{cameraEnabled ? 'Camera off' : 'Camera'}</button>
+          <button type="button" onClick={onToggleExpanded}><AppIcon name={expanded ? 'shrink' : 'expand'} size={16} />{expanded ? 'Compact' : 'Expand'}</button>
+          <button className="danger" type="button" onClick={onLeave}><AppIcon name="phoneOff" size={16} />Leave</button>
         </div>
       </div>
 
@@ -1073,10 +1134,10 @@ function DesktopTitleBar({ user, onOpenSettings, onWindowAction }) {
         <span className="titlebar-channel">{user ? getDisplayName(user) : 'Desktop'}</span>
       </div>
       <div className="titlebar-actions">
-        <button type="button" title="Settings" aria-label="Settings" onClick={onOpenSettings}>⚙</button>
-        <button type="button" title="Minimize" aria-label="Minimize" onClick={() => onWindowAction('minimize')}>−</button>
-        <button type="button" title="Maximize" aria-label="Maximize" onClick={() => onWindowAction('maximize')}>□</button>
-        <button className="titlebar-close" type="button" title="Close" aria-label="Close" onClick={() => onWindowAction('close')}>×</button>
+        <button type="button" title="Settings" aria-label="Settings" onClick={onOpenSettings}><AppIcon name="settings" size={16} /></button>
+        <button type="button" title="Minimize" aria-label="Minimize" onClick={() => onWindowAction('minimize')}><AppIcon name="minus" size={16} /></button>
+        <button type="button" title="Maximize" aria-label="Maximize" onClick={() => onWindowAction('maximize')}><AppIcon name="expand" size={16} /></button>
+        <button className="titlebar-close" type="button" title="Close" aria-label="Close" onClick={() => onWindowAction('close')}><AppIcon name="close" size={16} /></button>
       </div>
     </div>
   );
@@ -1156,7 +1217,7 @@ function SettingsModal({
       </aside>
 
       <section className="settings-content">
-        <button className="settings-close" type="button" onClick={onClose}>x</button>
+        <button className="settings-close" type="button" aria-label="Close" title="Close" onClick={onClose}><AppIcon name="close" /></button>
 
         {activeSection === 'account' ? (
           <div className="settings-page">
@@ -1309,10 +1370,11 @@ function StaticSettingsPage({ title, rows }) {
   );
 }
 
-function AdminPanel({ user, overview, status, error, onRefresh, onOpenApp, onLogout }) {
+function AdminPanel({ user, overview, status, error, roleUpdating, onRefresh, onOpenApp, onLogout, onChangeUserRole }) {
   const denied = status === 'denied';
   const loading = status === 'checking' || status === 'idle';
   const stats = overview?.stats || {};
+  const canEditRoles = Boolean(overview?.canManageRoles || canManageUserRoles(overview?.admin || user));
   const statCards = [
     ['Users', stats.users],
     ['Text channels', stats.textChannels],
@@ -1379,16 +1441,18 @@ function AdminPanel({ user, overview, status, error, onRefresh, onOpenApp, onLog
                   <UserAvatar user={item} />
                   <div>
                     <strong>@{item.username}</strong>
-                    <span>{item.bio || 'No bio'}</span>
+                    <span>{normalizeUserRole(item.role)} - {item.bio || 'No bio'}</span>
                   </div>
                 </div>
               ))}
             </div>
 
             <div className="admin-panel-card">
-              <p className="section-label">Allowed admins</p>
+              <p className="section-label">Admins</p>
               <div className="admin-chip-list">
-                {(overview.allowedAdmins || []).map((item) => <span className="live-pill" key={item}>@{item}</span>)}
+                {(overview.roleUsers || []).map((item) => <span className="live-pill" key={item.id}>@{item.username} - {normalizeUserRole(item.role)}</span>)}
+                {(overview.allowedAdmins || []).map((item) => <span className="live-pill" key={item}>env @{item}</span>)}
+                {(overview.roleUsers || []).length === 0 && (overview.allowedAdmins || []).length === 0 ? <span className="muted">No admins configured.</span> : null}
               </div>
               <div className="admin-runtime">
                 <span>Runtime</span>
@@ -1397,6 +1461,32 @@ function AdminPanel({ user, overview, status, error, onRefresh, onOpenApp, onLog
                 <strong>{Math.floor((overview.runtime?.uptimeSeconds || 0) / 60)} min</strong>
               </div>
             </div>
+          </section>
+
+          <section className="admin-panel-card">
+            <p className="section-label">Role management</p>
+            <div className="admin-user-list">
+              {(overview.manageableUsers || []).map((item) => (
+                <div className="admin-user-row admin-role-row" key={item.id}>
+                  <UserAvatar user={item} />
+                  <div>
+                    <strong>@{item.username}</strong>
+                    <span>{item.displayName || item.statusText || 'WebCord user'}</span>
+                  </div>
+                  <select
+                    aria-label={`Role for ${item.username}`}
+                    value={normalizeUserRole(item.role)}
+                    disabled={!canEditRoles || roleUpdating === item.id}
+                    onChange={(event) => onChangeUserRole(item.id, event.target.value)}
+                  >
+                    <option value="USER">USER</option>
+                    <option value="ADMIN">ADMIN</option>
+                    <option value="OWNER">OWNER</option>
+                  </select>
+                </div>
+              ))}
+            </div>
+            {!canEditRoles ? <p className="muted">Only owners can assign admins.</p> : null}
           </section>
         </>
       ) : null}
@@ -1470,6 +1560,7 @@ export default function App() {
   const [adminOverview, setAdminOverview] = useState(null);
   const [adminStatus, setAdminStatus] = useState('idle');
   const [adminError, setAdminError] = useState('');
+  const [adminRoleUpdating, setAdminRoleUpdating] = useState(null);
 
   const socketRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -1979,6 +2070,47 @@ export default function App() {
         return;
       }
       setAdminStatus(err.status === 403 ? 'denied' : 'error');
+    }
+  }
+
+  async function changeAdminUserRole(userId, role) {
+    setAdminRoleUpdating(userId);
+    setAdminError('');
+    try {
+      const payload = await apiFetch(
+        `/admin/users/${userId}/role`,
+        {
+          method: 'PATCH',
+          body: JSON.stringify({ role })
+        },
+        token
+      );
+      const updatedUser = payload?.user;
+      setAdminOverview((prev) => {
+        if (!prev || !updatedUser) return prev;
+        const updateList = (list = []) => list.map((item) => (String(item.id) === String(updatedUser.id) ? updatedUser : item));
+        const roleUsers = updateList(prev.roleUsers || []).filter((item) => ['ADMIN', 'OWNER'].includes(normalizeUserRole(item.role)));
+        if (['ADMIN', 'OWNER'].includes(normalizeUserRole(updatedUser.role)) && !roleUsers.some((item) => String(item.id) === String(updatedUser.id))) {
+          roleUsers.push(updatedUser);
+        }
+        return {
+          ...prev,
+          admin: String(prev.admin?.id) === String(updatedUser.id) ? updatedUser : prev.admin,
+          recentUsers: updateList(prev.recentUsers || []),
+          manageableUsers: updateList(prev.manageableUsers || []),
+          roleUsers
+        };
+      });
+      if (String(user?.id) === String(updatedUser?.id)) {
+        setUser(updatedUser);
+        localStorage.setItem('webcord_user', JSON.stringify(updatedUser));
+      }
+      pushToast(`@${updatedUser?.username || 'user'} role updated`, 'success');
+    } catch (err) {
+      setAdminError(err.message);
+      pushToast(err.message, 'error');
+    } finally {
+      setAdminRoleUpdating(null);
     }
   }
 
@@ -2999,6 +3131,7 @@ export default function App() {
       status: remoteStreams[socketId]?.getVideoTracks?.().length ? 'Video active' : 'Connected'
     }))
   ];
+  const userCanManageChannels = canManageChannels(user);
 
   if (!isAuthed) {
     if (!isAdminRoute) {
@@ -3044,12 +3177,14 @@ export default function App() {
         overview={adminOverview}
         status={adminStatus}
         error={adminError}
+        roleUpdating={adminRoleUpdating}
         onRefresh={loadAdminOverview}
         onOpenApp={() => {
           setWorkspace('server');
           navigateTo('/');
         }}
         onLogout={handleLogout}
+        onChangeUserRole={changeAdminUserRole}
       />
     );
   }
@@ -3064,9 +3199,9 @@ export default function App() {
       <main className={`${isMobile && mobileChatOpen ? 'app-shell mobile-chat-open' : 'app-shell'}${isDesktopShell ? ' desktop-shell' : ''}${voiceExpanded && voiceJoined ? ' voice-expanded-mode' : ''}`}>
         <aside className="rail">
           {[
-            ['server', '#', 'Server'],
-            ['friends', '◆', 'Friends'],
-            ['dm', '@', 'DMs']
+            ['server', 'brand', 'Server'],
+            ['friends', 'smile', 'Friends'],
+            ['dm', 'browser', 'DMs']
           ].map(([item, icon, label]) => (
             <button
               key={item}
@@ -3080,7 +3215,7 @@ export default function App() {
                 if (isMobile) setMobileChatOpen(false);
               }}
             >
-              <span>{item === 'server' ? <BrandLogo className="rail-logo" /> : icon}</span>
+              <span>{icon === 'brand' ? <BrandLogo className="rail-logo" /> : <AppIcon name={icon} size={22} />}</span>
             </button>
           ))}
         </aside>
@@ -3096,7 +3231,7 @@ export default function App() {
                 <p className="muted">{workspace === 'server' ? 'Chats' : workspace === 'friends' ? 'Friends' : 'Direct messages'}</p>
               </div>
             </div>
-            <button className="icon-btn" type="button" title="Appearance" aria-label="Appearance" onClick={() => { setSettingsSection('appearance'); setShowSettingsModal(true); }}>⚙</button>
+            <button className="icon-btn" type="button" title="Appearance" aria-label="Appearance" onClick={() => { setSettingsSection('appearance'); setShowSettingsModal(true); }}><AppIcon name="settings" /></button>
           </div>
 
           <div className="profile-card" style={getProfileBannerStyle(user)}>
@@ -3112,35 +3247,39 @@ export default function App() {
             </div>
           </div>
 
-          <div className="sidebar-top">
+          <div className="sidebar-top guild-cover" style={getGuildCoverStyle(guild)}>
             <div>
               <span className="hero-badge brand-badge"><BrandLogo /> Live Workspace</span>
-              <h2>WebCord</h2>
-              <p className="muted">{guild?.name || 'Workspace'} - {getDisplayName(user)}</p>
+              <h2>{guild?.name || 'WebCord'}</h2>
+              <p className="muted">{guild?.description || guild?.name || 'Workspace'} - {getDisplayName(user)}</p>
             </div>
-            <button className="icon-btn" type="button" title="Appearance" aria-label="Appearance" onClick={() => { setSettingsSection('appearance'); setShowSettingsModal(true); }}>⚙</button>
+            <button className="icon-btn" type="button" title="Appearance" aria-label="Appearance" onClick={() => { setSettingsSection('appearance'); setShowSettingsModal(true); }}><AppIcon name="settings" /></button>
           </div>
 
           {workspace === 'server' ? (
             <div className="stack">
               <section className="sidebar-card">
                 <p className="section-label">Text channels</p>
-                {textChannels.length === 0 ? <p className="muted empty-copy">No text channels yet.</p> : textChannels.map((channel) => <button key={channel.id} className={String(channel.id) === String(channelId) ? 'channel-btn active' : 'channel-btn'} type="button" onClick={() => selectTextChannel(channel.id)}><span className="channel-icon">#</span><span>{channel.name}</span></button>)}
+                {textChannels.length === 0 ? <p className="muted empty-copy">No text channels yet.</p> : textChannels.map((channel) => <button key={channel.id} className={String(channel.id) === String(channelId) ? 'channel-btn active' : 'channel-btn'} type="button" onClick={() => selectTextChannel(channel.id)}><span className="channel-icon"><AppIcon name="hash" size={16} /></span><span>{channel.name}</span></button>)}
                 <p className="section-label">Voice channels</p>
-                {voiceChannels.length === 0 ? <p className="muted empty-copy">No voice channels yet.</p> : voiceChannels.map((channel) => <button key={channel.id} className={String(channel.id) === String(voiceChannelId) ? 'channel-btn active' : 'channel-btn'} type="button" onClick={() => selectVoiceChannel(channel.id)}><span className="channel-icon">◌</span><span>{channel.name}</span></button>)}
+                {voiceChannels.length === 0 ? <p className="muted empty-copy">No voice channels yet.</p> : voiceChannels.map((channel) => <button key={channel.id} className={String(channel.id) === String(voiceChannelId) ? 'channel-btn active' : 'channel-btn'} type="button" onClick={() => selectVoiceChannel(channel.id)}><span className="channel-icon"><AppIcon name="wave" size={16} /></span><span>{channel.name}</span></button>)}
               </section>
               <section className="sidebar-card">
                 <p className="section-label">Create channel</p>
-                <form className="channel-form" onSubmit={handleCreateChannel}>
-                  <input value={newChannelName} onChange={(e) => setNewChannelName(e.target.value)} placeholder="New channel name" />
-                  <div className="channel-actions-row">
-                    <select value={newChannelType} onChange={(e) => setNewChannelType(e.target.value)}>
-                      <option value="TEXT">TEXT</option>
-                      <option value="VOICE">VOICE</option>
-                    </select>
-                    <button type="submit">Create</button>
-                  </div>
-                </form>
+                {userCanManageChannels ? (
+                  <form className="channel-form" onSubmit={handleCreateChannel}>
+                    <input value={newChannelName} onChange={(e) => setNewChannelName(e.target.value)} placeholder="New channel name" />
+                    <div className="channel-actions-row">
+                      <select value={newChannelType} onChange={(e) => setNewChannelType(e.target.value)}>
+                        <option value="TEXT">TEXT</option>
+                        <option value="VOICE">VOICE</option>
+                      </select>
+                      <button type="submit"><AppIcon name="plus" size={16} />Create</button>
+                    </div>
+                  </form>
+                ) : (
+                  <p className="muted empty-copy">Only admins can create channels.</p>
+                )}
               </section>
             </div>
           ) : null}
@@ -3181,10 +3320,10 @@ export default function App() {
           ) : null}
 
           <div className="sidebar-bottom">
-            <button type="button" onClick={handleJoinVoice}>{voiceJoined ? 'Leave voice' : `Join voice${activeVoiceChannel ? `: ${activeVoiceChannel.name}` : ''}`}</button>
-            {voiceJoined ? <button type="button" onClick={toggleMicrophone}>{micMuted ? 'Unmute mic' : 'Mute mic'}</button> : null}
-            {voiceJoined ? <button type="button" onClick={() => (screenSharing ? stopScreenShare() : startScreenShare())}>{screenSharing ? 'Stop stream' : 'Start stream'}</button> : null}
-            {voiceJoined ? <button type="button" onClick={toggleCamera}>{cameraEnabled ? 'Camera off' : 'Camera on'}</button> : null}
+            <button type="button" onClick={handleJoinVoice}><AppIcon name={voiceJoined ? 'phoneOff' : 'phone'} size={16} />{voiceJoined ? 'Leave voice' : `Join voice${activeVoiceChannel ? `: ${activeVoiceChannel.name}` : ''}`}</button>
+            {voiceJoined ? <button type="button" onClick={toggleMicrophone}><AppIcon name={micMuted ? 'micOff' : 'mic'} size={16} />{micMuted ? 'Unmute mic' : 'Mute mic'}</button> : null}
+            {voiceJoined ? <button type="button" onClick={() => (screenSharing ? stopScreenShare() : startScreenShare())}><AppIcon name="screen" size={16} />{screenSharing ? 'Stop stream' : 'Start stream'}</button> : null}
+            {voiceJoined ? <button type="button" onClick={toggleCamera}><AppIcon name={cameraEnabled ? 'cameraOff' : 'camera'} size={16} />{cameraEnabled ? 'Camera off' : 'Camera on'}</button> : null}
             <button className="ghost-btn" type="button" disabled={voiceJoined} onClick={() => setNoiseSuppressionEnabled((prev) => !prev)}>Noise suppression: {noiseSuppressionEnabled ? 'On' : 'Off'}</button>
             <p className="voice-status">{voiceStatus}</p>
             <button className="danger" type="button" onClick={handleLogout}>Logout</button>
@@ -3196,11 +3335,11 @@ export default function App() {
             <div>
               {isMobile ? (
                 <button className="mobile-sidebar-toggle" type="button" onClick={() => setMobileChatOpen(false)}>
-                  Back
+                  <AppIcon name="arrowLeft" size={16} />Back
                 </button>
               ) : (
                 <button className="mobile-sidebar-toggle" type="button" onClick={() => setMobileSidebarOpen((prev) => !prev)}>
-                  Menu
+                  <AppIcon name="menu" size={16} />Menu
                 </button>
               )}
               <strong>{chatTitle}</strong>
@@ -3266,11 +3405,11 @@ export default function App() {
                   <div className="composer-context">
                     <span>{editingMessage ? 'Editing message' : `Replying to ${getDisplayName(replyTarget?.author)}`}</span>
                     <strong>{editingMessage?.content || replyTarget?.content || replyTarget?.attachmentName || 'Attachment'}</strong>
-                    <button className="icon-btn" type="button" onClick={cancelComposerContext}>x</button>
+                    <button className="icon-btn" type="button" aria-label="Cancel" title="Cancel" onClick={cancelComposerContext}><AppIcon name="close" /></button>
                   </div>
                 ) : null}
                 <input ref={fileInputRef} type="file" accept="image/*,video/*,audio/*,.webm,.ogg,.mp3,.m4a,.wav" onChange={handleFileSelect} hidden />
-                <button className="icon-btn composer-btn" type="button" onClick={() => fileInputRef.current?.click()}>+</button>
+                <button className="icon-btn composer-btn" type="button" aria-label="Attach file" title="Attach file" onClick={() => fileInputRef.current?.click()}><AppIcon name="paperclip" /></button>
                 <button
                   className={voiceRecording ? 'icon-btn composer-btn recording' : 'icon-btn composer-btn'}
                   type="button"
@@ -3279,7 +3418,7 @@ export default function App() {
                   disabled={uploading || circleRecording || (!!pendingAttachment && !voiceRecording) || Boolean(editingMessage)}
                   onClick={() => (voiceRecording ? cleanupMessageRecording() : startMessageRecording('voice'))}
                 >
-                  {voiceRecording ? '■' : 'mic'}
+                  <AppIcon name={voiceRecording ? 'stop' : 'mic'} />
                 </button>
                 <button
                   className={circleRecording ? 'icon-btn composer-btn recording' : 'icon-btn composer-btn'}
@@ -3289,10 +3428,10 @@ export default function App() {
                   disabled={uploading || voiceRecording || (!!pendingAttachment && !circleRecording) || Boolean(editingMessage)}
                   onClick={() => (circleRecording ? cleanupMessageRecording() : startMessageRecording('circle'))}
                 >
-                  {circleRecording ? '■' : 'cam'}
+                  <AppIcon name={circleRecording ? 'stop' : 'camera'} />
                 </button>
                 <div className="emoji-wrapper">
-                  <button className="icon-btn composer-btn" type="button" onClick={() => setShowEmojiPicker((prev) => !prev)}>:)</button>
+                  <button className="icon-btn composer-btn" type="button" aria-label="Emoji" title="Emoji" onClick={() => setShowEmojiPicker((prev) => !prev)}><AppIcon name="smile" /></button>
                   {showEmojiPicker ? (
                     <div className="emoji-popover">
                       <Suspense fallback={<div className="emoji-loading">Loading...</div>}>
@@ -3302,7 +3441,7 @@ export default function App() {
                   ) : null}
                 </div>
                 <input value={newMessage} onChange={(e) => setNewMessage(e.target.value)} placeholder={editingMessage ? 'Edit your message' : workspace === 'dm' ? 'Message your friend' : 'Send a message'} />
-                <button className="composer-send" type="submit" disabled={uploading || (!newMessage.trim() && !pendingAttachment)}>{editingMessage ? 'Save' : 'Send'}</button>
+                <button className="composer-send" type="submit" disabled={uploading || (!newMessage.trim() && !pendingAttachment)}><AppIcon name="send" size={16} />{editingMessage ? 'Save' : 'Send'}</button>
               </form>
             </>
           )}
@@ -3312,7 +3451,7 @@ export default function App() {
               <div className="attachment-preview">
                 <span className="attachment-dot">{getAttachmentBadge(getAttachmentKind({ attachmentType: pendingAttachment.type, attachmentName: pendingAttachment.name, attachmentUrl: pendingAttachment.url }))}</span>
                 <p className="muted">Attached: {pendingAttachment.name}</p>
-                <button className="icon-btn" type="button" aria-label="Remove attachment" title="Remove attachment" onClick={() => setPendingAttachment(null)}>×</button>
+                <button className="icon-btn" type="button" aria-label="Remove attachment" title="Remove attachment" onClick={() => setPendingAttachment(null)}><AppIcon name="close" /></button>
               </div>
             ) : null}
             {voiceRecording || circleRecording ? (

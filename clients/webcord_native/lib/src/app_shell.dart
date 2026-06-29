@@ -571,12 +571,13 @@ class _SidebarState extends State<Sidebar> {
         Row(
           children: [
             const Expanded(child: SectionLabel('Text channels')),
-            IconButton(
-              tooltip: 'Create text channel',
-              onPressed: () =>
-                  showCreateChannelDialog(context, state, ChannelKind.text),
-              icon: const Icon(Icons.add_rounded, size: 19),
-            ),
+            if (state.canManageChannels)
+              IconButton(
+                tooltip: 'Create text channel',
+                onPressed: () =>
+                    showCreateChannelDialog(context, state, ChannelKind.text),
+                icon: const Icon(Icons.add_rounded, size: 19),
+              ),
           ],
         ),
         for (final channel in state.textChannels)
@@ -592,12 +593,13 @@ class _SidebarState extends State<Sidebar> {
         Row(
           children: [
             const Expanded(child: SectionLabel('Voice rooms')),
-            IconButton(
-              tooltip: 'Create voice channel',
-              onPressed: () =>
-                  showCreateChannelDialog(context, state, ChannelKind.voice),
-              icon: const Icon(Icons.add_rounded, size: 19),
-            ),
+            if (state.canManageChannels)
+              IconButton(
+                tooltip: 'Create voice channel',
+                onPressed: () =>
+                    showCreateChannelDialog(context, state, ChannelKind.voice),
+                icon: const Icon(Icons.add_rounded, size: 19),
+              ),
           ],
         ),
         for (final channel in state.voiceChannels)
@@ -718,35 +720,84 @@ class BrandHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        const BrandMark(size: 30),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                state.guild?.name ?? 'WebCord',
-                style: const TextStyle(
-                  fontWeight: FontWeight.w900,
-                  fontSize: 17,
-                ),
-              ),
-              Text(
-                state.socketStatus == 'connected' ? 'Live' : state.socketStatus,
-                style: TextStyle(
-                  color: state.socketStatus == 'connected'
-                      ? WebCordColors.cyan
-                      : WebCordColors.muted,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ],
-          ),
+    final palette = WebCordPalette.of(context);
+    final guild = state.guild;
+    final accent = _parseHexColor(guild?.accentColor ?? '', palette.accent);
+    final statusColor = state.socketStatus == 'connected'
+        ? WebCordColors.cyan
+        : WebCordColors.muted;
+    final description = guild?.description.trim() ?? '';
+    final subtitle = description.isNotEmpty
+        ? description
+        : state.socketStatus == 'connected'
+        ? 'Live'
+        : state.socketStatus;
+
+    return Container(
+      constraints: const BoxConstraints(minHeight: 84),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: palette.border),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [accent.withAlpha(155), palette.panelStrong],
         ),
-      ],
+        image: guild?.bannerUrl == null
+            ? null
+            : DecorationImage(
+                image: NetworkImage(_resolveMediaUrl(guild!.bannerUrl!)),
+                fit: BoxFit.cover,
+                colorFilter: ColorFilter.mode(
+                  Colors.black.withAlpha(96),
+                  BlendMode.darken,
+                ),
+              ),
+      ),
+      child: Row(
+        children: [
+          if (guild?.iconUrl == null)
+            const BrandMark(size: 34)
+          else
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: Image.network(
+                _resolveMediaUrl(guild!.iconUrl!),
+                width: 34,
+                height: 34,
+                fit: BoxFit.cover,
+              ),
+            ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  guild?.name ?? 'WebCord',
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w900,
+                    fontSize: 17,
+                  ),
+                ),
+                Text(
+                  subtitle,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: statusColor,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -1504,11 +1555,36 @@ class MessageList extends StatelessWidget {
         body: 'Start the conversation in this room.',
       );
     }
+    final extraTopItems = state.hasOlderMessages ? 1 : 0;
     return ListView.builder(
       padding: EdgeInsets.fromLTRB(18, state.compactMessages ? 10 : 14, 18, 18),
-      itemCount: state.messages.length,
+      itemCount: state.messages.length + extraTopItems,
       itemBuilder: (context, index) {
-        final message = state.messages[index];
+        if (state.hasOlderMessages && index == 0) {
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Center(
+              child: OutlinedButton.icon(
+                onPressed: state.loadingOlderMessages
+                    ? null
+                    : state.loadOlderMessages,
+                icon: state.loadingOlderMessages
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.history_rounded),
+                label: Text(
+                  state.loadingOlderMessages
+                      ? 'Loading history'
+                      : 'Load older messages',
+                ),
+              ),
+            ),
+          );
+        }
+        final message = state.messages[index - extraTopItems];
         return MessageTile(
           message: message,
           own: message.author.id == state.user?.id,
@@ -2867,12 +2943,13 @@ class MobileNavigationSheet extends StatelessWidget {
           Row(
             children: [
               const Expanded(child: SectionLabel('Voice rooms')),
-              TextButton.icon(
-                onPressed: () =>
-                    showCreateChannelDialog(context, state, ChannelKind.voice),
-                icon: const Icon(Icons.add_rounded, size: 18),
-                label: const Text('Create'),
-              ),
+              if (state.canManageChannels)
+                TextButton.icon(
+                  onPressed: () =>
+                      showCreateChannelDialog(context, state, ChannelKind.voice),
+                  icon: const Icon(Icons.add_rounded, size: 18),
+                  label: const Text('Create'),
+                ),
             ],
           ),
           if (state.voiceChannels.isEmpty)
@@ -3772,7 +3849,20 @@ class AttachmentChip extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (kind == _AttachmentKind.image)
+        if (!state.inlineMediaPreviews &&
+            kind != _AttachmentKind.file &&
+            kind != _AttachmentKind.voice)
+          MediaPreviewChip(
+            icon: _attachmentIcon(message),
+            title: title,
+            subtitle: kind == _AttachmentKind.image
+                ? 'Image preview disabled'
+                : kind == _AttachmentKind.circleVideo
+                ? 'Circle video preview disabled'
+                : 'Video preview disabled',
+            onPressed: () => showMediaViewer(context, message, state),
+          ),
+        if (state.inlineMediaPreviews && kind == _AttachmentKind.image)
           InkWell(
             borderRadius: BorderRadius.circular(8),
             onTap: () => showMediaViewer(context, message, state),
@@ -3787,7 +3877,7 @@ class AttachmentChip extends StatelessWidget {
               ),
             ),
           ),
-        if (kind == _AttachmentKind.circleVideo)
+        if (state.inlineMediaPreviews && kind == _AttachmentKind.circleVideo)
           Padding(
             padding: const EdgeInsets.only(bottom: 6),
             child: InlineVideoAttachment(
@@ -3802,7 +3892,7 @@ class AttachmentChip extends StatelessWidget {
             padding: const EdgeInsets.only(bottom: 6),
             child: VoiceMessagePlayer(url: uri.toString(), title: title),
           ),
-        if (kind == _AttachmentKind.video)
+        if (state.inlineMediaPreviews && kind == _AttachmentKind.video)
           Padding(
             padding: const EdgeInsets.only(bottom: 6),
             child: InlineVideoAttachment(
@@ -3819,6 +3909,49 @@ class AttachmentChip extends StatelessWidget {
             onPressed: () => state.openAttachment(message),
           ),
       ],
+    );
+  }
+}
+
+class MediaPreviewChip extends StatelessWidget {
+  const MediaPreviewChip({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onPressed,
+    super.key,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = WebCordPalette.of(context);
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 280),
+      child: ActionChip(
+        avatar: Icon(icon, size: 18),
+        label: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              title,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontWeight: FontWeight.w900),
+            ),
+            Text(
+              subtitle,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: palette.muted, fontSize: 11),
+            ),
+          ],
+        ),
+        onPressed: onPressed,
+      ),
     );
   }
 }
@@ -5846,6 +5979,24 @@ class SettingsDialog extends StatelessWidget {
                       onChanged: state.setCompactMessages,
                       secondary: const Icon(Icons.density_small_rounded),
                       title: const Text('Compact messages'),
+                    ),
+                    const SectionLabel('Media'),
+                    SwitchListTile(
+                      value: state.inlineMediaPreviews,
+                      onChanged: state.setInlineMediaPreviews,
+                      secondary: const Icon(Icons.photo_library_rounded),
+                      title: const Text('Inline media previews'),
+                      subtitle: const Text(
+                        'Turn off to keep image and video attachments as light chips.',
+                      ),
+                    ),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton.icon(
+                        onPressed: state.clearLocalMediaCache,
+                        icon: const Icon(Icons.cleaning_services_rounded),
+                        label: const Text('Clear local media cache'),
+                      ),
                     ),
                     const SectionLabel('Voice & Video'),
                     LayoutBuilder(

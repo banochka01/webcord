@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/painting.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
 
@@ -85,9 +86,12 @@ class WebCordState extends ChangeNotifier {
   static const _noiseSuppressionKey = 'webcord_native_noise_suppression';
   static const _notificationsKey = 'webcord_native_notifications';
   static const _compactMessagesKey = 'webcord_native_compact_messages';
+  static const _inlineMediaPreviewsKey =
+      'webcord_native_inline_media_previews';
   static const _micDeviceKey = 'webcord_native_mic_device';
   static const _outputDeviceKey = 'webcord_native_output_device';
   static const _cameraDeviceKey = 'webcord_native_camera_device';
+  static const _messagePageSize = 100;
 
   final WebCordApi api;
   NativeStore? _store;
@@ -140,6 +144,8 @@ class WebCordState extends ChangeNotifier {
   bool initializing = true;
   bool busy = false;
   bool uploading = false;
+  bool loadingOlderMessages = false;
+  bool hasOlderMessages = false;
   bool profileSaving = false;
   bool profileAssetUploading = false;
   bool mediaBusy = false;
@@ -150,6 +156,7 @@ class WebCordState extends ChangeNotifier {
   bool noiseSuppressionEnabled = true;
   bool notificationsEnabled = true;
   bool compactMessages = false;
+  bool inlineMediaPreviews = true;
   bool recordingVoice = false;
   int inputVolume = 100;
   int outputVolume = 100;
@@ -225,6 +232,8 @@ class WebCordState extends ChangeNotifier {
 
   List<Channel> get voiceChannels =>
       channels.where((channel) => channel.kind == ChannelKind.voice).toList();
+
+  bool get canManageChannels => user?.canManageChannels ?? false;
 
   Channel? get activeTextChannel => _findChannel(selectedTextChannelId);
   Channel? get activeVoiceChannel => _findChannel(selectedVoiceChannelId);
@@ -308,6 +317,10 @@ class WebCordState extends ChangeNotifier {
       await _store?.getInt(_compactMessagesKey),
       fallback: false,
     );
+    inlineMediaPreviews = _storedFlag(
+      await _store?.getInt(_inlineMediaPreviewsKey),
+      fallback: true,
+    );
 
     if (token == null) {
       initializing = false;
@@ -354,6 +367,8 @@ class WebCordState extends ChangeNotifier {
     channels = [];
     social = const SocialSnapshot();
     messages = [];
+    hasOlderMessages = false;
+    loadingOlderMessages = false;
     voiceParticipants = [];
     stories = [];
     activeCall = null;
@@ -457,7 +472,13 @@ class WebCordState extends ChangeNotifier {
   Future<void> loadChannelMessages(int? channelId) async {
     final currentToken = token;
     if (currentToken == null || channelId == null) return;
-    messages = await api.channelMessages(currentToken, channelId);
+    final next = await api.channelMessages(
+      currentToken,
+      channelId,
+      limit: _messagePageSize,
+    );
+    messages = next;
+    hasOlderMessages = next.length >= _messagePageSize;
     unreadChannelIds.remove(channelId);
     notifyListeners();
   }
@@ -465,9 +486,58 @@ class WebCordState extends ChangeNotifier {
   Future<void> loadDirectMessages(int conversationId) async {
     final currentToken = token;
     if (currentToken == null) return;
-    messages = await api.directMessages(currentToken, conversationId);
+    final next = await api.directMessages(
+      currentToken,
+      conversationId,
+      limit: _messagePageSize,
+    );
+    messages = next;
+    hasOlderMessages = next.length >= _messagePageSize;
     unreadConversationIds.remove(conversationId);
     notifyListeners();
+  }
+
+  Future<void> loadOlderMessages() async {
+    final currentToken = token;
+    final beforeId = messages.firstOrNull?.id;
+    if (currentToken == null ||
+        beforeId == null ||
+        loadingOlderMessages ||
+        !hasOlderMessages) {
+      return;
+    }
+
+    loadingOlderMessages = true;
+    notifyListeners();
+    try {
+      final older =
+          workspace == WorkspaceKind.direct && selectedConversationId != null
+          ? await api.directMessages(
+              currentToken,
+              selectedConversationId!,
+              beforeId: beforeId,
+              limit: _messagePageSize,
+            )
+          : selectedTextChannelId != null
+          ? await api.channelMessages(
+              currentToken,
+              selectedTextChannelId!,
+              beforeId: beforeId,
+              limit: _messagePageSize,
+            )
+          : const <ChatMessage>[];
+      final existingIds = messages.map((message) => message.id).toSet();
+      messages = [
+        ...older.where((message) => !existingIds.contains(message.id)),
+        ...messages,
+      ];
+      hasOlderMessages = older.length >= _messagePageSize;
+    } catch (exception) {
+      error = '$exception';
+    } finally {
+      loadingOlderMessages = false;
+      notifyListeners();
+    }
   }
 
   Future<void> selectWorkspace(WorkspaceKind next) async {
@@ -481,14 +551,17 @@ class WebCordState extends ChangeNotifier {
     } else if (next == WorkspaceKind.stories) {
       await refreshStories();
       messages = [];
+      hasOlderMessages = false;
       notifyListeners();
     } else if (next == WorkspaceKind.calls ||
         next == WorkspaceKind.profile ||
         next == WorkspaceKind.friends) {
       messages = [];
+      hasOlderMessages = false;
       notifyListeners();
     } else {
       messages = [];
+      hasOlderMessages = false;
       notifyListeners();
     }
   }
@@ -756,6 +829,11 @@ class WebCordState extends ChangeNotifier {
     if (currentToken == null || currentGuild == null || name.trim().isEmpty) {
       return;
     }
+    if (!canManageChannels) {
+      error = 'Only admins can create channels';
+      notifyListeners();
+      return;
+    }
     await _runBusy(() async {
       final channel = await api.createChannel(
         token: currentToken,
@@ -864,14 +942,15 @@ class WebCordState extends ChangeNotifier {
       uploading = true;
       notifyListeners();
       final uploaded = await api.upload(currentToken, File(path));
-      if (uploaded.type != 'IMAGE' && uploaded.type != 'VIDEO') {
+      final mediaType = _storyMediaType(path, uploaded);
+      if (mediaType == null) {
         error = 'Stories support photos and videos';
         return;
       }
       final story = await api.createStory(
         token: currentToken,
         mediaUrl: uploaded.url,
-        mediaType: uploaded.type,
+        mediaType: mediaType,
         caption: caption.trim(),
       );
       stories = [story, ...stories.where((item) => item.id != story.id)];
@@ -988,10 +1067,7 @@ class WebCordState extends ChangeNotifier {
       notifyListeners();
 
       await _prepareNativeVoiceAudio();
-      _localVoiceStream = await navigator.mediaDevices.getUserMedia({
-        'audio': _audioConstraints(),
-        'video': false,
-      });
+      _localVoiceStream = await _openVoiceAudioStream();
       await _applyLocalAudioSettings();
       await refreshMediaDevices();
 
@@ -1035,10 +1111,7 @@ class WebCordState extends ChangeNotifier {
       notifyListeners();
 
       await _prepareNativeVoiceAudio();
-      _localVoiceStream = await navigator.mediaDevices.getUserMedia({
-        'audio': _audioConstraints(),
-        'video': false,
-      });
+      _localVoiceStream = await _openVoiceAudioStream();
       await _applyLocalAudioSettings();
       await refreshMediaDevices();
 
@@ -1137,6 +1210,17 @@ class WebCordState extends ChangeNotifier {
     compactMessages = value;
     await _store?.setInt(_compactMessagesKey, value ? 1 : 0);
     notifyListeners();
+  }
+
+  Future<void> setInlineMediaPreviews(bool value) async {
+    inlineMediaPreviews = value;
+    await _store?.setInt(_inlineMediaPreviewsKey, value ? 1 : 0);
+    notifyListeners();
+  }
+
+  void clearLocalMediaCache() {
+    PaintingBinding.instance.imageCache.clear();
+    PaintingBinding.instance.imageCache.clearLiveImages();
   }
 
   Future<void> setMicDevice(String value) async {
@@ -1325,7 +1409,58 @@ class WebCordState extends ChangeNotifier {
     } catch (_) {}
   }
 
-  Map<String, dynamic> _audioConstraints() {
+  Future<MediaStream> _openVoiceAudioStream() async {
+    try {
+      return await navigator.mediaDevices.getUserMedia({
+        'audio': _audioConstraints(),
+        'video': false,
+      });
+    } catch (exception) {
+      Object lastException = exception;
+      if (selectedMicDeviceId.isNotEmpty) {
+        selectedMicDeviceId = '';
+        await _store?.setString(_micDeviceKey, '');
+        notifyListeners();
+        try {
+          return await navigator.mediaDevices.getUserMedia({
+            'audio': _audioConstraints(forceDefaultDevice: true),
+            'video': false,
+          });
+        } catch (defaultException) {
+          lastException = defaultException;
+        }
+      }
+
+      if (WebRTC.platformIsDesktop) {
+        try {
+          return await navigator.mediaDevices.getUserMedia({
+            'audio': true,
+            'video': false,
+          });
+        } catch (desktopException) {
+          lastException = desktopException;
+        }
+      }
+
+      throw lastException;
+    }
+  }
+
+  Map<String, dynamic> _audioConstraints({bool forceDefaultDevice = false}) {
+    if (!WebRTC.platformIsWeb) {
+      final optional = <Map<String, dynamic>>[
+        if (!forceDefaultDevice && selectedMicDeviceId.isNotEmpty)
+          {'sourceId': selectedMicDeviceId},
+      ];
+      return {
+        'echoCancellation': true,
+        'noiseSuppression': noiseSuppressionEnabled,
+        'autoGainControl': true,
+        'channelCount': 1,
+        if (optional.isNotEmpty) 'optional': optional,
+      };
+    }
+
     return {
       'echoCancellation': {'ideal': true},
       'noiseSuppression': {'ideal': noiseSuppressionEnabled},
@@ -1334,12 +1469,24 @@ class WebCordState extends ChangeNotifier {
       'sampleRate': {'ideal': 48000},
       'sampleSize': {'ideal': 16},
       'latency': {'ideal': 0.02},
-      if (selectedMicDeviceId.isNotEmpty)
+      if (!forceDefaultDevice && selectedMicDeviceId.isNotEmpty)
         'deviceId': {'exact': selectedMicDeviceId},
     };
   }
 
   Map<String, dynamic> _cameraConstraints() {
+    if (!WebRTC.platformIsWeb) {
+      return {
+        if (selectedCameraDeviceId.isNotEmpty)
+          'optional': [
+            {'sourceId': selectedCameraDeviceId},
+          ],
+        'width': 1280,
+        'height': 720,
+        'frameRate': 30,
+      };
+    }
+
     return {
       if (selectedCameraDeviceId.isNotEmpty)
         'deviceId': {'exact': selectedCameraDeviceId},
@@ -1355,10 +1502,7 @@ class WebCordState extends ChangeNotifier {
     try {
       voiceStatus = 'Switching microphone...';
       notifyListeners();
-      _localVoiceStream = await navigator.mediaDevices.getUserMedia({
-        'audio': _audioConstraints(),
-        'video': false,
-      });
+      _localVoiceStream = await _openVoiceAudioStream();
       await _applyLocalAudioSettings();
       if (previous != null) {
         await _replaceAudioTracks(previous, _localVoiceStream!);
@@ -1707,7 +1851,7 @@ class WebCordState extends ChangeNotifier {
     if (payloadType == null) return description;
 
     const fmtpValue =
-        'minptime=10;useinbandfec=1;usedtx=1;maxaveragebitrate=48000;stereo=0;sprop-stereo=0';
+        'minptime=10;useinbandfec=1;usedtx=0;maxaveragebitrate=64000;maxplaybackrate=48000;stereo=0;sprop-stereo=0';
     final fmtpIndex = lines.indexWhere(
       (line) => line.startsWith('a=fmtp:$payloadType'),
     );
@@ -2549,13 +2693,31 @@ class WebCordState extends ChangeNotifier {
   }
 
   bool _looksLikeStoryFile(String path) {
+    return _looksLikeImageFile(path) || _looksLikeVideoFile(path);
+  }
+
+  bool _looksLikeVideoFile(String path) {
     final lower = path.toLowerCase();
-    return _looksLikeImageFile(path) ||
-        lower.endsWith('.mp4') ||
+    return lower.endsWith('.mp4') ||
         lower.endsWith('.mov') ||
         lower.endsWith('.m4v') ||
         lower.endsWith('.webm') ||
-        lower.endsWith('.3gp');
+        lower.endsWith('.3gp') ||
+        lower.endsWith('.mkv') ||
+        lower.endsWith('.avi');
+  }
+
+  String? _storyMediaType(String path, AttachmentUpload uploaded) {
+    final uploadedType = uploaded.type.toUpperCase();
+    if (uploadedType == 'IMAGE') return 'IMAGE';
+    if (uploadedType == 'VIDEO') return 'VIDEO';
+    if (_looksLikeImageFile(path) || _looksLikeImageFile(uploaded.name)) {
+      return 'IMAGE';
+    }
+    if (_looksLikeVideoFile(path) || _looksLikeVideoFile(uploaded.name)) {
+      return 'VIDEO';
+    }
+    return null;
   }
 
   String _fileDisplayName(String path) {

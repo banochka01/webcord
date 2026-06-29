@@ -76,6 +76,10 @@ textarea {
 
 button {
   min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
   padding: 8px 12px;
   cursor: pointer;
   font-weight: 700;
@@ -159,6 +163,15 @@ p {
 
 .brand-badge {
   gap: 6px;
+}
+
+.app-icon {
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .inline-brand-logo {
@@ -1187,7 +1200,7 @@ p {
   gap: 10px;
   align-items: center;
   padding: 10px 0;
-  border-top: 1px solid var(--border-soft);
+  border-top: 1px solid var(--border-color);
 }
 
 .admin-user-row:first-of-type {
@@ -1209,12 +1222,25 @@ p {
   margin: 12px 0 18px;
 }
 
+.admin-user-list {
+  display: grid;
+  gap: 2px;
+}
+
+.admin-role-row {
+  grid-template-columns: 42px minmax(0, 1fr) minmax(112px, 136px);
+}
+
+.admin-role-row select {
+  min-height: 36px;
+}
+
 .admin-runtime {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 10px;
   padding-top: 14px;
-  border-top: 1px solid var(--border-soft);
+  border-top: 1px solid var(--border-color);
 }
 
 .desktop-titlebar {
@@ -1551,6 +1577,27 @@ p {
   align-items: flex-start;
   justify-content: space-between;
   gap: 8px;
+}
+
+.guild-cover {
+  --guild-accent: var(--accent-color);
+  min-height: 96px;
+  align-items: flex-end;
+  padding: 12px;
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, rgba(8, 11, 17, 0.06), rgba(8, 11, 17, 0.9)),
+    linear-gradient(135deg, color-mix(in srgb, var(--guild-accent) 42%, #111926), var(--surface-2));
+  background-position: center;
+  background-size: cover;
+  box-shadow: var(--shadow-lift);
+}
+
+.guild-cover .icon-btn {
+  background: rgba(7, 9, 14, 0.66);
+  backdrop-filter: blur(12px);
 }
 
 .sidebar-top h2 {
@@ -3453,6 +3500,14 @@ p {
 
   .admin-actions button {
     flex: 1 1 140px;
+  }
+
+  .admin-role-row {
+    grid-template-columns: 42px minmax(0, 1fr);
+  }
+
+  .admin-role-row select {
+    grid-column: 1 / -1;
   }
 
   .admin-grid {

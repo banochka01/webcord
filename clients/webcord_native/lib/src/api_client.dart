@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
 
 import 'models.dart';
 
@@ -115,18 +116,33 @@ class WebCordApi {
     return PublicUser.fromJson(json as Map<String, dynamic>?);
   }
 
-  Future<List<ChatMessage>> channelMessages(String token, int channelId) async {
-    final data = await _send('GET', '/messages/$channelId', token: token);
+  Future<List<ChatMessage>> channelMessages(
+    String token,
+    int channelId, {
+    int? beforeId,
+    int limit = 100,
+  }) async {
+    final data = await _send(
+      'GET',
+      _messagesPath('/messages/$channelId', beforeId: beforeId, limit: limit),
+      token: token,
+    );
     return _messageList(data);
   }
 
   Future<List<ChatMessage>> directMessages(
     String token,
-    int conversationId,
-  ) async {
+    int conversationId, {
+    int? beforeId,
+    int limit = 100,
+  }) async {
     final data = await _send(
       'GET',
-      '/dms/$conversationId/messages',
+      _messagesPath(
+        '/dms/$conversationId/messages',
+        beforeId: beforeId,
+        limit: limit,
+      ),
       token: token,
     );
     return _messageList(data);
@@ -372,7 +388,13 @@ class WebCordApi {
   Future<AttachmentUpload> upload(String token, File file) async {
     final request = http.MultipartRequest('POST', Uri.parse('$baseUrl/upload'));
     request.headers['Authorization'] = 'Bearer $token';
-    request.files.add(await http.MultipartFile.fromPath('file', file.path));
+    request.files.add(
+      await http.MultipartFile.fromPath(
+        'file',
+        file.path,
+        contentType: _contentTypeForPath(file.path),
+      ),
+    );
 
     final streamed = await request.send();
     final response = await http.Response.fromStream(streamed);
@@ -384,6 +406,45 @@ class WebCordApi {
       );
     }
     return AttachmentUpload.fromJson(payload as Map<String, dynamic>);
+  }
+
+  String _messagesPath(String path, {int? beforeId, int limit = 100}) {
+    final params = <String, String>{'limit': '$limit'};
+    if (beforeId != null && beforeId > 0) params['beforeId'] = '$beforeId';
+    return '$path?${Uri(queryParameters: params).query}';
+  }
+
+  MediaType? _contentTypeForPath(String path) {
+    final lower = path.toLowerCase();
+    if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) {
+      return MediaType('image', 'jpeg');
+    }
+    if (lower.endsWith('.png')) return MediaType('image', 'png');
+    if (lower.endsWith('.webp')) return MediaType('image', 'webp');
+    if (lower.endsWith('.gif')) return MediaType('image', 'gif');
+    if (lower.endsWith('.bmp')) return MediaType('image', 'bmp');
+    if (lower.endsWith('.heic')) return MediaType('image', 'heic');
+    if (lower.endsWith('.heif')) return MediaType('image', 'heif');
+
+    if (lower.endsWith('.mp4') || lower.endsWith('.m4v')) {
+      return MediaType('video', 'mp4');
+    }
+    if (lower.endsWith('.mov')) return MediaType('video', 'quicktime');
+    if (lower.endsWith('.webm')) return MediaType('video', 'webm');
+    if (lower.endsWith('.3gp')) return MediaType('video', '3gpp');
+    if (lower.endsWith('.mkv')) return MediaType('video', 'x-matroska');
+    if (lower.endsWith('.avi')) return MediaType('video', 'x-msvideo');
+
+    if (lower.endsWith('.mp3')) return MediaType('audio', 'mpeg');
+    if (lower.endsWith('.m4a')) return MediaType('audio', 'mp4');
+    if (lower.endsWith('.aac')) return MediaType('audio', 'aac');
+    if (lower.endsWith('.ogg') || lower.endsWith('.oga')) {
+      return MediaType('audio', 'ogg');
+    }
+    if (lower.endsWith('.opus')) return MediaType('audio', 'opus');
+    if (lower.endsWith('.wav')) return MediaType('audio', 'wav');
+    if (lower.endsWith('.flac')) return MediaType('audio', 'flac');
+    return null;
   }
 
   Future<dynamic> _send(

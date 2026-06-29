@@ -116,6 +116,7 @@ const rateLimitBuckets = new Map();
 const publicUserSelect = {
   id: true,
   username: true,
+  role: true,
   displayName: true,
   avatarUrl: true,
   bannerUrl: true,
@@ -132,6 +133,8 @@ const messageRateLimit = createRateLimiter(messageRateLimitConfig);
 const uploadRateLimit = createRateLimiter({ windowMs: 60_000, max: 20, keyPrefix: 'upload' });
 const ATTACHMENT_TYPES = new Set(['IMAGE', 'VIDEO', 'AUDIO', 'CIRCLE_VIDEO', 'FILE']);
 const STORY_MEDIA_TYPES = new Set(['IMAGE', 'VIDEO']);
+const USER_ROLES = new Set(['USER', 'ADMIN', 'OWNER']);
+const ADMIN_ROLES = new Set(['ADMIN', 'OWNER']);
 
 function normalizeUsername(value) {
   return String(value || '').trim().toLowerCase();
@@ -139,6 +142,25 @@ function normalizeUsername(value) {
 
 function isAdminUsername(username) {
   return ADMIN_USERNAMES.has(normalizeUsername(username));
+}
+
+function normalizeUserRole(value) {
+  const role = String(value || 'USER').trim().toUpperCase();
+  return USER_ROLES.has(role) ? role : 'USER';
+}
+
+function getEffectiveUserRole(user = {}) {
+  const role = normalizeUserRole(user.role);
+  if (role === 'OWNER' || isAdminUsername(user.username)) return 'OWNER';
+  return role;
+}
+
+function isAdminUser(user = {}) {
+  return ADMIN_ROLES.has(getEffectiveUserRole(user));
+}
+
+function canManageUserRoles(user = {}) {
+  return getEffectiveUserRole(user) === 'OWNER';
 }
 
 function getVoiceIceServers() {
@@ -272,9 +294,13 @@ function sendCaughtApiError(res, error, fallbackCode, fallbackMessage) {
 
 function serializePublicUser(user) {
   if (!user) return null;
+  const role = getEffectiveUserRole(user);
   return {
     id: user.id,
     username: user.username,
+    role,
+    isAdmin: ADMIN_ROLES.has(role),
+    canManageRoles: role === 'OWNER',
     displayName: user.displayName || null,
     avatarUrl: user.avatarUrl || null,
     bannerUrl: user.bannerUrl || null,
@@ -332,20 +358,16 @@ function sanitizeProfilePayload(body = {}) {
 
 async function adminMiddleware(req, res, next) {
   try {
-    if (ADMIN_USERNAMES.size === 0) {
-      return sendApiError(res, 403, 'ADMIN_NOT_CONFIGURED', 'Admin access is not configured.');
-    }
-
     const user = await prisma.user.findUnique({
       where: { id: req.user.userId },
       select: publicUserSelect
     });
 
-    if (!user || !isAdminUsername(user.username)) {
+    if (!user || !isAdminUser(user)) {
       return sendApiError(res, 403, 'ADMIN_FORBIDDEN', 'Admin access denied.');
     }
 
-    req.adminUser = user;
+    req.adminUser = serializePublicUser(user);
     return next();
   } catch (error) {
     console.error('Admin authorization failed:', error);
@@ -484,7 +506,7 @@ function serializeStory(story, currentUserId) {
 function normalizeStoryMediaType(value, mediaUrl = '') {
   const raw = String(value || '').toUpperCase();
   if (STORY_MEDIA_TYPES.has(raw)) return raw;
-  const source = String(mediaUrl || '').toLowerCase().split('?').first;
+  const source = String(mediaUrl || '').toLowerCase().split('?')[0];
   if (['.mp4', '.mov', '.m4v', '.webm', '.mkv', '.3gp'].some((ext) => source.endsWith(ext))) {
     return 'VIDEO';
   }
@@ -769,9 +791,10 @@ function isAllowedCorsOrigin(origin, callback) {
     return;
   }
 
-  callback(new Error('Not allowed by CORS'));
+  callback(null, false);
 }
 
+app.disable('x-powered-by');
 app.set('trust proxy', 1);
 app.use(cors({ origin: isAllowedCorsOrigin, credentials: true }));
 app.use(express.json());
@@ -873,7 +896,9 @@ app.get('/api/admin/overview', authMiddleware, adminMiddleware, async (req, res)
       directConversations,
       directMessages,
       pendingFriendRequests,
-      recentUsers
+      recentUsers,
+      roleUsers,
+      manageableUsers
     ] = await Promise.all([
       prisma.user.count(),
       prisma.guild.count(),
@@ -887,12 +912,24 @@ app.get('/api/admin/overview', authMiddleware, adminMiddleware, async (req, res)
         orderBy: { createdAt: 'desc' },
         take: 8,
         select: publicUserSelect
+      }),
+      prisma.user.findMany({
+        where: { role: { in: ['ADMIN', 'OWNER'] } },
+        orderBy: [{ role: 'desc' }, { username: 'asc' }],
+        take: 50,
+        select: publicUserSelect
+      }),
+      prisma.user.findMany({
+        orderBy: { createdAt: 'desc' },
+        take: 50,
+        select: publicUserSelect
       })
     ]);
 
     return res.json({
       admin: req.adminUser,
       allowedAdmins: [...ADMIN_USERNAMES].sort(),
+      canManageRoles: canManageUserRoles(req.adminUser),
       stats: {
         users,
         guilds,
@@ -904,7 +941,9 @@ app.get('/api/admin/overview', authMiddleware, adminMiddleware, async (req, res)
         pendingFriendRequests,
         voiceRooms: voiceParticipants.size
       },
-      recentUsers,
+      recentUsers: recentUsers.map(serializePublicUser),
+      roleUsers: roleUsers.map(serializePublicUser),
+      manageableUsers: manageableUsers.map(serializePublicUser),
       runtime: {
         nodeEnv: process.env.NODE_ENV || 'development',
         uptimeSeconds: Math.round(process.uptime())
@@ -913,6 +952,55 @@ app.get('/api/admin/overview', authMiddleware, adminMiddleware, async (req, res)
   } catch (error) {
     console.error(error);
     return sendApiError(res, 500, 'ADMIN_OVERVIEW_FAILED', 'Failed to load admin overview.');
+  }
+});
+
+app.patch('/api/admin/users/:userId/role', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    if (!canManageUserRoles(req.adminUser)) {
+      return sendApiError(res, 403, 'ROLE_MANAGEMENT_FORBIDDEN', 'Only owners can assign admin roles.');
+    }
+
+    const userId = parsePositiveInt(req.params.userId);
+    const role = normalizeUserRole(req.body.role);
+
+    if (!userId) {
+      return sendApiError(res, 400, 'INVALID_USER_ID', 'Invalid user id.');
+    }
+
+    if (!USER_ROLES.has(String(req.body.role || '').trim().toUpperCase())) {
+      return sendApiError(res, 400, 'INVALID_USER_ROLE', 'Invalid user role.');
+    }
+
+    const target = await prisma.user.findUnique({
+      where: { id: userId },
+      select: publicUserSelect
+    });
+
+    if (!target) {
+      return sendApiError(res, 404, 'USER_NOT_FOUND', 'User not found.');
+    }
+
+    if (getEffectiveUserRole(target) === 'OWNER' && role !== 'OWNER' && !isAdminUsername(target.username)) {
+      const ownerCount = await prisma.user.count({
+        where: { role: 'OWNER', id: { not: target.id } }
+      });
+
+      if (ownerCount === 0 && ADMIN_USERNAMES.size === 0) {
+        return sendApiError(res, 409, 'LAST_OWNER_REQUIRED', 'At least one owner must remain.');
+      }
+    }
+
+    const updated = await prisma.user.update({
+      where: { id: userId },
+      data: { role },
+      select: publicUserSelect
+    });
+
+    return res.json({ user: serializePublicUser(updated) });
+  } catch (error) {
+    console.error(error);
+    return sendCaughtApiError(res, error, 'ROLE_UPDATE_FAILED', 'Failed to update user role.');
   }
 });
 
@@ -1578,7 +1666,7 @@ app.get('/api/channels/:guildId', authMiddleware, async (req, res) => {
   }
 });
 
-app.post('/api/channels', authMiddleware, async (req, res) => {
+app.post('/api/channels', authMiddleware, adminMiddleware, async (req, res) => {
   try {
     const name = String(req.body.name || '').trim();
     const guildId = Number(req.body.guildId);
