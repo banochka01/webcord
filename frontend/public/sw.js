@@ -1,5 +1,5 @@
-const CACHE_NAME = 'webcord-app-v4';
-const SHELL_ASSETS = ['/', '/manifest.webmanifest', '/icons/webcord.png'];
+const CACHE_NAME = 'webcord-app-v5-media-stories';
+const SHELL_ASSETS = ['/manifest.webmanifest', '/icons/webcord.png'];
 
 self.addEventListener('install', (event) => {
   self.skipWaiting();
@@ -28,13 +28,27 @@ self.addEventListener('fetch', (event) => {
 
   if (request.mode === 'navigate') {
     event.respondWith(
-      fetch(request)
+      fetch(request, { cache: 'no-store' })
         .then((response) => {
           const copy = response.clone();
           caches.open(CACHE_NAME).then((cache) => cache.put('/', copy)).catch(() => {});
           return response;
         })
         .catch(() => caches.match('/') || Response.error())
+    );
+    return;
+  }
+
+  if (url.pathname.startsWith('/assets/')) {
+    event.respondWith(
+      fetch(request, { cache: 'no-store' })
+        .then((response) => {
+          if (!response || response.status !== 200 || response.type === 'opaque') return response;
+          const copy = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(request, copy)).catch(() => {});
+          return response;
+        })
+        .catch(() => caches.match(request) || Response.error())
     );
     return;
   }
