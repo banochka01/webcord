@@ -1228,11 +1228,48 @@ p {
 }
 
 .admin-role-row {
-  grid-template-columns: 42px minmax(0, 1fr) minmax(112px, 136px);
+  grid-template-columns: 42px minmax(0, 1fr) minmax(112px, 136px) minmax(220px, auto);
 }
 
 .admin-role-row select {
   min-height: 36px;
+}
+
+.admin-inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.admin-inline-actions button {
+  width: auto;
+  min-height: 32px;
+  padding: 6px 9px;
+  font-size: 12px;
+}
+
+.admin-report-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  padding: 12px 0;
+  border-top: 1px solid var(--border-color);
+}
+
+.admin-report-row:first-of-type {
+  border-top: 0;
+}
+
+.admin-report-row strong,
+.admin-report-row span {
+  display: block;
+}
+
+.admin-report-row p {
+  margin: 6px 0 0;
+  overflow-wrap: anywhere;
 }
 
 .admin-runtime {
@@ -1635,8 +1672,22 @@ p {
 .viewer-actions,
 .settings-actions-row {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   align-items: center;
+}
+
+.viewer-actions button {
+  width: auto;
+}
+
+.report-card {
+  display: grid;
+  gap: 14px;
+}
+
+.report-card textarea {
+  resize: vertical;
 }
 
 .channel-actions-row > * {
@@ -2371,6 +2422,48 @@ p {
 
 .voice-actions button {
   min-width: 84px;
+}
+
+.voice-quality-pill {
+  width: fit-content;
+  max-width: 100%;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 7px 9px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-color);
+  font-size: 12px;
+}
+
+.voice-quality-pill span {
+  display: inline-flex;
+  color: var(--accent-color);
+}
+
+.voice-quality-pill strong {
+  font-size: 12px;
+}
+
+.voice-quality-pill em {
+  color: var(--muted-text);
+  font-style: normal;
+}
+
+.voice-quality-pill.good {
+  border-color: rgba(99, 212, 113, 0.34);
+}
+
+.voice-quality-pill.fair {
+  border-color: rgba(242, 184, 75, 0.42);
+}
+
+.voice-quality-pill.poor {
+  border-color: rgba(255, 107, 138, 0.44);
 }
 
 .share-layout {
@@ -3508,6 +3601,20 @@ p {
 
   .admin-role-row select {
     grid-column: 1 / -1;
+  }
+
+  .admin-inline-actions,
+  .admin-report-row {
+    grid-column: 1 / -1;
+    justify-content: stretch;
+  }
+
+  .admin-report-row {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-inline-actions button {
+    flex: 1 1 96px;
   }
 
   .admin-grid {

@@ -42,6 +42,29 @@ enum UserRole {
   OWNER
 }
 
+enum ReportStatus {
+  OPEN
+  REVIEWED
+  RESOLVED
+  DISMISSED
+}
+
+enum ReportTargetType {
+  USER
+  MESSAGE
+  DIRECT_MESSAGE
+}
+
+enum ModerationActionType {
+  MUTE
+  UNMUTE
+  BAN
+  UNBAN
+  REPORT_REVIEWED
+  REPORT_RESOLVED
+  REPORT_DISMISSED
+}
+
 model User {
   id                      Int                 @id @default(autoincrement())
   username                String              @unique
@@ -56,6 +79,8 @@ model User {
   favoriteTrackUrl        String?
   favoriteTrackName       String?
   accentColor             String              @default("#7c5cff")
+  mutedUntil              DateTime?
+  bannedUntil             DateTime?
   messages                Message[]
   directMessages          DirectMessage[]
   sentFriendRequests      FriendRequest[]     @relation("FriendRequestSender")
@@ -68,6 +93,13 @@ model User {
   directConversationMemberships DirectConversationMember[]
   stories                 Story[]
   storyViews              StoryView[]
+  blockedUsers            UserBlock[]         @relation("UserBlocksFrom")
+  blockedBy               UserBlock[]         @relation("UserBlocksTo")
+  reportsMade             ModerationReport[]  @relation("ReportReporter")
+  reportsTargetingUser    ModerationReport[]  @relation("ReportTargetUser")
+  reportsResolved         ModerationReport[]  @relation("ReportResolver")
+  moderationActions       ModerationAction[]  @relation("ModerationActor")
+  moderationTargets       ModerationAction[]  @relation("ModerationTargetUser")
   createdAt               DateTime            @default(now())
 }
 
@@ -110,6 +142,7 @@ model Message {
   author         User            @relation(fields: [authorId], references: [id], onDelete: Cascade)
   replyTo        Message?        @relation("MessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
   replies        Message[]       @relation("MessageReplies")
+  reports        ModerationReport[]
 
   @@index([channelId, createdAt])
   @@index([authorId])
@@ -195,10 +228,65 @@ model DirectMessage {
   author         User            @relation(fields: [authorId], references: [id], onDelete: Cascade)
   replyTo        DirectMessage?   @relation("DirectMessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
   replies        DirectMessage[]  @relation("DirectMessageReplies")
+  reports        ModerationReport[]
 
   @@index([conversationId, createdAt])
   @@index([authorId])
   @@index([conversationId, readAt])
+}
+
+model UserBlock {
+  id        Int      @id @default(autoincrement())
+  blockerId Int
+  blockedId Int
+  createdAt DateTime @default(now())
+  blocker   User     @relation("UserBlocksFrom", fields: [blockerId], references: [id], onDelete: Cascade)
+  blocked   User     @relation("UserBlocksTo", fields: [blockedId], references: [id], onDelete: Cascade)
+
+  @@unique([blockerId, blockedId])
+  @@index([blockedId])
+}
+
+model ModerationReport {
+  id              Int              @id @default(autoincrement())
+  reporterId      Int
+  targetType      ReportTargetType
+  targetUserId    Int?
+  messageId       Int?
+  directMessageId Int?
+  reason          String
+  details         String           @default("")
+  status          ReportStatus     @default(OPEN)
+  resolvedById    Int?
+  resolvedAt      DateTime?
+  createdAt       DateTime         @default(now())
+  reporter        User             @relation("ReportReporter", fields: [reporterId], references: [id], onDelete: Cascade)
+  targetUser      User?            @relation("ReportTargetUser", fields: [targetUserId], references: [id], onDelete: SetNull)
+  message         Message?         @relation(fields: [messageId], references: [id], onDelete: SetNull)
+  directMessage   DirectMessage?   @relation(fields: [directMessageId], references: [id], onDelete: SetNull)
+  resolvedBy      User?            @relation("ReportResolver", fields: [resolvedById], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+  @@index([reporterId, createdAt])
+  @@index([targetUserId])
+  @@index([messageId])
+  @@index([directMessageId])
+}
+
+model ModerationAction {
+  id           Int                  @id @default(autoincrement())
+  actorId      Int
+  targetUserId Int?
+  action       ModerationActionType
+  reason       String               @default("")
+  metadata     Json?
+  createdAt    DateTime             @default(now())
+  actor        User                 @relation("ModerationActor", fields: [actorId], references: [id], onDelete: Cascade)
+  targetUser   User?                @relation("ModerationTargetUser", fields: [targetUserId], references: [id], onDelete: SetNull)
+
+  @@index([actorId, createdAt])
+  @@index([targetUserId, createdAt])
+  @@index([action, createdAt])
 }
 
 model Story {

@@ -22,6 +22,10 @@ class PublicUser {
     this.role = 'USER',
     this.isAdmin = false,
     this.canManageRoles = false,
+    this.mutedUntil,
+    this.bannedUntil,
+    this.isMuted = false,
+    this.isBanned = false,
   });
 
   final int id;
@@ -38,6 +42,10 @@ class PublicUser {
   final String role;
   final bool isAdmin;
   final bool canManageRoles;
+  final DateTime? mutedUntil;
+  final DateTime? bannedUntil;
+  final bool isMuted;
+  final bool isBanned;
 
   bool get canManageChannels =>
       isAdmin || role.toUpperCase() == 'ADMIN' || role.toUpperCase() == 'OWNER';
@@ -64,6 +72,10 @@ class PublicUser {
       role: '${data['role'] ?? 'USER'}',
       isAdmin: data['isAdmin'] == true,
       canManageRoles: data['canManageRoles'] == true,
+      mutedUntil: _asNullableDate(data['mutedUntil']),
+      bannedUntil: _asNullableDate(data['bannedUntil']),
+      isMuted: _asBool(data['isMuted']),
+      isBanned: _asBool(data['isBanned']),
     );
   }
 }
@@ -289,11 +301,13 @@ class SocialSnapshot {
     this.friends = const [],
     this.requests = const [],
     this.conversations = const [],
+    this.blockedUserIds = const [],
   });
 
   final List<Friendship> friends;
   final List<FriendRequest> requests;
   final List<DirectConversation> conversations;
+  final List<int> blockedUserIds;
 
   factory SocialSnapshot.fromJson(Map<String, dynamic>? json) {
     final data = json ?? const <String, dynamic>{};
@@ -303,6 +317,12 @@ class SocialSnapshot {
       conversations: _asList(
         data['conversations'],
       ).map(DirectConversation.fromJson).toList(),
+      blockedUserIds: data['blockedUserIds'] is List
+          ? (data['blockedUserIds'] as List)
+              .map(_asInt)
+              .where((id) => id > 0)
+              .toList()
+          : const [],
     );
   }
 }

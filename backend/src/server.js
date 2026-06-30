@@ -125,16 +125,27 @@ const publicUserSelect = {
   favoriteTrack: true,
   favoriteTrackUrl: true,
   favoriteTrackName: true,
-  accentColor: true
+  accentColor: true,
+  mutedUntil: true,
+  bannedUntil: true
 };
 const authRateLimit = createRateLimiter({ windowMs: 60_000, max: 20, keyPrefix: 'auth' });
 const messageRateLimitConfig = { windowMs: 10_000, max: 18, keyPrefix: 'message' };
 const messageRateLimit = createRateLimiter(messageRateLimitConfig);
 const uploadRateLimit = createRateLimiter({ windowMs: 60_000, max: 20, keyPrefix: 'upload' });
+const moderationRateLimit = createRateLimiter({ windowMs: 60_000, max: 12, keyPrefix: 'moderation' });
+const socialRateLimit = createRateLimiter({ windowMs: 60_000, max: 30, keyPrefix: 'social' });
+const voiceSignalRateLimitConfig = { windowMs: 10_000, max: 180, keyPrefix: 'voice-signal' };
+const voiceStateRateLimitConfig = { windowMs: 10_000, max: 80, keyPrefix: 'voice-state' };
 const ATTACHMENT_TYPES = new Set(['IMAGE', 'VIDEO', 'AUDIO', 'CIRCLE_VIDEO', 'FILE']);
 const STORY_MEDIA_TYPES = new Set(['IMAGE', 'VIDEO']);
 const USER_ROLES = new Set(['USER', 'ADMIN', 'OWNER']);
 const ADMIN_ROLES = new Set(['ADMIN', 'OWNER']);
+const REPORT_TARGET_TYPES = new Set(['USER', 'MESSAGE', 'DIRECT_MESSAGE']);
+const REPORT_STATUSES = new Set(['OPEN', 'REVIEWED', 'RESOLVED', 'DISMISSED']);
+const MODERATION_ACTIONS = new Set(['MUTE', 'UNMUTE', 'BAN', 'UNBAN']);
+const MAX_SIGNAL_SDP_LENGTH = 80_000;
+const MAX_ICE_CANDIDATE_LENGTH = 4_096;
 
 function normalizeUsername(value) {
   return String(value || '').trim().toLowerCase();
@@ -278,6 +289,20 @@ function parseOptionalPositiveInt(value) {
   return parsePositiveInt(value);
 }
 
+function isFutureDate(value) {
+  return value ? new Date(value).getTime() > Date.now() : false;
+}
+
+function parseDurationMinutes(value, fallbackMinutes, maxMinutes = 525_600) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallbackMinutes;
+  return Math.min(maxMinutes, Math.max(1, Math.round(parsed)));
+}
+
+function moderationUntil(minutes) {
+  return new Date(Date.now() + minutes * 60_000);
+}
+
 function parseMessagePagination(query = {}) {
   const limit = Math.min(MAX_MESSAGE_LIMIT, Math.max(1, parsePositiveInt(query.limit) || DEFAULT_MESSAGE_LIMIT));
   const beforeId = parseOptionalPositiveInt(query.beforeId);
@@ -309,8 +334,152 @@ function serializePublicUser(user) {
     favoriteTrack: user.favoriteTrack || '',
     favoriteTrackUrl: user.favoriteTrackUrl || null,
     favoriteTrackName: user.favoriteTrackName || null,
-    accentColor: user.accentColor || '#7c5cff'
+    accentColor: user.accentColor || '#7c5cff',
+    mutedUntil: user.mutedUntil || null,
+    bannedUntil: user.bannedUntil || null,
+    isMuted: isFutureDate(user.mutedUntil),
+    isBanned: isFutureDate(user.bannedUntil)
   };
+}
+
+function serializeModerationReport(report) {
+  if (!report) return null;
+  return {
+    id: report.id,
+    targetType: report.targetType,
+    reason: report.reason,
+    details: report.details || '',
+    status: report.status,
+    createdAt: report.createdAt,
+    resolvedAt: report.resolvedAt || null,
+    reporter: serializePublicUser(report.reporter),
+    targetUser: serializePublicUser(report.targetUser),
+    message: report.message
+      ? {
+          id: report.message.id,
+          content: report.message.deletedAt ? '' : report.message.content,
+          attachmentName: report.message.attachmentName,
+          channelId: report.message.channelId,
+          createdAt: report.message.createdAt
+        }
+      : null,
+    directMessage: report.directMessage
+      ? {
+          id: report.directMessage.id,
+          content: report.directMessage.deletedAt ? '' : report.directMessage.content,
+          attachmentName: report.directMessage.attachmentName,
+          conversationId: report.directMessage.conversationId,
+          createdAt: report.directMessage.createdAt
+        }
+      : null,
+    resolvedBy: serializePublicUser(report.resolvedBy)
+  };
+}
+
+function serializeModerationAction(action) {
+  if (!action) return null;
+  return {
+    id: action.id,
+    action: action.action,
+    reason: action.reason || '',
+    metadata: action.metadata || null,
+    createdAt: action.createdAt,
+    actor: serializePublicUser(action.actor),
+    targetUser: serializePublicUser(action.targetUser)
+  };
+}
+
+function normalizeReportTargetType(value) {
+  const normalized = String(value || '').trim().toUpperCase();
+  return REPORT_TARGET_TYPES.has(normalized) ? normalized : '';
+}
+
+function normalizeReportStatus(value) {
+  const normalized = String(value || '').trim().toUpperCase();
+  return REPORT_STATUSES.has(normalized) ? normalized : '';
+}
+
+function reportStatusToAction(status) {
+  return {
+    REVIEWED: 'REPORT_REVIEWED',
+    RESOLVED: 'REPORT_RESOLVED',
+    DISMISSED: 'REPORT_DISMISSED'
+  }[status] || '';
+}
+
+async function getBlockedUserIds(userId) {
+  const rows = await prisma.userBlock.findMany({
+    where: { blockerId: Number(userId) },
+    select: { blockedId: true }
+  });
+  return rows.map((row) => row.blockedId);
+}
+
+async function usersHaveBlockBetween(leftId, rightId) {
+  if (!leftId || !rightId || Number(leftId) === Number(rightId)) return false;
+  const block = await prisma.userBlock.findFirst({
+    where: {
+      OR: [
+        { blockerId: Number(leftId), blockedId: Number(rightId) },
+        { blockerId: Number(rightId), blockedId: Number(leftId) }
+      ]
+    },
+    select: { id: true }
+  });
+  return Boolean(block);
+}
+
+async function assertUserCanSend(userId) {
+  const user = await prisma.user.findUnique({
+    where: { id: Number(userId) },
+    select: { mutedUntil: true, bannedUntil: true }
+  });
+
+  if (!user) throw createApiError(401, 'USER_NOT_FOUND', 'User not found.');
+  if (isFutureDate(user.bannedUntil)) throw createApiError(403, 'ACCOUNT_BANNED', 'This account is banned.');
+  if (isFutureDate(user.mutedUntil)) throw createApiError(403, 'ACCOUNT_MUTED', 'This account is muted.');
+}
+
+function normalizeTargetSocketId(value) {
+  const socketId = String(value || '').trim();
+  return /^[A-Za-z0-9_-]{3,120}$/.test(socketId) ? socketId : '';
+}
+
+function sanitizeSessionDescription(description, expectedType) {
+  if (!description || typeof description !== 'object') return null;
+  const type = String(description.type || '').trim().toLowerCase();
+  const sdp = String(description.sdp || '');
+  if (type !== expectedType || !sdp || sdp.length > MAX_SIGNAL_SDP_LENGTH) return null;
+  return { type, sdp };
+}
+
+function sanitizeIceCandidate(candidate) {
+  if (!candidate || typeof candidate !== 'object') return null;
+  const candidateText = String(candidate.candidate || '');
+  if (!candidateText || candidateText.length > MAX_ICE_CANDIDATE_LENGTH) return null;
+  const sdpMid = candidate.sdpMid === undefined || candidate.sdpMid === null ? null : String(candidate.sdpMid).slice(0, 80);
+  const sdpMLineIndex = Number(candidate.sdpMLineIndex);
+  return {
+    candidate: candidateText,
+    sdpMid,
+    sdpMLineIndex: Number.isInteger(sdpMLineIndex) && sdpMLineIndex >= 0 ? sdpMLineIndex : null
+  };
+}
+
+function sanitizeSignalPayload(eventName, payload = {}) {
+  if (eventName.endsWith('offer')) {
+    const offer = sanitizeSessionDescription(payload.offer, 'offer');
+    return offer ? { offer } : null;
+  }
+  if (eventName.endsWith('answer')) {
+    const answer = sanitizeSessionDescription(payload.answer, 'answer');
+    return answer ? { answer } : null;
+  }
+  if (eventName.endsWith('ice-candidate')) {
+    const candidate = sanitizeIceCandidate(payload.candidate);
+    return candidate ? { candidate } : null;
+  }
+  return null;
 }
 
 function sanitizeProfilePayload(body = {}) {
@@ -546,7 +715,7 @@ async function ensureBootstrapData() {
 }
 
 async function getSocialSnapshot(userId) {
-  const [friendships, requests, conversations] = await Promise.all([
+  const [friendships, requests, conversations, blockedRows] = await Promise.all([
     prisma.friendship.findMany({
       where: {
         OR: [{ userOneId: userId }, { userTwoId: userId }]
@@ -593,13 +762,31 @@ async function getSocialSnapshot(userId) {
         }
       },
       orderBy: { updatedAt: 'desc' }
+    }),
+    prisma.userBlock.findMany({
+      where: {
+        OR: [{ blockerId: userId }, { blockedId: userId }]
+      },
+      select: { blockerId: true, blockedId: true }
     })
   ]);
+  const blockedIds = new Set(
+    blockedRows.map((row) => (row.blockerId === userId ? row.blockedId : row.blockerId))
+  );
+  const hasBlockedMember = (conversation) =>
+    getConversationMemberIds(conversation).some((memberId) => Number(memberId) !== Number(userId) && blockedIds.has(Number(memberId)));
 
   return {
-    friends: friendships.map((item) => serializeFriendship(item, userId)),
-    requests: requests.map((item) => serializeFriendRequest(item, userId)),
-    conversations: conversations.map((item) => serializeDirectConversation(item, userId))
+    friends: friendships
+      .filter((item) => !blockedIds.has(getFriendshipCounterpart(item, userId)?.id))
+      .map((item) => serializeFriendship(item, userId)),
+    requests: requests
+      .filter((item) => !blockedIds.has((item.senderId === userId ? item.receiverId : item.senderId)))
+      .map((item) => serializeFriendRequest(item, userId)),
+    conversations: conversations
+      .filter((item) => item.type !== 'DIRECT' || !hasBlockedMember(item))
+      .map((item) => serializeDirectConversation(item, userId)),
+    blockedUserIds: [...blockedIds]
   };
 }
 
@@ -656,20 +843,27 @@ function leaveCallRoom(socket) {
 }
 
 function emitCallSignal(socket, eventName, { callId, targetSocketId, ...payload }) {
+  if (!checkSocketRateLimit(socket, voiceSignalRateLimitConfig)) return;
   const roomKey = getCallRoomKey(callId);
   if (!roomKey || socket.data.callRoomKey !== roomKey) return;
+  const sanitizedPayload = sanitizeSignalPayload(eventName, payload);
+  if (!sanitizedPayload) {
+    socket.emit('socket-error', { code: 'INVALID_CALL_SIGNAL', error: 'Invalid call signal' });
+    return;
+  }
+  const safeTargetSocketId = normalizeTargetSocketId(targetSocketId);
 
   const signalPayload = {
-    ...payload,
+    ...sanitizedPayload,
     callId,
     fromSocketId: socket.id,
-    targetSocketId
+    targetSocketId: safeTargetSocketId || undefined
   };
 
-  if (targetSocketId) {
-    const targetSocket = io.sockets.sockets.get(targetSocketId);
+  if (safeTargetSocketId) {
+    const targetSocket = io.sockets.sockets.get(safeTargetSocketId);
     if (!targetSocket || targetSocket.data.callRoomKey !== roomKey) return;
-    io.to(targetSocketId).emit(eventName, signalPayload);
+    io.to(safeTargetSocketId).emit(eventName, signalPayload);
     return;
   }
 
@@ -677,6 +871,8 @@ function emitCallSignal(socket, eventName, { callId, targetSocketId, ...payload 
 }
 
 async function createChannelMessage({ channelId, userId, content, attachmentUrl, attachmentType, attachmentName, replyToId }) {
+  await assertUserCanSend(userId);
+
   const channel = await prisma.channel.findUnique({
     where: { id: channelId },
     select: { id: true, type: true, guildId: true }
@@ -735,6 +931,15 @@ async function createDirectConversationMessage({ conversationId, userId, content
   if (!conversation || !getConversationMemberIds(conversation).includes(userId)) {
     return { conversation: null, message: null };
   }
+
+  if (conversation.type === 'DIRECT') {
+    const counterpartId = getConversationMemberIds(conversation).find((memberId) => Number(memberId) !== Number(userId));
+    if (counterpartId && await usersHaveBlockBetween(userId, counterpartId)) {
+      throw createApiError(403, 'USER_BLOCKED', 'This direct conversation is blocked.');
+    }
+  }
+
+  await assertUserCanSend(userId);
 
   if (replyToId) {
     const replyTarget = await prisma.directMessage.findUnique({
@@ -873,6 +1078,10 @@ app.post('/api/auth/login', authRateLimit, async (req, res) => {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
+    if (isFutureDate(user.bannedUntil)) {
+      return sendApiError(res, 403, 'ACCOUNT_BANNED', 'This account is banned.');
+    }
+
     await ensureBootstrapData();
 
     return res.json({
@@ -898,7 +1107,12 @@ app.get('/api/admin/overview', authMiddleware, adminMiddleware, async (req, res)
       pendingFriendRequests,
       recentUsers,
       roleUsers,
-      manageableUsers
+      manageableUsers,
+      openReports,
+      recentReports,
+      recentModerationActions,
+      mutedUsers,
+      bannedUsers
     ] = await Promise.all([
       prisma.user.count(),
       prisma.guild.count(),
@@ -923,7 +1137,29 @@ app.get('/api/admin/overview', authMiddleware, adminMiddleware, async (req, res)
         orderBy: { createdAt: 'desc' },
         take: 50,
         select: publicUserSelect
-      })
+      }),
+      prisma.moderationReport.count({ where: { status: 'OPEN' } }),
+      prisma.moderationReport.findMany({
+        orderBy: { createdAt: 'desc' },
+        take: 12,
+        include: {
+          reporter: { select: publicUserSelect },
+          targetUser: { select: publicUserSelect },
+          message: true,
+          directMessage: true,
+          resolvedBy: { select: publicUserSelect }
+        }
+      }),
+      prisma.moderationAction.findMany({
+        orderBy: { createdAt: 'desc' },
+        take: 12,
+        include: {
+          actor: { select: publicUserSelect },
+          targetUser: { select: publicUserSelect }
+        }
+      }),
+      prisma.user.count({ where: { mutedUntil: { gt: new Date() } } }),
+      prisma.user.count({ where: { bannedUntil: { gt: new Date() } } })
     ]);
 
     return res.json({
@@ -939,11 +1175,16 @@ app.get('/api/admin/overview', authMiddleware, adminMiddleware, async (req, res)
         directConversations,
         directMessages,
         pendingFriendRequests,
-        voiceRooms: voiceParticipants.size
+        voiceRooms: voiceParticipants.size,
+        openReports,
+        mutedUsers,
+        bannedUsers
       },
       recentUsers: recentUsers.map(serializePublicUser),
       roleUsers: roleUsers.map(serializePublicUser),
       manageableUsers: manageableUsers.map(serializePublicUser),
+      recentReports: recentReports.map(serializeModerationReport),
+      recentModerationActions: recentModerationActions.map(serializeModerationAction),
       runtime: {
         nodeEnv: process.env.NODE_ENV || 'development',
         uptimeSeconds: Math.round(process.uptime())
@@ -1001,6 +1242,153 @@ app.patch('/api/admin/users/:userId/role', authMiddleware, adminMiddleware, asyn
   } catch (error) {
     console.error(error);
     return sendCaughtApiError(res, error, 'ROLE_UPDATE_FAILED', 'Failed to update user role.');
+  }
+});
+
+app.get('/api/admin/moderation/reports', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const status = normalizeReportStatus(req.query.status) || undefined;
+    const reports = await prisma.moderationReport.findMany({
+      where: status ? { status } : undefined,
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+      include: {
+        reporter: { select: publicUserSelect },
+        targetUser: { select: publicUserSelect },
+        message: true,
+        directMessage: true,
+        resolvedBy: { select: publicUserSelect }
+      }
+    });
+
+    return res.json(reports.map(serializeModerationReport));
+  } catch (error) {
+    console.error(error);
+    return sendApiError(res, 500, 'REPORTS_FETCH_FAILED', 'Failed to load moderation reports.');
+  }
+});
+
+app.patch('/api/admin/moderation/reports/:reportId', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const reportId = parsePositiveInt(req.params.reportId);
+    const status = normalizeReportStatus(req.body.status);
+    const reason = String(req.body.reason || '').trim().slice(0, 500);
+
+    if (!reportId) {
+      return sendApiError(res, 400, 'INVALID_REPORT_ID', 'Invalid report id.');
+    }
+    if (!status || status === 'OPEN') {
+      return sendApiError(res, 400, 'INVALID_REPORT_STATUS', 'Invalid report status.');
+    }
+
+    const action = reportStatusToAction(status);
+    const report = await prisma.$transaction(async (tx) => {
+      const updated = await tx.moderationReport.update({
+        where: { id: reportId },
+        data: {
+          status,
+          resolvedById: req.user.userId,
+          resolvedAt: new Date()
+        },
+        include: {
+          reporter: { select: publicUserSelect },
+          targetUser: { select: publicUserSelect },
+          message: true,
+          directMessage: true,
+          resolvedBy: { select: publicUserSelect }
+        }
+      });
+
+      if (action) {
+        await tx.moderationAction.create({
+          data: {
+            actorId: req.user.userId,
+            targetUserId: updated.targetUserId,
+            action,
+            reason,
+            metadata: { reportId: updated.id, targetType: updated.targetType }
+          }
+        });
+      }
+
+      return updated;
+    });
+
+    return res.json({ report: serializeModerationReport(report) });
+  } catch (error) {
+    console.error(error);
+    return sendCaughtApiError(res, error, 'REPORT_UPDATE_FAILED', 'Failed to update report.');
+  }
+});
+
+app.post('/api/admin/users/:userId/moderation', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const userId = parsePositiveInt(req.params.userId);
+    const action = String(req.body.action || '').trim().toUpperCase();
+    const reason = String(req.body.reason || '').trim().slice(0, 500);
+
+    if (!userId) {
+      return sendApiError(res, 400, 'INVALID_USER_ID', 'Invalid user id.');
+    }
+    if (!MODERATION_ACTIONS.has(action)) {
+      return sendApiError(res, 400, 'INVALID_MODERATION_ACTION', 'Invalid moderation action.');
+    }
+
+    const target = await prisma.user.findUnique({
+      where: { id: userId },
+      select: publicUserSelect
+    });
+    if (!target) {
+      return sendApiError(res, 404, 'USER_NOT_FOUND', 'User not found.');
+    }
+    if (String(target.id) === String(req.user.userId)) {
+      return sendApiError(res, 400, 'SELF_MODERATION_FORBIDDEN', 'You cannot moderate yourself.');
+    }
+    if (getEffectiveUserRole(target) === 'OWNER' && getEffectiveUserRole(req.adminUser) !== 'OWNER') {
+      return sendApiError(res, 403, 'OWNER_MODERATION_FORBIDDEN', 'Only owners can moderate owners.');
+    }
+
+    const data = {};
+    let until = null;
+    if (action === 'MUTE') {
+      const minutes = parseDurationMinutes(req.body.durationMinutes, 60, 43_200);
+      until = moderationUntil(minutes);
+      data.mutedUntil = until;
+    } else if (action === 'UNMUTE') {
+      data.mutedUntil = null;
+    } else if (action === 'BAN') {
+      const minutes = parseDurationMinutes(req.body.durationMinutes, 525_600, 5_256_000);
+      until = moderationUntil(minutes);
+      data.bannedUntil = until;
+    } else if (action === 'UNBAN') {
+      data.bannedUntil = null;
+    }
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const user = await tx.user.update({
+        where: { id: userId },
+        data,
+        select: publicUserSelect
+      });
+
+      await tx.moderationAction.create({
+        data: {
+          actorId: req.user.userId,
+          targetUserId: userId,
+          action,
+          reason,
+          metadata: until ? { until: until.toISOString() } : {}
+        }
+      });
+
+      return user;
+    });
+
+    emitSocialRefresh([userId]);
+    return res.json({ user: serializePublicUser(updated) });
+  } catch (error) {
+    console.error(error);
+    return sendCaughtApiError(res, error, 'MODERATION_ACTION_FAILED', 'Failed to apply moderation action.');
   }
 });
 
@@ -1069,6 +1457,178 @@ app.patch('/api/me/profile', authMiddleware, async (req, res) => {
   } catch (error) {
     console.error(error);
     return res.status(500).json({ error: 'Failed to update profile' });
+  }
+});
+
+app.get('/api/me/blocks', authMiddleware, async (req, res) => {
+  try {
+    const blocks = await prisma.userBlock.findMany({
+      where: { blockerId: req.user.userId },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        blocked: { select: publicUserSelect }
+      }
+    });
+
+    return res.json(blocks.map((block) => ({
+      id: block.id,
+      createdAt: block.createdAt,
+      user: serializePublicUser(block.blocked)
+    })));
+  } catch (error) {
+    console.error(error);
+    return sendApiError(res, 500, 'BLOCKS_FETCH_FAILED', 'Failed to fetch blocked users.');
+  }
+});
+
+app.post('/api/users/:userId/block', authMiddleware, socialRateLimit, async (req, res) => {
+  try {
+    const blockedId = parsePositiveInt(req.params.userId);
+    const blockerId = req.user.userId;
+
+    if (!blockedId) {
+      return sendApiError(res, 400, 'INVALID_USER_ID', 'Invalid user id.');
+    }
+    if (blockedId === blockerId) {
+      return sendApiError(res, 400, 'SELF_BLOCK_FORBIDDEN', 'You cannot block yourself.');
+    }
+
+    const target = await prisma.user.findUnique({
+      where: { id: blockedId },
+      select: publicUserSelect
+    });
+    if (!target) {
+      return sendApiError(res, 404, 'USER_NOT_FOUND', 'User not found.');
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.userBlock.upsert({
+        where: { blockerId_blockedId: { blockerId, blockedId } },
+        create: { blockerId, blockedId },
+        update: {}
+      });
+
+      await tx.friendRequest.updateMany({
+        where: {
+          status: 'PENDING',
+          OR: [
+            { senderId: blockerId, receiverId: blockedId },
+            { senderId: blockedId, receiverId: blockerId }
+          ]
+        },
+        data: { status: 'DECLINED' }
+      });
+    });
+
+    emitSocialRefresh([blockerId, blockedId]);
+    return res.status(201).json({ user: serializePublicUser(target) });
+  } catch (error) {
+    console.error(error);
+    return sendCaughtApiError(res, error, 'BLOCK_USER_FAILED', 'Failed to block user.');
+  }
+});
+
+app.delete('/api/users/:userId/block', authMiddleware, socialRateLimit, async (req, res) => {
+  try {
+    const blockedId = parsePositiveInt(req.params.userId);
+    const blockerId = req.user.userId;
+
+    if (!blockedId) {
+      return sendApiError(res, 400, 'INVALID_USER_ID', 'Invalid user id.');
+    }
+
+    await prisma.userBlock.deleteMany({
+      where: { blockerId, blockedId }
+    });
+
+    emitSocialRefresh([blockerId, blockedId]);
+    return res.json({ ok: true });
+  } catch (error) {
+    console.error(error);
+    return sendCaughtApiError(res, error, 'UNBLOCK_USER_FAILED', 'Failed to unblock user.');
+  }
+});
+
+app.post('/api/moderation/reports', authMiddleware, moderationRateLimit, async (req, res) => {
+  try {
+    const reporterId = req.user.userId;
+    const targetType = normalizeReportTargetType(req.body.targetType);
+    const reason = String(req.body.reason || '').trim().slice(0, 120);
+    const details = String(req.body.details || '').trim().slice(0, 700);
+    let targetUserId = parseOptionalPositiveInt(req.body.targetUserId);
+    let messageId = null;
+    let directMessageId = null;
+
+    if (!targetType) {
+      return sendApiError(res, 400, 'INVALID_REPORT_TARGET', 'Invalid report target.');
+    }
+    if (reason.length < 3) {
+      return sendApiError(res, 400, 'REPORT_REASON_REQUIRED', 'Report reason is required.');
+    }
+
+    if (targetType === 'USER') {
+      if (!targetUserId || targetUserId === reporterId) {
+        return sendApiError(res, 400, 'INVALID_REPORT_TARGET', 'Invalid reported user.');
+      }
+      const target = await prisma.user.findUnique({
+        where: { id: targetUserId },
+        select: { id: true }
+      });
+      if (!target) return sendApiError(res, 404, 'REPORT_TARGET_NOT_FOUND', 'Report target not found.');
+    }
+
+    if (targetType === 'MESSAGE') {
+      messageId = parseOptionalPositiveInt(req.body.messageId);
+      if (!messageId) return sendApiError(res, 400, 'INVALID_REPORT_TARGET', 'Invalid message report.');
+      const message = await prisma.message.findUnique({
+        where: { id: messageId },
+        select: { authorId: true }
+      });
+      if (!message) return sendApiError(res, 404, 'REPORT_TARGET_NOT_FOUND', 'Report target not found.');
+      targetUserId = message.authorId;
+    }
+
+    if (targetType === 'DIRECT_MESSAGE') {
+      directMessageId = parseOptionalPositiveInt(req.body.directMessageId);
+      if (!directMessageId) return sendApiError(res, 400, 'INVALID_REPORT_TARGET', 'Invalid direct message report.');
+      const directMessage = await prisma.directMessage.findUnique({
+        where: { id: directMessageId },
+        select: { authorId: true, conversationId: true }
+      });
+      if (!directMessage) return sendApiError(res, 404, 'REPORT_TARGET_NOT_FOUND', 'Report target not found.');
+      if (!await isConversationMember(directMessage.conversationId, reporterId)) {
+        return sendApiError(res, 403, 'REPORT_FORBIDDEN', 'You cannot report a message from this conversation.');
+      }
+      targetUserId = directMessage.authorId;
+    }
+
+    if (targetUserId === reporterId) {
+      return sendApiError(res, 400, 'SELF_REPORT_FORBIDDEN', 'You cannot report yourself.');
+    }
+
+    const report = await prisma.moderationReport.create({
+      data: {
+        reporterId,
+        targetType,
+        targetUserId,
+        messageId,
+        directMessageId,
+        reason,
+        details
+      },
+      include: {
+        reporter: { select: publicUserSelect },
+        targetUser: { select: publicUserSelect },
+        message: true,
+        directMessage: true,
+        resolvedBy: { select: publicUserSelect }
+      }
+    });
+
+    return res.status(201).json({ report: serializeModerationReport(report) });
+  } catch (error) {
+    console.error(error);
+    return sendCaughtApiError(res, error, 'REPORT_CREATE_FAILED', 'Failed to create report.');
   }
 });
 
@@ -1197,6 +1757,10 @@ app.post('/api/friends/request', authMiddleware, async (req, res) => {
       return res.status(400).json({ error: 'You cannot add yourself' });
     }
 
+    if (await usersHaveBlockBetween(currentUserId, targetUser.id)) {
+      return sendApiError(res, 403, 'USER_BLOCKED', 'Friend requests are blocked for this user.');
+    }
+
     const [userOneId, userTwoId] = normalizeUserPair(currentUserId, targetUser.id);
     const existingFriendship = await prisma.friendship.findUnique({
       where: { userOneId_userTwoId: { userOneId, userTwoId } }
@@ -1288,6 +1852,10 @@ app.post('/api/friends/respond', authMiddleware, async (req, res) => {
 
     const nextStatus = action === 'ACCEPT' ? 'ACCEPTED' : 'DECLINED';
 
+    if (nextStatus === 'ACCEPTED' && await usersHaveBlockBetween(request.senderId, request.receiverId)) {
+      return sendApiError(res, 403, 'USER_BLOCKED', 'This friend request is blocked.');
+    }
+
     await prisma.$transaction(async (tx) => {
       await tx.friendRequest.update({
         where: { id: request.id },
@@ -1340,6 +1908,10 @@ app.post('/api/dms/open', authMiddleware, async (req, res) => {
 
     if (targetUserId === currentUserId) {
       return res.status(400).json({ error: 'You cannot message yourself' });
+    }
+
+    if (await usersHaveBlockBetween(currentUserId, targetUserId)) {
+      return sendApiError(res, 403, 'USER_BLOCKED', 'This direct conversation is blocked.');
     }
 
     const [userOneId, userTwoId] = normalizeUserPair(currentUserId, targetUserId);
@@ -1416,6 +1988,19 @@ app.post('/api/groups', authMiddleware, async (req, res) => {
     }
 
     const requestedFriendIds = memberIds.filter((userId) => userId !== currentUserId);
+    const blockedLinks = await prisma.userBlock.count({
+      where: {
+        OR: requestedFriendIds.flatMap((friendId) => [
+          { blockerId: currentUserId, blockedId: friendId },
+          { blockerId: friendId, blockedId: currentUserId }
+        ])
+      }
+    });
+
+    if (blockedLinks > 0) {
+      return sendApiError(res, 403, 'GROUP_BLOCKED_USER', 'Groups cannot include blocked users.');
+    }
+
     const friendships = await prisma.friendship.findMany({
       where: {
         OR: requestedFriendIds.flatMap((friendId) => {
@@ -1499,6 +2084,13 @@ app.post('/api/dms/:conversationId/calls', authMiddleware, async (req, res) => {
 
     if (!conversation || !getConversationMemberIds(conversation).includes(req.user.userId)) {
       return sendApiError(res, 404, 'CONVERSATION_NOT_FOUND', 'Conversation not found');
+    }
+
+    if (conversation.type === 'DIRECT') {
+      const counterpartId = getConversationMemberIds(conversation).find((memberId) => Number(memberId) !== Number(req.user.userId));
+      if (counterpartId && await usersHaveBlockBetween(req.user.userId, counterpartId)) {
+        return sendApiError(res, 403, 'USER_BLOCKED', 'This direct call is blocked.');
+      }
     }
 
     const serialized = serializeDirectConversation(conversation, req.user.userId);
@@ -1603,6 +2195,13 @@ app.get('/api/dms/:conversationId/messages', authMiddleware, async (req, res) =>
       return res.status(404).json({ error: 'Conversation not found' });
     }
 
+    if (conversation.type === 'DIRECT') {
+      const counterpartId = getConversationMemberIds(conversation).find((memberId) => Number(memberId) !== Number(currentUserId));
+      if (counterpartId && await usersHaveBlockBetween(currentUserId, counterpartId)) {
+        return sendApiError(res, 403, 'USER_BLOCKED', 'This direct conversation is blocked.');
+      }
+    }
+
     await prisma.directMessage.updateMany({
       where: {
         conversationId,
@@ -1613,9 +2212,11 @@ app.get('/api/dms/:conversationId/messages', authMiddleware, async (req, res) =>
     });
 
     const { limit, beforeId } = parseMessagePagination(req.query);
+    const blockedUserIds = await getBlockedUserIds(currentUserId);
     const messages = await prisma.directMessage.findMany({
       where: {
         conversationId,
+        ...(blockedUserIds.length > 0 ? { authorId: { notIn: blockedUserIds } } : {}),
         ...(beforeId ? { id: { lt: beforeId } } : {})
       },
       orderBy: { id: 'desc' },
@@ -1705,9 +2306,11 @@ app.get('/api/messages/:channelId', authMiddleware, async (req, res) => {
     }
 
     const { limit, beforeId } = parseMessagePagination(req.query);
+    const blockedUserIds = await getBlockedUserIds(req.user.userId);
     const messages = await prisma.message.findMany({
       where: {
         channelId,
+        ...(blockedUserIds.length > 0 ? { authorId: { notIn: blockedUserIds } } : {}),
         ...(beforeId ? { id: { lt: beforeId } } : {})
       },
       orderBy: { id: 'desc' },
@@ -1832,6 +2435,7 @@ app.patch('/api/messages/:messageId', authMiddleware, messageRateLimit, async (r
     if (!content) {
       return sendApiError(res, 400, 'MESSAGE_EMPTY', 'Message content is required');
     }
+    await assertUserCanSend(req.user.userId);
 
     const existing = await prisma.message.findUnique({ where: { id: messageId } });
     if (!existing || existing.authorId !== req.user.userId || existing.deletedAt) {
@@ -1851,7 +2455,7 @@ app.patch('/api/messages/:messageId', authMiddleware, messageRateLimit, async (r
     return res.json(message);
   } catch (error) {
     console.error(error);
-    return sendApiError(res, 500, 'MESSAGE_EDIT_FAILED', 'Failed to edit message');
+    return sendCaughtApiError(res, error, 'MESSAGE_EDIT_FAILED', 'Failed to edit message');
   }
 });
 
@@ -1902,6 +2506,7 @@ app.patch('/api/dms/:conversationId/messages/:messageId', authMiddleware, messag
     if (!content) {
       return sendApiError(res, 400, 'MESSAGE_EMPTY', 'Message content is required');
     }
+    await assertUserCanSend(req.user.userId);
 
     const conversation = await prisma.directConversation.findUnique({
       where: { id: conversationId },
@@ -1933,7 +2538,7 @@ app.patch('/api/dms/:conversationId/messages/:messageId', authMiddleware, messag
     return res.json({ ...message, conversationId });
   } catch (error) {
     console.error(error);
-    return sendApiError(res, 500, 'MESSAGE_EDIT_FAILED', 'Failed to edit direct message');
+    return sendCaughtApiError(res, error, 'MESSAGE_EDIT_FAILED', 'Failed to edit direct message');
   }
 });
 
@@ -1985,7 +2590,14 @@ app.delete('/api/dms/:conversationId/messages/:messageId', authMiddleware, messa
   }
 });
 
-app.post('/api/upload', authMiddleware, uploadRateLimit, upload.single('file'), async (req, res) => {
+app.post('/api/upload', authMiddleware, uploadRateLimit, async (req, res, next) => {
+  try {
+    await assertUserCanSend(req.user.userId);
+    return next();
+  } catch (error) {
+    return sendCaughtApiError(res, error, 'UPLOAD_FORBIDDEN', 'Upload is not allowed.');
+  }
+}, upload.single('file'), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: 'No file uploaded' });
   }
@@ -2019,7 +2631,7 @@ const io = new Server(server, {
   path: '/socket.io'
 });
 
-io.use((socket, next) => {
+io.use(async (socket, next) => {
   try {
     const token = socket.handshake.auth?.token;
     if (!token) {
@@ -2027,6 +2639,13 @@ io.use((socket, next) => {
     }
 
     socket.user = verifyToken(token);
+    const user = await prisma.user.findUnique({
+      where: { id: socket.user.userId },
+      select: { id: true, bannedUntil: true }
+    });
+    if (!user || isFutureDate(user.bannedUntil)) {
+      return next(new Error('Unauthorized'));
+    }
     return next();
   } catch {
     return next(new Error('Unauthorized'));
@@ -2076,19 +2695,26 @@ function leaveVoiceRoom(socket) {
 }
 
 function emitVoiceSignal(socket, eventName, { channelId, targetSocketId, ...payload }) {
+  if (!checkSocketRateLimit(socket, voiceSignalRateLimitConfig)) return;
   const roomKey = getVoiceRoomKey(channelId);
   if (!roomKey || socket.data.voiceRoomKey !== roomKey) return;
+  const sanitizedPayload = sanitizeSignalPayload(eventName, payload);
+  if (!sanitizedPayload) {
+    socket.emit('socket-error', { code: 'INVALID_VOICE_SIGNAL', error: 'Invalid voice signal' });
+    return;
+  }
+  const safeTargetSocketId = normalizeTargetSocketId(targetSocketId);
 
   const signalPayload = {
-    ...payload,
+    ...sanitizedPayload,
     fromSocketId: socket.id,
-    targetSocketId
+    targetSocketId: safeTargetSocketId || undefined
   };
 
-  if (targetSocketId) {
-    const targetSocket = io.sockets.sockets.get(targetSocketId);
+  if (safeTargetSocketId) {
+    const targetSocket = io.sockets.sockets.get(safeTargetSocketId);
     if (!targetSocket || targetSocket.data.voiceRoomKey !== roomKey) return;
-    io.to(targetSocketId).emit(eventName, signalPayload);
+    io.to(safeTargetSocketId).emit(eventName, signalPayload);
     return;
   }
 
@@ -2129,6 +2755,11 @@ io.on('connection', (socket) => {
 
       if (!conversation || !getConversationMemberIds(conversation).includes(socket.user.userId)) {
         return;
+      }
+
+      if (conversation.type === 'DIRECT') {
+        const counterpartId = getConversationMemberIds(conversation).find((memberId) => Number(memberId) !== Number(socket.user.userId));
+        if (counterpartId && await usersHaveBlockBetween(socket.user.userId, counterpartId)) return;
       }
 
       if (socket.data.directRoomKey) {
@@ -2286,6 +2917,7 @@ io.on('connection', (socket) => {
   socket.on('leave-call', () => leaveCallRoom(socket));
 
   socket.on('call-state', (payload = {}) => {
+    if (!checkSocketRateLimit(socket, voiceStateRateLimitConfig)) return;
     const roomKey = socket.data.callRoomKey;
     const callId = socket.data.callId;
     if (!roomKey || !callId) return;
@@ -2367,6 +2999,7 @@ io.on('connection', (socket) => {
   socket.on('leave-voice', () => leaveVoiceRoom(socket));
 
   socket.on('voice-state', (payload = {}) => {
+    if (!checkSocketRateLimit(socket, voiceStateRateLimitConfig)) return;
     const roomKey = socket.data.voiceRoomKey;
     if (!roomKey) return;
 

@@ -1660,7 +1660,7 @@ class MessageTile extends StatelessWidget {
                               fontSize: 11,
                             ),
                           ),
-                        if (own && !message.isDeleted)
+                        if (!message.isDeleted)
                           PopupMenuButton<String>(
                             tooltip: 'Message actions',
                             padding: EdgeInsets.zero,
@@ -1674,14 +1674,22 @@ class MessageTile extends StatelessWidget {
                                 showEditMessageDialog(context, state, message);
                               } else if (value == 'delete') {
                                 state.deleteMessage(message);
+                              } else if (value == 'report') {
+                                state.reportMessage(message);
                               }
                             },
-                            itemBuilder: (context) => const [
-                              PopupMenuItem(value: 'edit', child: Text('Edit')),
-                              PopupMenuItem(
-                                value: 'delete',
-                                child: Text('Delete'),
-                              ),
+                            itemBuilder: (context) => [
+                              if (own) const PopupMenuItem(value: 'edit', child: Text('Edit')),
+                              if (own)
+                                const PopupMenuItem(
+                                  value: 'delete',
+                                  child: Text('Delete'),
+                                ),
+                              if (!own)
+                                const PopupMenuItem(
+                                  value: 'report',
+                                  child: Text('Report'),
+                                ),
                             ],
                           ),
                       ],
@@ -3218,6 +3226,27 @@ class VoiceParticipantSheet extends StatelessWidget {
                   onPressed: () => state.sendFriendRequest(user.username),
                   icon: const Icon(Icons.person_add_alt_1_rounded),
                   label: const Text('Add friend'),
+                ),
+              if (state.user?.id != user.id)
+                OutlinedButton.icon(
+                  onPressed: () => state.reportUser(user),
+                  icon: const Icon(Icons.flag_rounded),
+                  label: const Text('Report'),
+                ),
+              if (state.user?.id != user.id && !state.isBlockedUser(user.id))
+                OutlinedButton.icon(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    state.blockUser(user);
+                  },
+                  icon: const Icon(Icons.block_rounded),
+                  label: const Text('Block'),
+                ),
+              if (state.user?.id != user.id && state.isBlockedUser(user.id))
+                OutlinedButton.icon(
+                  onPressed: () => state.unblockUser(user),
+                  icon: const Icon(Icons.lock_open_rounded),
+                  label: const Text('Unblock'),
                 ),
             ],
           ),

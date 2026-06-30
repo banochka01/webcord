@@ -297,6 +297,44 @@ class WebCordApi {
     return DirectConversation.fromJson(json);
   }
 
+  Future<void> blockUser({
+    required String token,
+    required int userId,
+  }) async {
+    await _send('POST', '/users/$userId/block', token: token);
+  }
+
+  Future<void> unblockUser({
+    required String token,
+    required int userId,
+  }) async {
+    await _send('DELETE', '/users/$userId/block', token: token);
+  }
+
+  Future<void> createReport({
+    required String token,
+    required String targetType,
+    String reason = 'Other',
+    String details = '',
+    int? targetUserId,
+    int? messageId,
+    int? directMessageId,
+  }) async {
+    await _send(
+      'POST',
+      '/moderation/reports',
+      token: token,
+      body: {
+        'targetType': targetType,
+        'reason': reason,
+        'details': details,
+        if (targetUserId != null) 'targetUserId': targetUserId,
+        if (messageId != null) 'messageId': messageId,
+        if (directMessageId != null) 'directMessageId': directMessageId,
+      },
+    );
+  }
+
   Future<DirectConversation> createGroupConversation({
     required String token,
     required String title,

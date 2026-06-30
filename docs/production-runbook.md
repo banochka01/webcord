@@ -18,6 +18,7 @@
 2. Run build checks:
 
    ```bash
+   $env:DATABASE_URL='postgresql://webcord:webcord@localhost:5432/webcord'
    npm run check
    npm run android:release:apk
    npm run desktop:build
@@ -43,8 +44,40 @@ The script:
 - refuses dirty tracked files unless `ALLOW_DIRTY=1` is set;
 - writes a pre-deploy patch into `/opt/webcord_backups`;
 - fetches the selected branch;
+- applies Prisma migrations before the app handles traffic;
 - rebuilds containers;
 - waits for `/api/health`.
+
+After deploy, verify:
+
+```bash
+curl -fsSL https://webcordes.ru/api/health
+curl -fsSL https://webcordes.ru/manifest.webmanifest
+```
+
+## Moderation And Public Release
+
+WebCord is open for registration, so public releases must keep the moderation layer enabled:
+
+- users can report users, channel messages and DM messages;
+- users can block/unblock other users;
+- admins can review reports and apply temporary mute/ban actions;
+- muted/banned users are blocked on message/upload write paths;
+- the admin panel shows open reports, muted users, banned users and recent moderation actions.
+
+Do not remove these flows before iOS/TestFlight review. Apps with user-generated content need reporting, blocking and moderation.
+
+## Voice Quality
+
+Current voice uses peer-to-peer WebRTC with Socket.IO signaling. The production-safe improvement path currently enabled:
+
+- backend-provided ICE servers through `/api/voice/ice-servers`;
+- SDP validation and signaling rate limits;
+- Opus 48 kHz mono speech tuning with in-band FEC and 64 kbps target bitrate;
+- web and Flutter quality diagnostics: RTT, jitter, packet loss, bitrate and direct/relay route;
+- ICE restart on failed/disconnected routes.
+
+For larger public voice rooms, move media transport to an SFU such as LiveKit, mediasoup or Janus. That is an infrastructure migration and should be deployed separately from normal UI/client releases.
 
 ## Rollback
 
@@ -75,3 +108,8 @@ The script:
 - Android AAB: `android/app/build/outputs/bundle/release/app-release.aab`
 - Desktop installer: `src-tauri/target/release/bundle/nsis/WebCord_3.1.2_x64-setup.exe`
 - Desktop portable/MSI artifacts: `src-tauri/target/release/bundle/`
+- Web/PWA build: `frontend/dist/`
+- Flutter native Android APK: `clients/webcord_native/build/app/outputs/flutter-apk/app-release.apk`
+- Flutter Windows release: `clients/webcord_native/build/windows/x64/runner/Release/`
+
+Android artifacts from local CI are test artifacts until a production upload keystore is configured. Keep `.jks`, `key.properties` and keystore passwords outside git.

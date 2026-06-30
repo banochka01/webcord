@@ -252,6 +252,10 @@ class WebCordState extends ChangeNotifier {
     return social.friends.any((friend) => friend.user.id == userId);
   }
 
+  bool isBlockedUser(int userId) {
+    return social.blockedUserIds.contains(userId);
+  }
+
   Friendship? friendshipForUser(int userId) {
     for (final friend in social.friends) {
       if (friend.user.id == userId) return friend;
@@ -894,6 +898,7 @@ class WebCordState extends ChangeNotifier {
         friends: social.friends,
         requests: social.requests,
         conversations: conversations,
+        blockedUserIds: social.blockedUserIds,
       );
       await selectConversation(conversation.id);
     });
@@ -921,8 +926,61 @@ class WebCordState extends ChangeNotifier {
         friends: social.friends,
         requests: social.requests,
         conversations: conversations,
+        blockedUserIds: social.blockedUserIds,
       );
       await selectConversation(conversation.id);
+    });
+  }
+
+  Future<void> blockUser(PublicUser targetUser) async {
+    final currentToken = token;
+    if (currentToken == null || user?.id == targetUser.id) return;
+    await _runBusy(() async {
+      await api.blockUser(token: currentToken, userId: targetUser.id);
+      await refreshSocial();
+      error = '';
+    });
+  }
+
+  Future<void> unblockUser(PublicUser targetUser) async {
+    final currentToken = token;
+    if (currentToken == null || user?.id == targetUser.id) return;
+    await _runBusy(() async {
+      await api.unblockUser(token: currentToken, userId: targetUser.id);
+      await refreshSocial();
+      error = '';
+    });
+  }
+
+  Future<void> reportUser(PublicUser targetUser, {String reason = 'Other'}) async {
+    final currentToken = token;
+    if (currentToken == null || user?.id == targetUser.id) return;
+    await _runBusy(() async {
+      await api.createReport(
+        token: currentToken,
+        targetType: 'USER',
+        targetUserId: targetUser.id,
+        reason: reason,
+      );
+      error = 'Report sent to moderators';
+    });
+  }
+
+  Future<void> reportMessage(ChatMessage message, {String reason = 'Other'}) async {
+    final currentToken = token;
+    if (currentToken == null || user?.id == message.author.id) return;
+    await _runBusy(() async {
+      await api.createReport(
+        token: currentToken,
+        targetType: workspace == WorkspaceKind.direct
+            ? 'DIRECT_MESSAGE'
+            : 'MESSAGE',
+        targetUserId: message.author.id,
+        messageId: workspace == WorkspaceKind.direct ? null : message.id,
+        directMessageId: workspace == WorkspaceKind.direct ? message.id : null,
+        reason: reason,
+      );
+      error = 'Report sent to moderators';
     });
   }
 
@@ -1850,19 +1908,41 @@ class WebCordState extends ChangeNotifier {
     final payloadType = match?.group(1);
     if (payloadType == null) return description;
 
-    const fmtpValue =
-        'minptime=10;useinbandfec=1;usedtx=0;maxaveragebitrate=64000;maxplaybackrate=48000;stereo=0;sprop-stereo=0';
+    const desiredParams = {
+      'minptime': '10',
+      'useinbandfec': '1',
+      'usedtx': '0',
+      'maxaveragebitrate': '64000',
+      'maxplaybackrate': '48000',
+      'stereo': '0',
+      'sprop-stereo': '0',
+    };
     final fmtpIndex = lines.indexWhere(
       (line) => line.startsWith('a=fmtp:$payloadType'),
     );
+    String mergedFmtpValue([String line = '']) {
+      final parts = line.split(RegExp(r'\s+'));
+      final source = parts.length > 1 ? parts.sublist(1).join(' ') : '';
+      final params = <String, String>{};
+      for (final item in source.split(';')) {
+        final trimmed = item.trim();
+        if (trimmed.isEmpty) continue;
+        final separator = trimmed.indexOf('=');
+        if (separator <= 0) continue;
+        params[trimmed.substring(0, separator)] = trimmed.substring(
+          separator + 1,
+        );
+      }
+      params.addAll(desiredParams);
+      return params.entries.map((entry) => '${entry.key}=${entry.value}').join(
+        ';',
+      );
+    }
 
     if (fmtpIndex >= 0) {
-      final existing = lines[fmtpIndex];
-      lines[fmtpIndex] = existing.contains('useinbandfec=1')
-          ? existing
-          : '$existing;$fmtpValue';
+      lines[fmtpIndex] = 'a=fmtp:$payloadType ${mergedFmtpValue(lines[fmtpIndex])}';
     } else {
-      lines.insert(opusLineIndex + 1, 'a=fmtp:$payloadType $fmtpValue');
+      lines.insert(opusLineIndex + 1, 'a=fmtp:$payloadType ${mergedFmtpValue()}');
     }
 
     return RTCSessionDescription(lines.join('\r\n'), description.type);

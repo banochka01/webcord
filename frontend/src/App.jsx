@@ -43,13 +43,24 @@ const PRESETS = {
 const DEFAULT_THEME = PRESETS.Webcord;
 const DEFAULT_PROFILE_ACCENT = '#7c5cff';
 const PROFILE_ACCENTS = ['#7c5cff', '#4f8cff', '#31e4d1', '#ff6b8a', '#f2b84b', '#63d471'];
-const EMPTY_SOCIAL = { friends: [], requests: [], conversations: [] };
+const EMPTY_SOCIAL = { friends: [], requests: [], conversations: [], blockedUserIds: [] };
 const DEFAULT_CLIENT_SETTINGS = {
   notificationsEnabled: true,
   micDeviceId: '',
   cameraDeviceId: '',
   outputDeviceId: ''
 };
+const DEFAULT_VOICE_QUALITY = {
+  label: 'Idle',
+  rttMs: 0,
+  jitterMs: 0,
+  packetLossPercent: 0,
+  inboundKbps: 0,
+  outboundKbps: 0,
+  usingRelay: false,
+  speaking: false
+};
+const REPORT_REASONS = ['Harassment', 'Spam', 'Illegal content', 'Impersonation', 'Other'];
 
 function getNativeBridge() {
   const existingBridge = window.webcordDesktop || window.webcordWindow || window.electronAPI;
@@ -410,14 +421,35 @@ function tuneOpusDescription(description) {
   const payloadType = lines[opusLineIndex].match(/^a=rtpmap:(\d+)/)?.[1];
   if (!payloadType) return description;
 
-  const fmtpValue = 'minptime=10;useinbandfec=1;usedtx=0;maxaveragebitrate=64000;maxplaybackrate=48000;stereo=0;sprop-stereo=0';
+  const desiredParams = {
+    minptime: '10',
+    useinbandfec: '1',
+    usedtx: '0',
+    maxaveragebitrate: '64000',
+    maxplaybackrate: '48000',
+    stereo: '0',
+    'sprop-stereo': '0'
+  };
   const fmtpIndex = lines.findIndex((line) => line.startsWith(`a=fmtp:${payloadType}`));
+  const toFmtpValue = (line = '') => {
+    const [, value = ''] = line.split(/\s+(.+)/);
+    const params = new Map();
+    value
+      .split(';')
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .forEach((item) => {
+        const [key, rawValue = ''] = item.split('=');
+        if (key) params.set(key, rawValue);
+      });
+    Object.entries(desiredParams).forEach(([key, value]) => params.set(key, value));
+    return [...params.entries()].map(([key, value]) => `${key}=${value}`).join(';');
+  };
 
   if (fmtpIndex >= 0) {
-    const existing = lines[fmtpIndex];
-    lines[fmtpIndex] = existing.includes('useinbandfec=1') ? existing : `${existing};${fmtpValue}`;
+    lines[fmtpIndex] = `a=fmtp:${payloadType} ${toFmtpValue(lines[fmtpIndex])}`;
   } else {
-    lines.splice(opusLineIndex + 1, 0, `a=fmtp:${payloadType} ${fmtpValue}`);
+    lines.splice(opusLineIndex + 1, 0, `a=fmtp:${payloadType} ${toFmtpValue()}`);
   }
 
   return { type: description.type, sdp: lines.join('\r\n') };
@@ -841,7 +873,7 @@ function MediaViewer({ message, onClose }) {
   );
 }
 
-function MessageItem({ message, currentUserId, workspace, onAvatarClick, onReply, onEdit, onDelete, onOpenMedia }) {
+function MessageItem({ message, currentUserId, workspace, onAvatarClick, onReply, onEdit, onDelete, onReport, onOpenMedia }) {
   const isOwn = String(message.author?.id) === String(currentUserId);
   const isDeleted = Boolean(message.deletedAt);
   const statusText = workspace === 'dm' && isOwn
@@ -860,6 +892,7 @@ function MessageItem({ message, currentUserId, workspace, onAvatarClick, onReply
         <span>{new Date(message.createdAt).toLocaleString()}{message.editedAt ? ' · edited' : ''}{statusText ? ` · ${statusText}` : ''}</span>
         <div className="message-actions">
           {!isDeleted ? <button type="button" onClick={() => onReply?.(message)}>Reply</button> : null}
+          {!isOwn && !isDeleted ? <button type="button" onClick={() => onReport?.(message)}>Report</button> : null}
           {isOwn && !isDeleted && message.content ? <button type="button" onClick={() => onEdit?.(message)}>Edit</button> : null}
           {isOwn && !isDeleted ? <button className="danger-text" type="button" onClick={() => onDelete?.(message)}>Delete</button> : null}
         </div>
@@ -876,9 +909,10 @@ function MessageItem({ message, currentUserId, workspace, onAvatarClick, onReply
   );
 }
 
-function UserProfileModal({ open, profile, relationshipLabel, canAddFriend, onAddFriend, onClose }) {
+function UserProfileModal({ open, profile, relationshipLabel, canAddFriend, isBlocked, onAddFriend, onReport, onBlock, onUnblock, onClose }) {
   if (!open || !profile) return null;
   const displayName = getDisplayName(profile);
+  const canUseSafetyActions = relationshipLabel !== 'This is you';
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -912,9 +946,62 @@ function UserProfileModal({ open, profile, relationshipLabel, canAddFriend, onAd
           <div className="viewer-actions">
             <span className="request-pill">{relationshipLabel}</span>
             {canAddFriend ? <button type="button" onClick={onAddFriend}>Add friend</button> : null}
+            {canUseSafetyActions ? <button className="ghost-btn" type="button" onClick={onReport}>Report</button> : null}
+            {canUseSafetyActions && isBlocked ? (
+              <button className="ghost-btn" type="button" onClick={onUnblock}>Unblock</button>
+            ) : null}
+            {canUseSafetyActions && !isBlocked ? (
+              <button className="danger" type="button" onClick={onBlock}>Block</button>
+            ) : null}
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function ReportModal({ target, onClose, onSubmit }) {
+  const [reason, setReason] = useState(REPORT_REASONS[0]);
+  const [details, setDetails] = useState('');
+
+  if (!target) return null;
+
+  const title = target.targetType === 'USER'
+    ? `Report ${getDisplayName(target.user)}`
+    : 'Report message';
+
+  return (
+    <div className="modal-backdrop" role="dialog" aria-modal="true" onClick={onClose}>
+      <form
+        className="modal-card report-card"
+        onClick={(event) => event.stopPropagation()}
+        onSubmit={(event) => {
+          event.preventDefault();
+          onSubmit({ ...target, reason, details });
+        }}
+      >
+        <div className="modal-header">
+          <div>
+            <h3>{title}</h3>
+            <p className="muted">Reports go to the admin moderation queue.</p>
+          </div>
+          <button className="icon-btn" type="button" aria-label="Close" title="Close" onClick={onClose}><AppIcon name="close" /></button>
+        </div>
+        <label>
+          Reason
+          <select value={reason} onChange={(event) => setReason(event.target.value)}>
+            {REPORT_REASONS.map((item) => <option key={item} value={item}>{item}</option>)}
+          </select>
+        </label>
+        <label>
+          Details
+          <textarea value={details} maxLength={700} rows={4} onChange={(event) => setDetails(event.target.value)} placeholder="Optional context for moderators" />
+        </label>
+        <div className="modal-actions">
+          <button className="ghost-btn" type="button" onClick={onClose}>Cancel</button>
+          <button type="submit">Send report</button>
+        </div>
+      </form>
     </div>
   );
 }
@@ -1030,6 +1117,22 @@ function VoiceParticipantTile({ participant, compact = false }) {
   );
 }
 
+function VoiceQualityPill({ quality = DEFAULT_VOICE_QUALITY }) {
+  const loss = Number(quality.packetLossPercent || 0);
+  const tone = quality.label === 'Good' ? 'good' : quality.label === 'Fair' ? 'fair' : quality.label === 'Poor' ? 'poor' : 'idle';
+  return (
+    <div className={`voice-quality-pill ${tone}`} title={`RTT ${quality.rttMs}ms, jitter ${quality.jitterMs}ms, loss ${loss.toFixed(1)}%, route ${quality.usingRelay ? 'relay' : 'direct'}`}>
+      <span>{quality.speaking ? <AppIcon name="wave" size={14} /> : <AppIcon name="phone" size={14} />}</span>
+      <strong>{quality.label}</strong>
+      <em>{quality.rttMs}ms</em>
+      <em>{quality.jitterMs}j</em>
+      <em>{loss.toFixed(loss >= 10 ? 0 : 1)}% loss</em>
+      <em>{quality.inboundKbps}/{quality.outboundKbps} kbps</em>
+      <em>{quality.usingRelay ? 'relay' : 'direct'}</em>
+    </div>
+  );
+}
+
 function VoiceStage({
   activeVoiceChannel,
   localScreenStream,
@@ -1047,7 +1150,8 @@ function VoiceStage({
   participants,
   remoteStreams,
   voiceParticipants,
-  voiceStatus
+  voiceStatus,
+  voiceQuality
 }) {
   const remoteVideoEntries = Object.entries(remoteStreams)
     .filter(([, stream]) => stream?.getVideoTracks?.().length)
@@ -1072,6 +1176,7 @@ function VoiceStage({
           <span className="eyebrow">Voice channel</span>
           <h2>{activeVoiceChannel?.name || 'Voice room'}</h2>
           <p className="muted">{voiceStatus}</p>
+          <VoiceQualityPill quality={voiceQuality} />
         </div>
         <div className="voice-actions">
           <span className="live-pill">Noise {noiseSuppressionEnabled ? 'on' : 'off'}</span>
@@ -1370,7 +1475,7 @@ function StaticSettingsPage({ title, rows }) {
   );
 }
 
-function AdminPanel({ user, overview, status, error, roleUpdating, onRefresh, onOpenApp, onLogout, onChangeUserRole }) {
+function AdminPanel({ user, overview, status, error, roleUpdating, moderationUpdating, onRefresh, onOpenApp, onLogout, onChangeUserRole, onModerateUser, onUpdateReport }) {
   const denied = status === 'denied';
   const loading = status === 'checking' || status === 'idle';
   const stats = overview?.stats || {};
@@ -1383,7 +1488,10 @@ function AdminPanel({ user, overview, status, error, roleUpdating, onRefresh, on
     ['DM threads', stats.directConversations],
     ['DM messages', stats.directMessages],
     ['Pending requests', stats.pendingFriendRequests],
-    ['Voice rooms', stats.voiceRooms]
+    ['Voice rooms', stats.voiceRooms],
+    ['Open reports', stats.openReports],
+    ['Muted users', stats.mutedUsers],
+    ['Banned users', stats.bannedUsers]
   ];
 
   return (
@@ -1483,10 +1591,46 @@ function AdminPanel({ user, overview, status, error, roleUpdating, onRefresh, on
                     <option value="ADMIN">ADMIN</option>
                     <option value="OWNER">OWNER</option>
                   </select>
+                  <div className="admin-inline-actions">
+                    <button type="button" disabled={moderationUpdating === `${item.id}:MUTE`} onClick={() => onModerateUser(item.id, 'MUTE', 60, 'Quick mute from admin panel')}>Mute 1h</button>
+                    {item.isMuted ? <button type="button" onClick={() => onModerateUser(item.id, 'UNMUTE')}>Unmute</button> : null}
+                    <button className="danger" type="button" disabled={moderationUpdating === `${item.id}:BAN`} onClick={() => onModerateUser(item.id, 'BAN', 1440, 'Quick ban from admin panel')}>Ban 24h</button>
+                    {item.isBanned ? <button type="button" onClick={() => onModerateUser(item.id, 'UNBAN')}>Unban</button> : null}
+                  </div>
                 </div>
               ))}
             </div>
             {!canEditRoles ? <p className="muted">Only owners can assign admins.</p> : null}
+          </section>
+
+          <section className="admin-panel-card">
+            <p className="section-label">Moderation reports</p>
+            {(overview.recentReports || []).length === 0 ? <p className="muted">No reports yet.</p> : (
+              <div className="admin-user-list">
+                {(overview.recentReports || []).map((report) => (
+                  <div className="admin-report-row" key={report.id}>
+                    <div>
+                      <strong>{report.targetType} - {report.reason}</strong>
+                      <span>
+                        by @{report.reporter?.username || 'user'}
+                        {report.targetUser?.username ? ` about @${report.targetUser.username}` : ''}
+                        {' - '}
+                        {report.status}
+                      </span>
+                      {report.message?.content || report.directMessage?.content ? <p className="muted">{report.message?.content || report.directMessage?.content}</p> : null}
+                      {report.details ? <p>{report.details}</p> : null}
+                    </div>
+                    {report.status === 'OPEN' ? (
+                      <div className="admin-inline-actions">
+                        <button type="button" disabled={moderationUpdating === `report:${report.id}`} onClick={() => onUpdateReport(report.id, 'REVIEWED')}>Reviewed</button>
+                        <button type="button" disabled={moderationUpdating === `report:${report.id}`} onClick={() => onUpdateReport(report.id, 'RESOLVED')}>Resolved</button>
+                        <button className="ghost-btn" type="button" disabled={moderationUpdating === `report:${report.id}`} onClick={() => onUpdateReport(report.id, 'DISMISSED')}>Dismiss</button>
+                      </div>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            )}
           </section>
         </>
       ) : null}
@@ -1524,6 +1668,7 @@ export default function App() {
   const [settingsSection, setSettingsSection] = useState('account');
   const [viewedProfile, setViewedProfile] = useState(null);
   const [viewedMedia, setViewedMedia] = useState(null);
+  const [reportTarget, setReportTarget] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [bannerUploading, setBannerUploading] = useState(false);
@@ -1536,6 +1681,7 @@ export default function App() {
   const [cameraEnabled, setCameraEnabled] = useState(false);
   const [voiceExpanded, setVoiceExpanded] = useState(false);
   const [voiceStatus, setVoiceStatus] = useState('Voice idle');
+  const [voiceQuality, setVoiceQuality] = useState(DEFAULT_VOICE_QUALITY);
   const [noiseSuppressionEnabled, setNoiseSuppressionEnabled] = useState(true);
   const [inputVolume, setInputVolume] = useState(100);
   const [outputVolume, setOutputVolume] = useState(100);
@@ -1561,6 +1707,7 @@ export default function App() {
   const [adminStatus, setAdminStatus] = useState('idle');
   const [adminError, setAdminError] = useState('');
   const [adminRoleUpdating, setAdminRoleUpdating] = useState(null);
+  const [adminModerationUpdating, setAdminModerationUpdating] = useState(null);
 
   const socketRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -1593,6 +1740,10 @@ export default function App() {
   const voiceJoinedRef = useRef(false);
   const voiceChannelIdRef = useRef('');
   const volumeRef = useRef({});
+  const voiceQualityRef = useRef(DEFAULT_VOICE_QUALITY);
+  const voiceStatsTimerRef = useRef(null);
+  const lastVoiceStatsRef = useRef({ at: 0, bytesReceived: 0, bytesSent: 0 });
+  const micMutedRef = useRef(false);
 
   const isAdminRoute = currentPath === ADMIN_PATH;
   const isAuthed = Boolean(token && user);
@@ -1694,6 +1845,7 @@ export default function App() {
   }, [user]);
 
   useEffect(() => { voiceJoinedRef.current = voiceJoined; }, [voiceJoined]);
+  useEffect(() => { micMutedRef.current = micMuted; }, [micMuted]);
   useEffect(() => { guildIdRef.current = guild?.id || null; }, [guild?.id]);
   useEffect(() => { channelIdRef.current = channelId; }, [channelId]);
   useEffect(() => { dmConversationIdRef.current = dmConversationId; }, [dmConversationId]);
@@ -1701,6 +1853,7 @@ export default function App() {
   useEffect(() => { voiceChannelIdRef.current = voiceChannelId; }, [voiceChannelId]);
   useEffect(() => { volumeRef.current = participantVolumes; }, [participantVolumes]);
   useEffect(() => { remoteStreamsRef.current = remoteStreams; }, [remoteStreams]);
+  useEffect(() => { voiceQualityRef.current = voiceQuality; }, [voiceQuality]);
   useEffect(() => { scopeRef.current = workspace === 'dm' ? { type: 'dm', id: String(dmConversationId || '') } : { type: 'channel', id: String(channelId || '') }; }, [workspace, channelId, dmConversationId]);
   useEffect(() => { shouldStickToBottomRef.current = true; }, [workspace, channelId, dmConversationId]);
   useEffect(() => {
@@ -2114,6 +2267,60 @@ export default function App() {
     }
   }
 
+  async function applyAdminModeration(userId, action, durationMinutes, reason = '') {
+    setAdminModerationUpdating(`${userId}:${action}`);
+    setAdminError('');
+    try {
+      const payload = await apiFetch(
+        `/admin/users/${userId}/moderation`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ action, durationMinutes, reason })
+        },
+        token
+      );
+      const updatedUser = payload?.user;
+      setAdminOverview((prev) => {
+        if (!prev || !updatedUser) return prev;
+        const updateList = (list = []) => list.map((item) => (String(item.id) === String(updatedUser.id) ? updatedUser : item));
+        return {
+          ...prev,
+          recentUsers: updateList(prev.recentUsers || []),
+          manageableUsers: updateList(prev.manageableUsers || [])
+        };
+      });
+      pushToast(`@${updatedUser?.username || 'user'} ${action.toLowerCase()} applied`, 'success');
+      await loadAdminOverview();
+    } catch (err) {
+      setAdminError(err.message);
+      pushToast(err.message, 'error');
+    } finally {
+      setAdminModerationUpdating(null);
+    }
+  }
+
+  async function updateAdminReport(reportId, status) {
+    setAdminModerationUpdating(`report:${reportId}`);
+    setAdminError('');
+    try {
+      await apiFetch(
+        `/admin/moderation/reports/${reportId}`,
+        {
+          method: 'PATCH',
+          body: JSON.stringify({ status })
+        },
+        token
+      );
+      pushToast(`Report ${status.toLowerCase()}`, 'success');
+      await loadAdminOverview();
+    } catch (err) {
+      setAdminError(err.message);
+      pushToast(err.message, 'error');
+    } finally {
+      setAdminModerationUpdating(null);
+    }
+  }
+
   async function refreshMediaDevices() {
     if (!navigator.mediaDevices?.enumerateDevices) return;
     const devices = await navigator.mediaDevices.enumerateDevices();
@@ -2395,6 +2602,10 @@ export default function App() {
       return { label: 'This is you', canAddFriend: false };
     }
 
+    if ((social.blockedUserIds || []).some((userId) => String(userId) === String(profile.id))) {
+      return { label: 'Blocked', canAddFriend: false };
+    }
+
     if (social.friends.some((friend) => String(friend.user?.id) === String(profile.id))) {
       return { label: 'Already friends', canAddFriend: false };
     }
@@ -2419,6 +2630,73 @@ export default function App() {
       await refreshSocialData();
     } catch (err) {
       setError(err.message);
+    }
+  }
+
+  function openReportForUser(profile = viewedProfile) {
+    if (!profile?.id) return;
+    setReportTarget({
+      targetType: 'USER',
+      targetUserId: profile.id,
+      user: profile
+    });
+  }
+
+  function openReportForMessage(message) {
+    if (!message?.id) return;
+    setReportTarget({
+      targetType: workspace === 'dm' ? 'DIRECT_MESSAGE' : 'MESSAGE',
+      ...(workspace === 'dm' ? { directMessageId: message.id } : { messageId: message.id }),
+      targetUserId: message.author?.id,
+      user: message.author,
+      message
+    });
+  }
+
+  async function submitReport(payload) {
+    try {
+      await apiFetch(
+        '/moderation/reports',
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            targetType: payload.targetType,
+            targetUserId: payload.targetUserId,
+            messageId: payload.messageId,
+            directMessageId: payload.directMessageId,
+            reason: payload.reason,
+            details: payload.details
+          })
+        },
+        token
+      );
+      setReportTarget(null);
+      pushToast('Report sent to moderators', 'success');
+    } catch (err) {
+      reportError(err, 'Could not send report');
+    }
+  }
+
+  async function blockProfile(profile = viewedProfile) {
+    if (!profile?.id) return;
+    try {
+      await apiFetch(`/users/${profile.id}/block`, { method: 'POST' }, token);
+      await refreshSocialData();
+      setViewedProfile(null);
+      pushToast(`Blocked @${profile.username || 'user'}`, 'success');
+    } catch (err) {
+      reportError(err, 'Could not block user');
+    }
+  }
+
+  async function unblockProfile(profile = viewedProfile) {
+    if (!profile?.id) return;
+    try {
+      await apiFetch(`/users/${profile.id}/block`, { method: 'DELETE' }, token);
+      await refreshSocialData();
+      pushToast(`Unblocked @${profile.username || 'user'}`, 'success');
+    } catch (err) {
+      reportError(err, 'Could not unblock user');
     }
   }
 
@@ -2710,6 +2988,50 @@ export default function App() {
     setNewMessage('');
   }
 
+  function setVoiceQualityState(nextQuality) {
+    voiceQualityRef.current = nextQuality;
+    setVoiceQuality(nextQuality);
+  }
+
+  function getStatsNumber(value) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  function getStatsBool(value) {
+    return value === true || value === 'true' || value === 1 || value === '1';
+  }
+
+  function voiceQualityLabel({ rttMs, jitterMs, packetLossPercent }) {
+    if (packetLossPercent >= 10 || jitterMs >= 70 || rttMs >= 360) return 'Poor';
+    if (packetLossPercent >= 4 || jitterMs >= 40 || rttMs >= 200) return 'Fair';
+    if (rttMs === 0 && jitterMs === 0 && packetLossPercent === 0) return 'Connecting';
+    return 'Good';
+  }
+
+  function applyVoiceSenderParameters(peer) {
+    peer?.getSenders?.()
+      .filter((sender) => sender.track?.kind === 'audio')
+      .forEach((sender) => {
+        if (typeof sender.getParameters !== 'function' || typeof sender.setParameters !== 'function') return;
+        const parameters = sender.getParameters() || {};
+        parameters.encodings = parameters.encodings?.length ? parameters.encodings : [{}];
+        parameters.encodings = parameters.encodings.map((encoding) => ({
+          ...encoding,
+          maxBitrate: 64000,
+          priority: 'high',
+          networkPriority: 'high'
+        }));
+        sender.setParameters(parameters).catch(() => {});
+      });
+  }
+
+  function applyLocalVoiceTrackConstraints(stream) {
+    stream?.getAudioTracks?.().forEach((track) => {
+      track.applyConstraints?.(VOICE_AUDIO_CONSTRAINTS).catch(() => {});
+    });
+  }
+
   function addStreamTracksToPeer(peer, stream) {
     if (!peer || !stream) return;
     const senderTrackIds = new Set(peer.getSenders().map((sender) => sender.track?.id).filter(Boolean));
@@ -2718,6 +3040,7 @@ export default function App() {
         peer.addTrack(track, stream);
       }
     });
+    applyVoiceSenderParameters(peer);
   }
 
   function removeStreamTracksFromPeers(stream) {
@@ -2772,9 +3095,21 @@ export default function App() {
         setVoiceStatus('Voice media connected');
       }
 
+      if (peer.connectionState === 'disconnected' && voiceJoinedRef.current) {
+        setVoiceStatus('Voice network is recovering...');
+      }
+
       if (peer.connectionState === 'failed' && voiceJoinedRef.current) {
+        setVoiceStatus('Restarting voice route...');
         peer.restartIce?.();
         createPeerAndOffer(remoteSocketId, { iceRestart: true }).catch(() => setError('Could not restart voice connection'));
+      }
+    };
+
+    peer.oniceconnectionstatechange = () => {
+      if (peer.iceConnectionState === 'failed' && voiceJoinedRef.current) {
+        peer.restartIce?.();
+        createPeerAndOffer(remoteSocketId, { iceRestart: true }).catch(() => {});
       }
     };
 
@@ -2812,11 +3147,108 @@ export default function App() {
     await Promise.all(Object.keys(peersRef.current).map((socketId) => createPeerAndOffer(socketId)));
   }
 
+  function stopVoiceStats() {
+    if (voiceStatsTimerRef.current) {
+      window.clearInterval(voiceStatsTimerRef.current);
+      voiceStatsTimerRef.current = null;
+    }
+    lastVoiceStatsRef.current = { at: 0, bytesReceived: 0, bytesSent: 0 };
+    setVoiceQualityState(DEFAULT_VOICE_QUALITY);
+  }
+
+  function startVoiceStats() {
+    if (voiceStatsTimerRef.current) window.clearInterval(voiceStatsTimerRef.current);
+    lastVoiceStatsRef.current = { at: 0, bytesReceived: 0, bytesSent: 0 };
+    setVoiceQualityState({ ...DEFAULT_VOICE_QUALITY, label: 'Connecting' });
+    const sample = () => sampleVoiceStats().catch(() => {});
+    sample();
+    voiceStatsTimerRef.current = window.setInterval(sample, 2000);
+  }
+
+  async function sampleVoiceStats() {
+    if (!voiceJoinedRef.current) return;
+
+    const peers = Object.values(peersRef.current);
+    if (peers.length === 0) {
+      const nextQuality = { ...DEFAULT_VOICE_QUALITY, label: 'Waiting' };
+      setVoiceQualityState(nextQuality);
+      return;
+    }
+
+    const reports = [];
+    for (const peer of peers) {
+      const stats = await peer.getStats();
+      stats.forEach((report) => reports.push(report));
+    }
+
+    const reportById = new Map(reports.map((report) => [report.id, report]));
+    let packetsLost = 0;
+    let packetsReceived = 0;
+    let bytesReceived = 0;
+    let bytesSent = 0;
+    let jitterSeconds = 0;
+    let rttSeconds = 0;
+    let audioLevel = 0;
+    let usingRelay = false;
+
+    reports.forEach((report) => {
+      const kind = String(report.kind || report.mediaType || '');
+      if (report.type === 'inbound-rtp' && kind === 'audio') {
+        packetsLost += getStatsNumber(report.packetsLost);
+        packetsReceived += getStatsNumber(report.packetsReceived);
+        bytesReceived += getStatsNumber(report.bytesReceived);
+        jitterSeconds = Math.max(jitterSeconds, getStatsNumber(report.jitter));
+      }
+
+      if (report.type === 'outbound-rtp' && kind === 'audio') {
+        bytesSent += getStatsNumber(report.bytesSent);
+      }
+
+      if ((report.type === 'media-source' || report.type === 'track') && kind === 'audio') {
+        audioLevel = Math.max(audioLevel, getStatsNumber(report.audioLevel));
+      }
+
+      if (report.type === 'candidate-pair' && (getStatsBool(report.selected) || getStatsBool(report.nominated) || report.state === 'succeeded')) {
+        rttSeconds = Math.max(rttSeconds, getStatsNumber(report.currentRoundTripTime));
+        const localCandidate = reportById.get(report.localCandidateId);
+        const remoteCandidate = reportById.get(report.remoteCandidateId);
+        usingRelay = usingRelay || localCandidate?.candidateType === 'relay' || remoteCandidate?.candidateType === 'relay';
+      }
+    });
+
+    const now = performance.now();
+    const previous = lastVoiceStatsRef.current;
+    const elapsedSeconds = previous.at ? (now - previous.at) / 1000 : 0;
+    const inboundKbps = elapsedSeconds > 0 ? Math.round(Math.max(0, bytesReceived - previous.bytesReceived) * 8 / elapsedSeconds / 1000) : 0;
+    const outboundKbps = elapsedSeconds > 0 ? Math.round(Math.max(0, bytesSent - previous.bytesSent) * 8 / elapsedSeconds / 1000) : 0;
+    lastVoiceStatsRef.current = { at: now, bytesReceived, bytesSent };
+
+    const totalPackets = packetsReceived + packetsLost;
+    const packetLossPercent = totalPackets > 0 ? Math.max(0, Math.min(100, packetsLost / totalPackets * 100)) : 0;
+    const rttMs = Math.round(rttSeconds * 1000);
+    const jitterMs = Math.round(jitterSeconds * 1000);
+    const speaking = !micMutedRef.current && audioLevel > 0.018;
+    const nextQuality = {
+      label: voiceQualityLabel({ rttMs, jitterMs, packetLossPercent }),
+      rttMs,
+      jitterMs,
+      packetLossPercent,
+      inboundKbps,
+      outboundKbps,
+      usingRelay,
+      speaking
+    };
+    const speakingChanged = voiceQualityRef.current.speaking !== speaking;
+    setVoiceQualityState(nextQuality);
+    if (speakingChanged) emitVoiceState({ speaking });
+  }
+
   async function createPeerAndOffer(remoteSocketId, options = {}) {
     if (!voiceJoinedRef.current || !localStreamRef.current || !socketRef.current || !remoteSocketId || !voiceChannelIdRef.current) {
       return;
     }
     const peer = await getOrCreatePeer(remoteSocketId);
+    applyVoiceSenderParameters(peer);
     const offer = tuneOpusDescription(await peer.createOffer({ iceRestart: Boolean(options.iceRestart) }));
     await peer.setLocalDescription(offer);
     socketRef.current.emit('voice-offer', {
@@ -2977,6 +3409,7 @@ export default function App() {
   }
 
   function cleanupVoice({ emitLeave = true } = {}) {
+    stopVoiceStats();
     if (screenStreamRef.current) {
       removeStreamTracksFromPeers(screenStreamRef.current);
       screenStreamRef.current.getTracks().forEach((track) => track.stop());
@@ -3037,6 +3470,8 @@ export default function App() {
       const { stream, audioContext } = noiseSuppressionEnabled
         ? await createEnhancedVoiceStream(rawStream)
         : { stream: rawStream, audioContext: null };
+      applyLocalVoiceTrackConstraints(rawStream);
+      applyLocalVoiceTrackConstraints(stream);
 
       rawLocalStreamRef.current = rawStream;
       localStreamRef.current = stream;
@@ -3044,6 +3479,7 @@ export default function App() {
       setMicMuted(false);
       setVoiceJoined(true);
       setVoiceStatus(noiseSuppressionEnabled ? 'Noise suppression active' : 'Voice connected');
+      startVoiceStats();
       socketRef.current?.emit('join-voice', { channelId: Number(voiceChannelId) });
       window.setTimeout(() => emitVoiceState({ muted: false }), 0);
     } catch {
@@ -3127,8 +3563,14 @@ export default function App() {
       socketId,
       username: participant.username || socketId.slice(0, 8),
       user: participant,
-      muted: false,
-      status: remoteStreams[socketId]?.getVideoTracks?.().length ? 'Video active' : 'Connected'
+      muted: Boolean(participant.muted),
+      status: participant.speaking
+        ? 'Speaking'
+        : participant.screen
+          ? 'Sharing screen'
+          : participant.camera || remoteStreams[socketId]?.getVideoTracks?.().length
+            ? 'Video active'
+            : 'Connected'
     }))
   ];
   const userCanManageChannels = canManageChannels(user);
@@ -3178,6 +3620,7 @@ export default function App() {
         status={adminStatus}
         error={adminError}
         roleUpdating={adminRoleUpdating}
+        moderationUpdating={adminModerationUpdating}
         onRefresh={loadAdminOverview}
         onOpenApp={() => {
           setWorkspace('server');
@@ -3185,6 +3628,8 @@ export default function App() {
         }}
         onLogout={handleLogout}
         onChangeUserRole={changeAdminUserRole}
+        onModerateUser={applyAdminModeration}
+        onUpdateReport={updateAdminReport}
       />
     );
   }
@@ -3326,6 +3771,7 @@ export default function App() {
             {voiceJoined ? <button type="button" onClick={toggleCamera}><AppIcon name={cameraEnabled ? 'cameraOff' : 'camera'} size={16} />{cameraEnabled ? 'Camera off' : 'Camera on'}</button> : null}
             <button className="ghost-btn" type="button" disabled={voiceJoined} onClick={() => setNoiseSuppressionEnabled((prev) => !prev)}>Noise suppression: {noiseSuppressionEnabled ? 'On' : 'Off'}</button>
             <p className="voice-status">{voiceStatus}</p>
+            {voiceJoined ? <VoiceQualityPill quality={voiceQuality} /> : null}
             <button className="danger" type="button" onClick={handleLogout}>Logout</button>
           </div>
         </aside>
@@ -3380,6 +3826,7 @@ export default function App() {
               remoteStreams={remoteStreams}
               voiceParticipants={voiceParticipants}
               voiceStatus={voiceStatus}
+              voiceQuality={voiceQuality}
             />
           ) : null}
 
@@ -3397,7 +3844,7 @@ export default function App() {
           ) : (
             <>
               <div className="messages" ref={messagesRef} onScroll={handleMessagesScroll}>
-                {messages.length === 0 ? <div className="empty-state"><h3>{workspace === 'dm' ? 'No direct messages yet' : 'No messages yet'}</h3><p className="muted">{workspace === 'dm' ? 'This thread is ready.' : 'Start the conversation in this channel.'}</p></div> : messages.map((message) => <MessageItem key={message.id} message={message} workspace={workspace} currentUserId={user?.id} onAvatarClick={setViewedProfile} onReply={beginReply} onEdit={beginEdit} onDelete={deleteMessage} onOpenMedia={setViewedMedia} />)}
+                {messages.length === 0 ? <div className="empty-state"><h3>{workspace === 'dm' ? 'No direct messages yet' : 'No messages yet'}</h3><p className="muted">{workspace === 'dm' ? 'This thread is ready.' : 'Start the conversation in this channel.'}</p></div> : messages.map((message) => <MessageItem key={message.id} message={message} workspace={workspace} currentUserId={user?.id} onAvatarClick={setViewedProfile} onReply={beginReply} onEdit={beginEdit} onDelete={deleteMessage} onReport={openReportForMessage} onOpenMedia={setViewedMedia} />)}
                 <div ref={endRef} />
               </div>
               <form className="message-form composer" onSubmit={sendMessage}>
@@ -3571,9 +4018,14 @@ export default function App() {
         profile={viewedProfile}
         relationshipLabel={getRelationshipInfo(viewedProfile).label}
         canAddFriend={getRelationshipInfo(viewedProfile).canAddFriend}
+        isBlocked={(social.blockedUserIds || []).some((userId) => String(userId) === String(viewedProfile?.id))}
         onAddFriend={() => handleAddFriendFromProfile().catch((err) => setError(err.message))}
+        onReport={() => openReportForUser(viewedProfile)}
+        onBlock={() => blockProfile(viewedProfile)}
+        onUnblock={() => unblockProfile(viewedProfile)}
         onClose={() => setViewedProfile(null)}
       />
+      <ReportModal target={reportTarget} onClose={() => setReportTarget(null)} onSubmit={(payload) => submitReport(payload)} />
       <MediaViewer message={viewedMedia} onClose={() => setViewedMedia(null)} />
     </>
   );
