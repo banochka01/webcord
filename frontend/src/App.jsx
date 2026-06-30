@@ -154,21 +154,24 @@ function normalizeProfileAccent(value) {
 }
 
 function getProfileStyle(profile = {}) {
-  return { '--profile-accent': normalizeProfileAccent(profile.accentColor) };
+  const safeProfile = profile || {};
+  return { '--profile-accent': normalizeProfileAccent(safeProfile.accentColor) };
 }
 
 function getProfileBannerStyle(profile = {}) {
+  const safeProfile = profile || {};
   return {
-    ...getProfileStyle(profile),
-    backgroundImage: profile.bannerUrl ? `url(${getAttachmentUrl(profile.bannerUrl)})` : undefined
+    ...getProfileStyle(safeProfile),
+    backgroundImage: safeProfile.bannerUrl ? `url(${getAttachmentUrl(safeProfile.bannerUrl)})` : undefined
   };
 }
 
 function getGuildCoverStyle(guild = {}) {
-  const accent = normalizeProfileAccent(guild.accentColor);
+  const safeGuild = guild || {};
+  const accent = normalizeProfileAccent(safeGuild.accentColor);
   return {
     '--guild-accent': accent,
-    backgroundImage: guild.bannerUrl ? `url(${getAttachmentUrl(guild.bannerUrl)})` : undefined
+    backgroundImage: safeGuild.bannerUrl ? `url(${getAttachmentUrl(safeGuild.bannerUrl)})` : undefined
   };
 }
 
