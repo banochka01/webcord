@@ -797,6 +797,13 @@ function emitSocialRefresh(userIds) {
   });
 }
 
+function emitStoriesRefresh(userIds) {
+  const uniqueUserIds = [...new Set(userIds.filter(Boolean).map(Number))];
+  uniqueUserIds.forEach((userId) => {
+    io.to(`user:${userId}`).emit('stories:refresh');
+  });
+}
+
 function serializeCallSession(call) {
   if (!call) return null;
   return {
@@ -1686,7 +1693,16 @@ app.post('/api/stories', authMiddleware, async (req, res) => {
       }
     });
 
-    io.to(`user:${req.user.userId}`).emit('stories:refresh');
+    const friendRows = await prisma.friendship.findMany({
+      where: {
+        OR: [{ userOneId: req.user.userId }, { userTwoId: req.user.userId }]
+      },
+      select: { userOneId: true, userTwoId: true }
+    });
+    emitStoriesRefresh([
+      req.user.userId,
+      ...friendRows.map((row) => (row.userOneId === req.user.userId ? row.userTwoId : row.userOneId))
+    ]);
     return res.status(201).json(serializeStory(story, req.user.userId));
   } catch (error) {
     console.error(error);

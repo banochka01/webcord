@@ -61,6 +61,7 @@ const DEFAULT_VOICE_QUALITY = {
   speaking: false
 };
 const REPORT_REASONS = ['Harassment', 'Spam', 'Illegal content', 'Impersonation', 'Other'];
+const MEDIA_PLAY_EVENT = 'webcord:media-play';
 
 function getNativeBridge() {
   const existingBridge = window.webcordDesktop || window.webcordWindow || window.electronAPI;
@@ -183,6 +184,8 @@ function createProfileDraft(user = {}) {
     bannerUrl: user.bannerUrl || '',
     statusText: user.statusText || 'Online',
     favoriteTrack: user.favoriteTrack || '',
+    favoriteTrackUrl: user.favoriteTrackUrl || '',
+    favoriteTrackName: user.favoriteTrackName || '',
     accentColor: normalizeProfileAccent(user.accentColor)
   };
 }
@@ -414,6 +417,29 @@ function formatShortDuration(seconds) {
   return `${minutes}:${rest}`;
 }
 
+function formatMediaDuration(seconds) {
+  const value = Math.max(0, Number(seconds) || 0);
+  const minutes = Math.floor(value / 60);
+  const rest = Math.floor(value % 60).toString().padStart(2, '0');
+  return `${minutes}:${rest}`;
+}
+
+function isAudioFile(file) {
+  const name = String(file?.name || '').toLowerCase();
+  return Boolean(file?.type?.startsWith('audio/')) || /\.(mp3|m4a|aac|ogg|oga|opus|wav|flac|webm)$/i.test(name);
+}
+
+function isStoryFile(file) {
+  const name = String(file?.name || '').toLowerCase();
+  return Boolean(file?.type?.startsWith('image/') || file?.type?.startsWith('video/')) || /\.(png|jpe?g|gif|webp|avif|mp4|webm|mov|m4v)$/i.test(name);
+}
+
+function getStoryMediaType(fileOrUrl = '') {
+  const type = String(fileOrUrl?.type || '').toLowerCase();
+  const name = String(fileOrUrl?.name || fileOrUrl || '').toLowerCase();
+  return type.startsWith('video/') || /\.(mp4|webm|mov|m4v|mkv|3gp)$/i.test(name) ? 'VIDEO' : 'IMAGE';
+}
+
 function tuneOpusDescription(description) {
   if (!description?.sdp) return description;
 
@@ -576,9 +602,12 @@ const APP_ICONS = {
   mic: <><path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z" /><path d="M19 10v2a7 7 0 0 1-14 0v-2" /><path d="M12 19v3" /></>,
   micOff: <><path d="m3 3 18 18" /><path d="M9 9v3a3 3 0 0 0 5.1 2.1" /><path d="M15 9.3V6a3 3 0 0 0-5.1-2.1" /><path d="M19 10v2a7 7 0 0 1-.7 3" /><path d="M5 10v2a7 7 0 0 0 10 6.3" /><path d="M12 19v3" /></>,
   minus: <path d="M5 12h14" />,
+  music: <><path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" /></>,
   paperclip: <><path d="m21.4 11.6-8.6 8.6a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 1 1 5.7 5.7L10 17.4a2 2 0 0 1-2.8-2.8l8.6-8.6" /></>,
+  pause: <><path d="M9 5v14" /><path d="M15 5v14" /></>,
   phone: <><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19 19 0 0 1-8.3-3 18.7 18.7 0 0 1-5.8-5.8 19 19 0 0 1-3-8.3A2 2 0 0 1 4.7 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8.7 9.8a15 15 0 0 0 5.5 5.5l1.2-1.2a2 2 0 0 1 2.1-.5c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2Z" /></>,
   phoneOff: <><path d="m3 3 18 18" /><path d="M14.5 14.5a15 15 0 0 1-5.8-5.8" /><path d="M8.7 9.8 7.5 11A2 2 0 0 0 7 13.1a19 19 0 0 0 8.3 8.3 2 2 0 0 0 2.1-.5l1.2-1.2" /><path d="M5.8 2H4.7a2 2 0 0 0-2 2.2 19 19 0 0 0 3 8.3" /><path d="M16.3 14.3c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2v1.1" /></>,
+  play: <path d="m8 5 11 7-11 7V5Z" />,
   plus: <><path d="M12 5v14" /><path d="M5 12h14" /></>,
   screen: <><rect x="3" y="4" width="18" height="13" rx="2" /><path d="m9 11 3-3 3 3" /><path d="M12 8v7" /><path d="M8 21h8" /></>,
   send: <><path d="m22 2-7 20-4-9-9-4 20-7Z" /><path d="M22 2 11 13" /></>,
@@ -586,6 +615,9 @@ const APP_ICONS = {
   shrink: <><path d="M8 3v3a2 2 0 0 1-2 2H3" /><path d="M21 8h-3a2 2 0 0 1-2-2V3" /><path d="M3 16h3a2 2 0 0 1 2 2v3" /><path d="M16 21v-3a2 2 0 0 1 2-2h3" /></>,
   smile: <><circle cx="12" cy="12" r="9" /><path d="M8 14s1.4 2 4 2 4-2 4-2" /><path d="M9 9h.01" /><path d="M15 9h.01" /></>,
   stop: <rect x="7" y="7" width="10" height="10" rx="2" />,
+  story: <><path d="M7 3.5a9 9 0 0 1 10 0" /><path d="M4.2 7.2a9 9 0 0 0 0 9.6" /><path d="M19.8 7.2a9 9 0 0 1 0 9.6" /><path d="M7 20.5a9 9 0 0 0 10 0" /><circle cx="12" cy="12" r="4" /></>,
+  volume: <><path d="M11 5 6 9H3v6h3l5 4V5Z" /><path d="M15.5 8.5a5 5 0 0 1 0 7" /><path d="M18.5 5.5a9 9 0 0 1 0 13" /></>,
+  volumeOff: <><path d="m3 3 18 18" /><path d="M11 5 6 9H3v6h3l5 4v-7" /><path d="M16 9.5a5 5 0 0 1 1.1 5.5" /></>,
   wave: <><path d="M4 12h2" /><path d="M8 8v8" /><path d="M12 5v14" /><path d="M16 8v8" /><path d="M20 12h-2" /></>
 };
 
@@ -800,6 +832,294 @@ function LandingPage({
   );
 }
 
+function CustomAudioPlayer({ src, title = 'Audio', variant = 'voice' }) {
+  const audioRef = useRef(null);
+  const idRef = useRef(`audio-${Math.random().toString(16).slice(2)}`);
+  const [playing, setPlaying] = useState(false);
+  const [muted, setMuted] = useState(false);
+  const [duration, setDuration] = useState(0);
+  const [current, setCurrent] = useState(0);
+
+  useEffect(() => {
+    setPlaying(false);
+    setCurrent(0);
+    setDuration(0);
+  }, [src]);
+
+  useEffect(() => {
+    const onOtherMediaPlay = (event) => {
+      if (event.detail?.id !== idRef.current) {
+        audioRef.current?.pause();
+      }
+    };
+    window.addEventListener(MEDIA_PLAY_EVENT, onOtherMediaPlay);
+    return () => window.removeEventListener(MEDIA_PLAY_EVENT, onOtherMediaPlay);
+  }, []);
+
+  async function togglePlayback() {
+    const node = audioRef.current;
+    if (!node) return;
+
+    if (node.paused) {
+      window.dispatchEvent(new CustomEvent(MEDIA_PLAY_EVENT, { detail: { id: idRef.current } }));
+      await node.play().catch(() => {});
+    } else {
+      node.pause();
+    }
+  }
+
+  function seek(event) {
+    const node = audioRef.current;
+    if (!node) return;
+    const nextTime = Number(event.target.value) || 0;
+    node.currentTime = nextTime;
+    setCurrent(nextTime);
+  }
+
+  const safeDuration = Number.isFinite(duration) && duration > 0 ? duration : 0;
+  const progress = safeDuration ? Math.min(100, Math.max(0, (current / safeDuration) * 100)) : 0;
+
+  return (
+    <div className={`custom-audio-player ${variant}`} style={{ '--media-progress': `${progress}%` }}>
+      <audio
+        ref={audioRef}
+        preload="metadata"
+        src={src}
+        muted={muted}
+        onLoadedMetadata={(event) => setDuration(event.currentTarget.duration || 0)}
+        onTimeUpdate={(event) => setCurrent(event.currentTarget.currentTime || 0)}
+        onPlay={() => setPlaying(true)}
+        onPause={() => setPlaying(false)}
+        onEnded={() => {
+          setPlaying(false);
+          setCurrent(0);
+        }}
+      />
+      <button className="media-round-btn" type="button" aria-label={playing ? `Pause ${title}` : `Play ${title}`} title={playing ? 'Pause' : 'Play'} onClick={togglePlayback}>
+        <AppIcon name={playing ? 'pause' : 'play'} size={16} />
+      </button>
+      <span className="media-time">{formatMediaDuration(current)}</span>
+      <input className="media-range" type="range" min="0" max={safeDuration || 0} step="0.01" value={Math.min(current, safeDuration || current)} aria-label={`Seek ${title}`} onChange={seek} />
+      <button className="media-speaker-btn" type="button" aria-label={muted ? `Unmute ${title}` : `Mute ${title}`} title={muted ? 'Unmute' : 'Mute'} onClick={() => setMuted((value) => !value)}>
+        <AppIcon name={muted ? 'volumeOff' : 'volume'} size={17} />
+      </button>
+    </div>
+  );
+}
+
+function ProfileTrackPlayer({ profile, compact = false }) {
+  const trackUrl = profile?.favoriteTrackUrl ? getAttachmentUrl(profile.favoriteTrackUrl) : '';
+  const title = profile?.favoriteTrack?.trim() || profile?.favoriteTrackName || 'Profile track';
+
+  if (!trackUrl && !profile?.favoriteTrack) return null;
+
+  return (
+    <div className={compact ? 'profile-track-player compact' : 'profile-track-player'} style={getProfileStyle(profile)}>
+      <div className="profile-track-title">
+        <span><AppIcon name="music" size={16} /></span>
+        <div>
+          <small>Profile track</small>
+          <strong>{title}</strong>
+        </div>
+      </div>
+      {trackUrl ? <CustomAudioPlayer src={trackUrl} title={title} variant="track" /> : null}
+    </div>
+  );
+}
+
+function CircleVideoPlayer({ src, title = 'Video circle', onOpen, large = false }) {
+  const videoRef = useRef(null);
+  const idRef = useRef(`circle-${Math.random().toString(16).slice(2)}`);
+  const [playing, setPlaying] = useState(false);
+  const [muted, setMuted] = useState(false);
+  const [duration, setDuration] = useState(0);
+  const [current, setCurrent] = useState(0);
+
+  useEffect(() => {
+    setPlaying(false);
+    setCurrent(0);
+    setDuration(0);
+  }, [src]);
+
+  useEffect(() => {
+    const onOtherMediaPlay = (event) => {
+      if (event.detail?.id !== idRef.current) {
+        videoRef.current?.pause();
+      }
+    };
+    window.addEventListener(MEDIA_PLAY_EVENT, onOtherMediaPlay);
+    return () => window.removeEventListener(MEDIA_PLAY_EVENT, onOtherMediaPlay);
+  }, []);
+
+  async function togglePlayback() {
+    const node = videoRef.current;
+    if (!node) return;
+
+    if (node.paused) {
+      window.dispatchEvent(new CustomEvent(MEDIA_PLAY_EVENT, { detail: { id: idRef.current } }));
+      await node.play().catch(() => {});
+    } else {
+      node.pause();
+    }
+  }
+
+  const safeDuration = Number.isFinite(duration) && duration > 0 ? duration : 0;
+  const progress = safeDuration ? Math.min(100, Math.max(0, (current / safeDuration) * 100)) : 0;
+
+  return (
+    <div className={large ? 'circle-video-note large' : 'circle-video-note'} style={{ '--circle-progress': `${progress * 3.6}deg` }}>
+      <video
+        ref={videoRef}
+        playsInline
+        preload="metadata"
+        src={src}
+        muted={muted}
+        onClick={togglePlayback}
+        onLoadedMetadata={(event) => setDuration(event.currentTarget.duration || 0)}
+        onTimeUpdate={(event) => setCurrent(event.currentTarget.currentTime || 0)}
+        onPlay={() => setPlaying(true)}
+        onPause={() => setPlaying(false)}
+        onEnded={() => {
+          setPlaying(false);
+          setCurrent(0);
+        }}
+      />
+      <span className="circle-progress-ring" aria-hidden="true" />
+      <button className="circle-main-control" type="button" aria-label={playing ? `Pause ${title}` : `Play ${title}`} title={playing ? 'Pause' : 'Play'} onClick={togglePlayback}>
+        <AppIcon name={playing ? 'pause' : 'play'} size={large ? 28 : 22} />
+      </button>
+      <div className="circle-video-hud">
+        <span>{formatMediaDuration(current || safeDuration)}</span>
+        <button type="button" aria-label={muted ? 'Unmute circle' : 'Mute circle'} title={muted ? 'Unmute' : 'Mute'} onClick={() => setMuted((value) => !value)}>
+          <AppIcon name={muted ? 'volumeOff' : 'volume'} size={15} />
+        </button>
+        {onOpen ? (
+          <button type="button" aria-label={`Open ${title}`} title="Open" onClick={onOpen}>
+            <AppIcon name="expand" size={15} />
+          </button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function StoriesPanel({ stories, user, loading, uploading, onCreateStory, onOpenStory, onRefresh }) {
+  const groups = stories.reduce((acc, story) => {
+    const authorId = String(story.author?.id || story.authorId || 'unknown');
+    if (!acc.has(authorId)) acc.set(authorId, []);
+    acc.get(authorId).push(story);
+    return acc;
+  }, new Map());
+  const orderedGroups = [...groups.values()].sort((left, right) => {
+    const leftOwn = String(left[0]?.author?.id) === String(user?.id);
+    const rightOwn = String(right[0]?.author?.id) === String(user?.id);
+    if (leftOwn !== rightOwn) return leftOwn ? -1 : 1;
+    return new Date(right[0]?.createdAt || 0).getTime() - new Date(left[0]?.createdAt || 0).getTime();
+  });
+
+  return (
+    <div className="stories-workspace">
+      <section className="stories-strip" aria-label="Stories">
+        <button className="story-bubble add" type="button" onClick={onCreateStory}>
+          <span className="story-avatar-ring">
+            <UserAvatar user={user} />
+            <i><AppIcon name="plus" size={13} /></i>
+          </span>
+          <strong>{uploading ? 'Uploading' : 'Your story'}</strong>
+        </button>
+
+        {orderedGroups.map((group) => {
+          const firstStory = group[0];
+          const unread = group.some((story) => !story.viewed);
+          return (
+            <button key={firstStory.author?.id || firstStory.id} className={unread ? 'story-bubble unread' : 'story-bubble'} type="button" onClick={() => onOpenStory(firstStory)}>
+              <span className="story-avatar-ring">
+                <UserAvatar user={firstStory.author} />
+              </span>
+              <strong>{getDisplayName(firstStory.author)}</strong>
+            </button>
+          );
+        })}
+      </section>
+
+      <section className="stories-board">
+        <div className="stories-board-top">
+          <div>
+            <span className="section-label">Stories</span>
+            <h3>Moments from your WebCord circle</h3>
+          </div>
+          <div className="stories-actions">
+            <button className="ghost-btn" type="button" onClick={onRefresh}>Refresh</button>
+            <button type="button" onClick={onCreateStory}><AppIcon name="story" size={16} />New Story</button>
+          </div>
+        </div>
+
+        {loading ? <p className="muted">Loading stories...</p> : null}
+        {!loading && stories.length === 0 ? (
+          <div className="empty-state">
+            <h3>No stories yet</h3>
+            <p className="muted">Add an image or video. It will live here for 24 hours.</p>
+          </div>
+        ) : null}
+
+        <div className="story-card-grid">
+          {stories.map((story) => {
+            const url = getAttachmentUrl(story.mediaUrl);
+            const isVideo = String(story.mediaType || '').toUpperCase() === 'VIDEO';
+            return (
+              <button key={story.id} className={story.viewed ? 'story-card viewed' : 'story-card'} type="button" onClick={() => onOpenStory(story)}>
+                <span className="story-card-media">
+                  {isVideo ? <video muted playsInline preload="metadata" src={url} /> : <img src={url} alt={story.caption || `${getDisplayName(story.author)} story`} />}
+                </span>
+                <span className="story-card-copy">
+                  <strong>{getDisplayName(story.author)}</strong>
+                  <small>{new Date(story.createdAt).toLocaleString([], { hour: '2-digit', minute: '2-digit' })}{story.viewed ? ' · viewed' : ''}</small>
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function StoryViewer({ story, stories, onClose, onNext, onPrev }) {
+  if (!story) return null;
+
+  const url = getAttachmentUrl(story.mediaUrl);
+  const isVideo = String(story.mediaType || '').toUpperCase() === 'VIDEO';
+  const storyIndex = stories.findIndex((item) => String(item.id) === String(story.id));
+
+  return (
+    <div className="story-viewer" role="dialog" aria-modal="true" onClick={onClose}>
+      <div className="story-viewer-shell" onClick={(event) => event.stopPropagation()}>
+        <div className="story-progress-row" aria-hidden="true">
+          {stories.map((item, index) => (
+            <span key={item.id} className={index <= storyIndex ? 'active' : ''} />
+          ))}
+        </div>
+        <div className="story-viewer-top">
+          <UserAvatar user={story.author} />
+          <div>
+            <strong>{getDisplayName(story.author)}</strong>
+            <span>{new Date(story.createdAt).toLocaleString([], { hour: '2-digit', minute: '2-digit' })}</span>
+          </div>
+          <button className="icon-btn" type="button" aria-label="Close story" title="Close" onClick={onClose}><AppIcon name="close" /></button>
+        </div>
+
+        <button className="story-nav prev" type="button" aria-label="Previous story" onClick={onPrev}><AppIcon name="arrowLeft" /></button>
+        <button className="story-nav next" type="button" aria-label="Next story" onClick={onNext}><AppIcon name="arrowLeft" /></button>
+
+        <div className="story-viewer-media">
+          {isVideo ? <video autoPlay controls playsInline src={url} /> : <img src={url} alt={story.caption || `${getDisplayName(story.author)} story`} />}
+        </div>
+        {story.caption ? <p className="story-caption">{story.caption}</p> : null}
+      </div>
+    </div>
+  );
+}
+
 function MessageAttachment({ message, onOpenMedia }) {
   if (!message.attachmentUrl) return null;
 
@@ -826,21 +1146,14 @@ function MessageAttachment({ message, onOpenMedia }) {
 
   if (kind === 'CIRCLE_VIDEO') {
     return (
-      <button className="circle-video-message" type="button" onClick={() => onOpenMedia?.(message)} aria-label={`Open ${title}`}>
-        <video muted playsInline preload="metadata" src={url} />
-        <span className="media-play-chip">Circle</span>
-      </button>
+      <CircleVideoPlayer src={url} title={title} onOpen={() => onOpenMedia?.(message)} />
     );
   }
 
   if (kind === 'AUDIO') {
     return (
       <div className="voice-message">
-        <span className="voice-message-icon"><AppIcon name="wave" size={18} /></span>
-        <div className="voice-message-body">
-          <strong>{title}</strong>
-          <audio controls preload="metadata" src={url} />
-        </div>
+        <CustomAudioPlayer src={url} title={title} variant="voice" />
       </div>
     );
   }
@@ -865,8 +1178,8 @@ function MediaViewer({ message, onClose }) {
         <div className="media-viewer-stage">
           {kind === 'IMAGE' ? <img src={url} alt={title} /> : null}
           {kind === 'VIDEO' ? <video controls autoPlay playsInline src={url} /> : null}
-          {kind === 'CIRCLE_VIDEO' ? <div className="media-circle-frame"><video controls autoPlay playsInline src={url} /></div> : null}
-          {kind === 'AUDIO' ? <audio controls autoPlay src={url} /> : null}
+          {kind === 'CIRCLE_VIDEO' ? <CircleVideoPlayer src={url} title={title} large /> : null}
+          {kind === 'AUDIO' ? <CustomAudioPlayer src={url} title={title} variant="viewer" /> : null}
         </div>
         <div className="media-viewer-actions">
           <a className="ghost-btn" href={url} download>Download</a>
@@ -939,12 +1252,7 @@ function UserProfileModal({ open, profile, relationshipLabel, canAddFriend, isBl
             <button className="icon-btn" type="button" aria-label="Close" title="Close" onClick={onClose}><AppIcon name="close" /></button>
           </div>
 
-          {profile.favoriteTrack ? (
-            <div className="profile-track">
-              <span>Track</span>
-              <strong>{profile.favoriteTrack}</strong>
-            </div>
-          ) : null}
+          <ProfileTrackPlayer profile={profile} />
 
           <div className="viewer-actions">
             <span className="request-pill">{relationshipLabel}</span>
@@ -1268,11 +1576,14 @@ function SettingsModal({
   clientSettings,
   avatarUploading,
   bannerUploading,
+  trackUploading,
   onClose,
   onSectionChange,
   onDraftChange,
   onUploadAvatar,
   onUploadBanner,
+  onUploadTrack,
+  onRemoveTrack,
   onSaveProfile,
   onThemeChange,
   onThemeReset,
@@ -1364,12 +1675,7 @@ function SettingsModal({
                   </div>
                   <span className="profile-username">{getUsernameTag(user)}</span>
                   <p className="profile-status-line">{draft.statusText || 'Online'}</p>
-                  {draft.favoriteTrack ? (
-                    <div className="profile-track compact">
-                      <span>Track</span>
-                      <strong>{draft.favoriteTrack}</strong>
-                    </div>
-                  ) : null}
+                  <ProfileTrackPlayer profile={draftProfile} compact />
                   <p>{draft.bio || 'Write a short bio so friends know what you are up to.'}</p>
                 </div>
               </div>
@@ -1377,6 +1683,13 @@ function SettingsModal({
                 <label>Display name<input value={draft.displayName} onChange={(e) => onDraftChange({ ...draft, displayName: e.target.value.slice(0, 40) })} maxLength={40} placeholder={user?.username || 'WebCord user'} /></label>
                 <label>Status<input value={draft.statusText} onChange={(e) => onDraftChange({ ...draft, statusText: e.target.value.slice(0, 80) })} maxLength={80} placeholder="Online" /></label>
                 <label>Favorite track<input value={draft.favoriteTrack} onChange={(e) => onDraftChange({ ...draft, favoriteTrack: e.target.value.slice(0, 120) })} maxLength={120} placeholder="Artist - Track" /></label>
+                <div className="track-upload-row">
+                  <ProfileTrackPlayer profile={draftProfile} compact />
+                  <div className="settings-actions-row">
+                    <button type="button" onClick={onUploadTrack}>{trackUploading ? 'Uploading...' : draft.favoriteTrackUrl ? 'Replace Track' : 'Attach Track'}</button>
+                    {draft.favoriteTrackUrl ? <button className="ghost-btn" type="button" onClick={onRemoveTrack}>Remove Track File</button> : null}
+                  </div>
+                </div>
                 <ProfileAccentPicker value={draft.accentColor} onChange={(accentColor) => onDraftChange({ ...draft, accentColor })} />
                 <label>Bio<textarea value={draft.bio} onChange={(e) => onDraftChange({ ...draft, bio: e.target.value.slice(0, 280) })} rows={5} /></label>
                 <div className="settings-actions-row">
@@ -1675,6 +1988,11 @@ export default function App() {
   const [uploading, setUploading] = useState(false);
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [bannerUploading, setBannerUploading] = useState(false);
+  const [trackUploading, setTrackUploading] = useState(false);
+  const [storyUploading, setStoryUploading] = useState(false);
+  const [storiesLoading, setStoriesLoading] = useState(false);
+  const [stories, setStories] = useState([]);
+  const [activeStoryId, setActiveStoryId] = useState(null);
   const [voiceRecording, setVoiceRecording] = useState(false);
   const [circleRecording, setCircleRecording] = useState(false);
   const [recordingElapsed, setRecordingElapsed] = useState(0);
@@ -1716,6 +2034,8 @@ export default function App() {
   const fileInputRef = useRef(null);
   const avatarInputRef = useRef(null);
   const bannerInputRef = useRef(null);
+  const trackInputRef = useRef(null);
+  const storyInputRef = useRef(null);
   const peersRef = useRef({});
   const localStreamRef = useRef(null);
   const rawLocalStreamRef = useRef(null);
@@ -1760,6 +2080,7 @@ export default function App() {
     if (!query) return true;
     return `${getConversationTitle(conversation)} ${getConversationSubtitle(conversation)} ${conversation.user?.username || ''} ${conversation.user?.statusText || ''} ${conversation.lastMessage?.content || ''} ${conversation.lastMessage?.attachmentName || ''}`.toLowerCase().includes(query);
   });
+  const activeStory = stories.find((story) => String(story.id) === String(activeStoryId)) || null;
   const incomingRequests = social.requests.filter((item) => item.direction === 'INCOMING' && item.status === 'PENDING');
   const outgoingRequests = social.requests.filter((item) => item.direction === 'OUTGOING' && item.status === 'PENDING');
   const peerConfig = useMemo(
@@ -1857,7 +2178,13 @@ export default function App() {
   useEffect(() => { volumeRef.current = participantVolumes; }, [participantVolumes]);
   useEffect(() => { remoteStreamsRef.current = remoteStreams; }, [remoteStreams]);
   useEffect(() => { voiceQualityRef.current = voiceQuality; }, [voiceQuality]);
-  useEffect(() => { scopeRef.current = workspace === 'dm' ? { type: 'dm', id: String(dmConversationId || '') } : { type: 'channel', id: String(channelId || '') }; }, [workspace, channelId, dmConversationId]);
+  useEffect(() => {
+    scopeRef.current = workspace === 'dm'
+      ? { type: 'dm', id: String(dmConversationId || '') }
+      : workspace === 'server'
+        ? { type: 'channel', id: String(channelId || '') }
+        : { type: 'none', id: '' };
+  }, [workspace, channelId, dmConversationId]);
   useEffect(() => { shouldStickToBottomRef.current = true; }, [workspace, channelId, dmConversationId]);
   useEffect(() => {
     if (!shouldStickToBottomRef.current) return;
@@ -1960,6 +2287,8 @@ export default function App() {
       setChannels([]);
       setSocial(EMPTY_SOCIAL);
       setMessages([]);
+      setStories([]);
+      setActiveStoryId(null);
       setSocketStatus(networkOnline ? 'disconnected' : 'offline');
       return;
     }
@@ -1968,14 +2297,14 @@ export default function App() {
 
   useEffect(() => {
     if (!isAuthed || isAdminRoute) return;
+    if (!getCurrentMessagePath()) {
+      setMessages([]);
+      return;
+    }
     const scopeKey = workspace === 'dm' ? getScopeKey('dm', dmConversationId) : getScopeKey('channel', channelId);
     const cachedMessages = readMessageCache()[scopeKey];
     if (Array.isArray(cachedMessages) && cachedMessages.length > 0) {
       setMessages(cachedMessages);
-    }
-    if (!getCurrentMessagePath()) {
-      setMessages([]);
-      return;
     }
     refreshCurrentMessages().catch((err) => setError(err.message));
   }, [isAuthed, isAdminRoute, workspace, channelId, dmConversationId, token]);
@@ -2071,6 +2400,7 @@ export default function App() {
       );
     });
     socket.on('social:refresh', () => refreshSocialData().catch((err) => setError(err.message)));
+    socket.on('stories:refresh', () => refreshStories({ silent: true }).catch((err) => setError(err.message)));
     socket.on('voice-participants', async (participants) => {
       setVoiceParticipants(() =>
         participants.reduce((acc, participant) => {
@@ -2154,6 +2484,7 @@ export default function App() {
 
     const interval = window.setInterval(() => {
       refreshSocialData().catch(() => {});
+      refreshStories({ silent: true }).catch(() => {});
 
       refreshCurrentMessages({ silent: true }).catch(() => {});
     }, MESSAGE_POLL_INTERVAL_MS);
@@ -2447,6 +2778,7 @@ export default function App() {
         ? savedDm
         : String(data.social?.conversations?.[0]?.id || '')
     );
+    refreshStories({ silent: true }).catch(() => {});
   }
 
   async function refreshSocialData() {
@@ -2457,6 +2789,114 @@ export default function App() {
       setDmConversationId(nextDm);
       if (workspace === 'dm' && !nextDm) setWorkspace('friends');
     }
+  }
+
+  async function refreshStories({ silent = false } = {}) {
+    if (!token || isAdminRoute) return;
+    try {
+      if (!silent) setStoriesLoading(true);
+      const nextStories = await apiFetch('/stories', {}, token);
+      setStories(Array.isArray(nextStories) ? nextStories : []);
+    } catch (err) {
+      if (!silent) setError(err.message);
+      throw err;
+    } finally {
+      if (!silent) setStoriesLoading(false);
+    }
+  }
+
+  async function uploadProfileTrack(file) {
+    if (!file || !token) return;
+    if (!isAudioFile(file)) {
+      setError('Choose an audio file for the profile track');
+      if (trackInputRef.current) trackInputRef.current.value = '';
+      return;
+    }
+
+    try {
+      setTrackUploading(true);
+      const formData = new FormData();
+      formData.append('file', file);
+      const uploaded = await apiFetch('/upload', { method: 'POST', body: formData }, token);
+      const nextDraft = {
+        ...profileDraft,
+        favoriteTrack: profileDraft.favoriteTrack || uploaded.name,
+        favoriteTrackUrl: uploaded.url,
+        favoriteTrackName: uploaded.name
+      };
+      setProfileDraft(nextDraft);
+      await saveProfile(nextDraft);
+      pushToast('Profile track attached');
+    } catch (err) {
+      reportError(err, 'Could not upload profile track');
+    } finally {
+      setTrackUploading(false);
+      if (trackInputRef.current) trackInputRef.current.value = '';
+    }
+  }
+
+  async function removeProfileTrack() {
+    const nextDraft = {
+      ...profileDraft,
+      favoriteTrackUrl: '',
+      favoriteTrackName: ''
+    };
+    setProfileDraft(nextDraft);
+    await saveProfile(nextDraft);
+    pushToast('Profile track file removed');
+  }
+
+  async function uploadStoryFile(file) {
+    if (!file || !token) return;
+    if (!isStoryFile(file)) {
+      setError('Choose an image or video for stories');
+      if (storyInputRef.current) storyInputRef.current.value = '';
+      return;
+    }
+
+    try {
+      setStoryUploading(true);
+      const formData = new FormData();
+      formData.append('file', file);
+      const uploaded = await apiFetch('/upload', { method: 'POST', body: formData }, token);
+      const story = await apiFetch(
+        '/stories',
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            mediaUrl: uploaded.url,
+            mediaType: getStoryMediaType(file),
+            caption: ''
+          })
+        },
+        token
+      );
+      setStories((prev) => [story, ...prev.filter((item) => String(item.id) !== String(story.id))]);
+      setWorkspace('stories');
+      setActiveStoryId(story.id);
+      pushToast('Story published');
+    } catch (err) {
+      reportError(err, 'Could not publish story');
+    } finally {
+      setStoryUploading(false);
+      if (storyInputRef.current) storyInputRef.current.value = '';
+    }
+  }
+
+  async function openStory(story) {
+    if (!story?.id) return;
+    setActiveStoryId(story.id);
+    if (!story.viewed) {
+      setStories((prev) => prev.map((item) => (String(item.id) === String(story.id) ? { ...item, viewed: true } : item)));
+      await apiFetch(`/stories/${story.id}/view`, { method: 'POST' }, token).catch(() => {});
+    }
+  }
+
+  function stepStory(direction) {
+    if (!stories.length) return;
+    const currentIndex = Math.max(0, stories.findIndex((story) => String(story.id) === String(activeStoryId)));
+    const nextIndex = (currentIndex + direction + stories.length) % stories.length;
+    openStory(stories[nextIndex]).catch(() => {});
   }
 
   async function saveProfile(nextDraft = profileDraft) {
@@ -2470,6 +2910,8 @@ export default function App() {
           bio: cleanDraft.bio,
           statusText: cleanDraft.statusText,
           favoriteTrack: cleanDraft.favoriteTrack,
+          favoriteTrackUrl: cleanDraft.favoriteTrackUrl || null,
+          favoriteTrackName: cleanDraft.favoriteTrackName || null,
           accentColor: cleanDraft.accentColor,
           avatarUrl: cleanDraft.avatarUrl || null,
           bannerUrl: cleanDraft.bannerUrl || null
@@ -2532,6 +2974,8 @@ export default function App() {
     setChannels([]);
     setSocial(EMPTY_SOCIAL);
     setMessages([]);
+    setStories([]);
+    setActiveStoryId(null);
     setToken('');
     setUser(null);
     setWorkspace('server');
@@ -3546,9 +3990,11 @@ export default function App() {
       ? 'Friends'
       : workspace === 'dm'
         ? (activeConversation?.user ? getDisplayName(activeConversation.user) : 'Direct messages')
-        : activeTextChannel
-          ? `# ${activeTextChannel.name}`
-          : 'Server chat';
+        : workspace === 'stories'
+          ? 'Stories'
+          : activeTextChannel
+            ? `# ${activeTextChannel.name}`
+            : 'Server chat';
   const realtimeStatus = networkOnline ? socketStatus : 'offline';
   const realtimeLabel = SOCKET_STATUS_LABELS[realtimeStatus] || SOCKET_STATUS_LABELS.disconnected;
   const syncTime = lastRealtimeSync
@@ -3641,6 +4087,8 @@ export default function App() {
     <>
       <input ref={avatarInputRef} type="file" accept="image/*" hidden onChange={(e) => uploadProfileAsset('avatar', e.target.files?.[0])} />
       <input ref={bannerInputRef} type="file" accept="image/*" hidden onChange={(e) => uploadProfileAsset('banner', e.target.files?.[0])} />
+      <input ref={trackInputRef} type="file" accept="audio/*,.mp3,.m4a,.aac,.ogg,.oga,.opus,.wav,.flac,.webm" hidden onChange={(e) => uploadProfileTrack(e.target.files?.[0])} />
+      <input ref={storyInputRef} type="file" accept="image/*,video/*,.webp,.avif,.mp4,.webm,.mov,.m4v" hidden onChange={(e) => uploadStoryFile(e.target.files?.[0])} />
       {isDesktopShell ? <DesktopTitleBar user={user} onOpenSettings={() => setShowSettingsModal(true)} onWindowAction={handleWindowAction} /> : null}
       <div className={mobileSidebarOpen ? 'mobile-overlay active' : 'mobile-overlay'} onClick={() => setMobileSidebarOpen(false)} />
 
@@ -3649,7 +4097,8 @@ export default function App() {
           {[
             ['server', 'brand', 'Server'],
             ['friends', 'smile', 'Friends'],
-            ['dm', 'browser', 'DMs']
+            ['dm', 'browser', 'DMs'],
+            ['stories', 'story', 'Stories']
           ].map(([item, icon, label]) => (
             <button
               key={item}
@@ -3676,7 +4125,7 @@ export default function App() {
               </span>
               <div>
                 <strong><BrandLogo className="inline-brand-logo" /> WebCord</strong>
-                <p className="muted">{workspace === 'server' ? 'Chats' : workspace === 'friends' ? 'Friends' : 'Direct messages'}</p>
+                <p className="muted">{workspace === 'server' ? 'Chats' : workspace === 'friends' ? 'Friends' : workspace === 'stories' ? 'Stories' : 'Direct messages'}</p>
               </div>
             </div>
             <button className="icon-btn" type="button" title="Appearance" aria-label="Appearance" onClick={() => { setSettingsSection('appearance'); setShowSettingsModal(true); }}><AppIcon name="settings" /></button>
@@ -3767,6 +4216,25 @@ export default function App() {
             </div>
           ) : null}
 
+          {workspace === 'stories' ? (
+            <div className="stack">
+              <section className="sidebar-card">
+                <p className="section-label">Stories</p>
+                <button type="button" onClick={() => storyInputRef.current?.click()}><AppIcon name="plus" size={16} />Add story</button>
+                <p className="muted empty-copy">{stories.length} active stories from you and friends.</p>
+              </section>
+              <section className="sidebar-card">
+                <p className="section-label">Unseen</p>
+                {stories.filter((story) => !story.viewed).length === 0 ? <p className="muted">Everything is viewed.</p> : stories.filter((story) => !story.viewed).slice(0, 5).map((story) => (
+                  <button key={story.id} className="channel-btn conversation-btn" type="button" onClick={() => openStory(story)}>
+                    <strong>{getDisplayName(story.author)}</strong>
+                    <span>{story.caption || 'Story update'}</span>
+                  </button>
+                ))}
+              </section>
+            </div>
+          ) : null}
+
           <div className="sidebar-bottom">
             <button type="button" onClick={handleJoinVoice}><AppIcon name={voiceJoined ? 'phoneOff' : 'phone'} size={16} />{voiceJoined ? 'Leave voice' : `Join voice${activeVoiceChannel ? `: ${activeVoiceChannel.name}` : ''}`}</button>
             {voiceJoined ? <button type="button" onClick={toggleMicrophone}><AppIcon name={micMuted ? 'micOff' : 'mic'} size={16} />{micMuted ? 'Unmute mic' : 'Mute mic'}</button> : null}
@@ -3792,13 +4260,14 @@ export default function App() {
                 </button>
               )}
               <strong>{chatTitle}</strong>
-              <p className="muted">{workspace === 'friends' ? 'Requests, friends, and direct conversations.' : workspace === 'dm' ? 'Private messages synced through the backend.' : 'Server chat synced through the backend.'}</p>
+              <p className="muted">{workspace === 'friends' ? 'Requests, friends, and direct conversations.' : workspace === 'dm' ? 'Private messages synced through the backend.' : workspace === 'stories' ? 'Image and video stories expire after 24 hours.' : 'Server chat synced through the backend.'}</p>
             </div>
             <div className="header-badges">
               <span className={`live-pill realtime-pill ${realtimeStatus}`}>
                 {realtimeLabel}{syncTime && realtimeStatus === 'connected' ? ` ${syncTime}` : ''}
               </span>
               <span className="live-pill">{social.friends.length} friends</span>
+              {workspace === 'stories' ? <span className="live-pill">{stories.filter((story) => !story.viewed).length} unseen</span> : null}
               {voiceJoined ? <span className="live-pill">Voice active</span> : null}
             </div>
           </header>
@@ -3833,7 +4302,17 @@ export default function App() {
             />
           ) : null}
 
-          {workspace === 'friends' ? (
+          {workspace === 'stories' ? (
+            <StoriesPanel
+              stories={stories}
+              user={user}
+              loading={storiesLoading}
+              uploading={storyUploading}
+              onCreateStory={() => storyInputRef.current?.click()}
+              onOpenStory={(story) => openStory(story)}
+              onRefresh={() => refreshStories().catch((err) => setError(err.message))}
+            />
+          ) : workspace === 'friends' ? (
             <div className="dashboard-grid">
               <section className="dashboard-card">
                 <p className="section-label">Friends</p>
@@ -3991,11 +4470,14 @@ export default function App() {
         clientSettings={clientSettings}
         avatarUploading={avatarUploading}
         bannerUploading={bannerUploading}
+        trackUploading={trackUploading}
         onClose={() => { setShowSettingsModal(false); stopCameraPreview().catch(() => {}); }}
         onSectionChange={setSettingsSection}
         onDraftChange={setProfileDraft}
         onUploadAvatar={() => avatarInputRef.current?.click()}
         onUploadBanner={() => bannerInputRef.current?.click()}
+        onUploadTrack={() => trackInputRef.current?.click()}
+        onRemoveTrack={() => removeProfileTrack().catch((err) => setError(err.message))}
         onSaveProfile={() => saveProfile().catch((err) => setError(err.message))}
         onThemeChange={setTheme}
         onThemeReset={() => setTheme(DEFAULT_THEME)}
@@ -4030,6 +4512,7 @@ export default function App() {
       />
       <ReportModal target={reportTarget} onClose={() => setReportTarget(null)} onSubmit={(payload) => submitReport(payload)} />
       <MediaViewer message={viewedMedia} onClose={() => setViewedMedia(null)} />
+      <StoryViewer story={activeStory} stories={stories} onClose={() => setActiveStoryId(null)} onNext={() => stepStory(1)} onPrev={() => stepStory(-1)} />
     </>
   );
 }
