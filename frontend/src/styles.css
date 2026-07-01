@@ -22,6 +22,11 @@
   --radius: 8px;
   --shadow: 0 22px 82px rgba(0, 0, 0, 0.52);
   --shadow-lift: 0 18px 48px rgba(0, 0, 0, 0.32), 0 0 0 1px rgba(255, 255, 255, 0.045);
+  --motion-fast: 150ms;
+  --motion-base: 220ms;
+  --motion-slow: 360ms;
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-spring: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 * {
@@ -83,13 +88,17 @@ button {
   padding: 8px 12px;
   cursor: pointer;
   font-weight: 700;
-  transition: transform 140ms ease, background 140ms ease, border-color 140ms ease, color 140ms ease, box-shadow 140ms ease;
+  transition: transform var(--motion-fast) var(--ease-out), background var(--motion-fast) ease, border-color var(--motion-fast) ease, color var(--motion-fast) ease, box-shadow var(--motion-fast) ease, opacity var(--motion-fast) ease;
 }
 
 button:hover {
   border-color: var(--border-strong);
   background: var(--surface-3);
   transform: translateY(-1px);
+}
+
+button:active {
+  transform: translateY(0) scale(0.98);
 }
 
 button:disabled {
@@ -106,6 +115,7 @@ textarea {
   outline: none;
   background: #101217;
   border-color: rgba(255, 255, 255, 0.09);
+  transition: border-color var(--motion-fast) ease, box-shadow var(--motion-fast) ease, background var(--motion-fast) ease, transform var(--motion-fast) var(--ease-out);
 }
 
 input:focus,
@@ -121,6 +131,51 @@ textarea {
 
 a {
   color: color-mix(in srgb, var(--accent-color) 72%, white);
+  transition: color var(--motion-fast) ease, opacity var(--motion-fast) ease;
+}
+
+@keyframes soft-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes sheet-enter {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes message-pop {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.992);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes ring-pulse {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent-hot) 34%, transparent); }
+  70% { box-shadow: 0 0 0 8px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
 }
 
 h1,
@@ -187,6 +242,109 @@ p {
 .empty-copy {
   padding: 8px 10px;
   font-size: 13px;
+}
+
+.app-shell,
+.auth-card,
+.landing-shell,
+.admin-shell {
+  animation: soft-enter var(--motion-slow) var(--ease-spring) both;
+}
+
+.sidebar,
+.chat-panel,
+.activity-panel,
+.settings-content,
+.stories-workspace,
+.dashboard-card,
+.voice-stage,
+.profile-card,
+.guild-cover,
+.modal-card,
+.media-viewer-card,
+.story-viewer-shell {
+  animation: soft-enter var(--motion-base) var(--ease-spring) both;
+}
+
+.sidebar-card,
+.activity-card,
+.message-card,
+.settings-row,
+.settings-card-list,
+.preset-btn,
+.theme-preview,
+.profile-preview,
+.account-hero,
+.story-bubble,
+.mobile-story-item,
+.profile-track-player,
+.custom-audio-player,
+.folder-editor-card {
+  transition:
+    transform var(--motion-base) var(--ease-out),
+    background var(--motion-base) ease,
+    border-color var(--motion-base) ease,
+    box-shadow var(--motion-base) ease,
+    opacity var(--motion-base) ease;
+}
+
+.sidebar-card:hover,
+.activity-card.interactive:hover,
+.preset-btn:hover,
+.theme-preview:hover,
+.profile-preview:hover,
+.account-hero:hover,
+.folder-editor-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lift);
+}
+
+.channel-btn,
+.conversation-btn,
+.rail-btn,
+.icon-btn,
+.composer-btn,
+.live-pill,
+.request-pill,
+.voice-chip {
+  transition:
+    transform var(--motion-fast) var(--ease-out),
+    background var(--motion-fast) ease,
+    border-color var(--motion-fast) ease,
+    color var(--motion-fast) ease,
+    box-shadow var(--motion-fast) ease,
+    opacity var(--motion-fast) ease;
+}
+
+.channel-btn:hover,
+.conversation-btn:hover,
+.rail-btn:hover,
+.icon-btn:hover,
+.composer-btn:hover {
+  transform: translateY(-1px);
+}
+
+.settings-backdrop,
+.modal-backdrop,
+.media-viewer-backdrop,
+.story-viewer,
+.circle-recording-overlay {
+  animation: fade-in var(--motion-base) ease both;
+}
+
+.circle-recording-stage,
+.composer-context,
+.attachment-preview,
+.recording-preview {
+  animation: sheet-enter var(--motion-base) var(--ease-spring) both;
+}
+
+.story-card,
+.voice-person,
+.voice-mini-video,
+.mobile-folder-tabs button,
+.folder-check-row {
+  will-change: transform;
 }
 
 .live-pill,
@@ -2082,7 +2240,7 @@ p {
   display: grid;
   grid-template-columns: 38px minmax(0, 1fr);
   column-gap: 8px;
-  animation: message-rise 180ms ease both;
+  animation: message-pop var(--motion-base) var(--ease-spring) both;
 }
 
 .message-card:hover {
@@ -3204,7 +3362,7 @@ p {
   background: rgba(21, 23, 27, 0.96);
   color: #f2f4f8;
   box-shadow: var(--shadow);
-  animation: toast-in 180ms ease both;
+  animation: toast-in var(--motion-base) var(--ease-spring) both;
 }
 
 .toast.error {
@@ -3910,6 +4068,88 @@ p {
   flex-wrap: wrap;
 }
 
+.folder-create-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.folder-empty .settings-row {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.folder-editor-list {
+  display: grid;
+  gap: 12px;
+}
+
+.folder-editor-card {
+  display: grid;
+  gap: 14px;
+  padding: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  background: #26282f;
+}
+
+.folder-editor-top {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.folder-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.folder-pick-list {
+  display: grid;
+  gap: 6px;
+  min-height: 44px;
+}
+
+.folder-check-row {
+  min-height: 36px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 9px;
+  align-items: center;
+  padding: 7px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  border-radius: 8px;
+  background: #303238;
+  color: #e9edf5;
+  font-weight: 750;
+  cursor: pointer;
+  transition: transform var(--motion-fast) var(--ease-out), background var(--motion-fast) ease, border-color var(--motion-fast) ease;
+}
+
+.folder-check-row:hover {
+  transform: translateY(-1px);
+  border-color: rgba(117, 196, 255, 0.34);
+  background: #363a43;
+}
+
+.folder-check-row input {
+  width: 18px;
+  min-height: 18px;
+  accent-color: var(--accent-color);
+}
+
+.folder-check-row span {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .theme-preview {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
@@ -4344,6 +4584,7 @@ p {
   .mobile-story-item.unread .mobile-story-ring,
   .mobile-story-item.add .mobile-story-ring {
     background: conic-gradient(#3dff87, #31a8ff, #b966ff, #3dff87);
+    animation: ring-pulse 2.4s ease-out infinite;
   }
 
   .mobile-story-ring .profile-avatar {
@@ -4394,13 +4635,15 @@ p {
 
   .mobile-folder-tabs {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-auto-flow: column;
+    grid-auto-columns: max-content;
     gap: 6px;
-    overflow: hidden;
+    overflow-x: auto;
     padding: 6px;
     border-radius: 26px;
     background: #213044;
     scrollbar-width: none;
+    scroll-snap-type: x proximity;
   }
 
   .mobile-folder-tabs::-webkit-scrollbar {
@@ -4408,19 +4651,20 @@ p {
   }
 
   .mobile-folder-tabs button {
-    min-width: 0;
+    min-width: max-content;
     min-height: 42px;
     display: inline-flex;
     align-items: center;
     gap: 6px;
     justify-content: center;
-    padding: 0 8px;
+    padding: 0 14px;
     border: 0;
     border-radius: 20px;
     background: transparent;
     color: #aab4c4;
     font-size: 15px;
     font-weight: 850;
+    scroll-snap-align: start;
   }
 
   .mobile-folder-tabs button.active {
@@ -5111,6 +5355,21 @@ p {
 
   .color-grid {
     grid-template-columns: 1fr;
+  }
+
+  .folder-create-row,
+  .folder-editor-top,
+  .folder-picker-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .folder-editor-card {
+    padding: 12px;
+    border-radius: 10px;
+  }
+
+  .folder-editor-top .ghost-btn {
+    width: 100%;
   }
 
   .admin-grid {
