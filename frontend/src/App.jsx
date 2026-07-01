@@ -136,6 +136,14 @@ function getUsernameTag(user) {
   return user?.username ? `@${user.username}` : '@webcord';
 }
 
+function splitTrackTitle(value = '') {
+  const clean = String(value || '').trim();
+  if (!clean) return { title: 'Profile track', artist: 'WebCord' };
+  const parts = clean.split(/\s+-\s+|\s+–\s+/).map((item) => item.trim()).filter(Boolean);
+  if (parts.length >= 2) return { artist: parts[0], title: parts.slice(1).join(' - ') };
+  return { title: clean, artist: 'Profile playlist' };
+}
+
 function getConversationTitle(conversation = {}) {
   if (conversation.type === 'GROUP') return conversation.title || 'Group chat';
   return getDisplayName(conversation.user);
@@ -599,6 +607,7 @@ const APP_ICONS = {
   expand: <><path d="M8 3H5a2 2 0 0 0-2 2v3" /><path d="M16 3h3a2 2 0 0 1 2 2v3" /><path d="M8 21H5a2 2 0 0 1-2-2v-3" /><path d="M16 21h3a2 2 0 0 0 2-2v-3" /></>,
   hash: <><path d="M5 9h14" /><path d="M5 15h14" /><path d="M10 3 8 21" /><path d="m16 3-2 18" /></>,
   menu: <><path d="M4 7h16" /><path d="M4 12h16" /><path d="M4 17h16" /></>,
+  more: <><circle cx="12" cy="5" r="1.5" /><circle cx="12" cy="12" r="1.5" /><circle cx="12" cy="19" r="1.5" /></>,
   mic: <><path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z" /><path d="M19 10v2a7 7 0 0 1-14 0v-2" /><path d="M12 19v3" /></>,
   micOff: <><path d="m3 3 18 18" /><path d="M9 9v3a3 3 0 0 0 5.1 2.1" /><path d="M15 9.3V6a3 3 0 0 0-5.1-2.1" /><path d="M19 10v2a7 7 0 0 1-.7 3" /><path d="M5 10v2a7 7 0 0 0 10 6.3" /><path d="M12 19v3" /></>,
   minus: <path d="M5 12h14" />,
@@ -612,13 +621,16 @@ const APP_ICONS = {
   screen: <><rect x="3" y="4" width="18" height="13" rx="2" /><path d="m9 11 3-3 3 3" /><path d="M12 8v7" /><path d="M8 21h8" /></>,
   send: <><path d="m22 2-7 20-4-9-9-4 20-7Z" /><path d="M22 2 11 13" /></>,
   settings: <><circle cx="12" cy="12" r="3.4" /><path d="M19.4 15a1.8 1.8 0 0 0 .4 2l.1.1a2.1 2.1 0 0 1-3 3l-.1-.1a1.8 1.8 0 0 0-2-.4 1.8 1.8 0 0 0-1.1 1.7V22h-3.4v-.7a1.8 1.8 0 0 0-1.1-1.7 1.8 1.8 0 0 0-2 .4l-.1.1a2.1 2.1 0 0 1-3-3l.1-.1a1.8 1.8 0 0 0 .4-2 1.8 1.8 0 0 0-1.7-1.1H2v-3.4h.7a1.8 1.8 0 0 0 1.7-1.1 1.8 1.8 0 0 0-.4-2l-.1-.1a2.1 2.1 0 0 1 3-3l.1.1a1.8 1.8 0 0 0 2 .4 1.8 1.8 0 0 0 1.1-1.7V2h3.4v.7a1.8 1.8 0 0 0 1.1 1.7 1.8 1.8 0 0 0 2-.4l.1-.1a2.1 2.1 0 0 1 3 3l-.1.1a1.8 1.8 0 0 0-.4 2 1.8 1.8 0 0 0 1.7 1.1H22v3.4h-.7a1.8 1.8 0 0 0-1.9 1.5Z" /></>,
+  search: <><circle cx="11" cy="11" r="7" /><path d="m20 20-3.6-3.6" /></>,
   shrink: <><path d="M8 3v3a2 2 0 0 1-2 2H3" /><path d="M21 8h-3a2 2 0 0 1-2-2V3" /><path d="M3 16h3a2 2 0 0 1 2 2v3" /><path d="M16 21v-3a2 2 0 0 1 2-2h3" /></>,
   smile: <><circle cx="12" cy="12" r="9" /><path d="M8 14s1.4 2 4 2 4-2 4-2" /><path d="M9 9h.01" /><path d="M15 9h.01" /></>,
   stop: <rect x="7" y="7" width="10" height="10" rx="2" />,
   story: <><path d="M7 3.5a9 9 0 0 1 10 0" /><path d="M4.2 7.2a9 9 0 0 0 0 9.6" /><path d="M19.8 7.2a9 9 0 0 1 0 9.6" /><path d="M7 20.5a9 9 0 0 0 10 0" /><circle cx="12" cy="12" r="4" /></>,
+  switchCamera: <><path d="M17 2v4h-4" /><path d="M7 22v-4h4" /><path d="M19 9a7 7 0 0 0-11.7-4.9L5 6.4" /><path d="M5 15a7 7 0 0 0 11.7 4.9l2.3-2.3" /></>,
   volume: <><path d="M11 5 6 9H3v6h3l5 4V5Z" /><path d="M15.5 8.5a5 5 0 0 1 0 7" /><path d="M18.5 5.5a9 9 0 0 1 0 13" /></>,
   volumeOff: <><path d="m3 3 18 18" /><path d="M11 5 6 9H3v6h3l5 4v-7" /><path d="M16 9.5a5 5 0 0 1 1.1 5.5" /></>,
-  wave: <><path d="M4 12h2" /><path d="M8 8v8" /><path d="M12 5v14" /><path d="M16 8v8" /><path d="M20 12h-2" /></>
+  wave: <><path d="M4 12h2" /><path d="M8 8v8" /><path d="M12 5v14" /><path d="M16 8v8" /><path d="M20 12h-2" /></>,
+  zap: <path d="M13 2 4 14h7l-1 8 10-13h-7l1-7Z" />
 };
 
 function AppIcon({ name, size = 20, className = '' }) {
@@ -910,19 +922,61 @@ function CustomAudioPlayer({ src, title = 'Audio', variant = 'voice' }) {
 function ProfileTrackPlayer({ profile, compact = false }) {
   const trackUrl = profile?.favoriteTrackUrl ? getAttachmentUrl(profile.favoriteTrackUrl) : '';
   const title = profile?.favoriteTrack?.trim() || profile?.favoriteTrackName || 'Profile track';
+  const track = splitTrackTitle(title);
 
   if (!trackUrl && !profile?.favoriteTrack) return null;
 
+  if (compact) {
+    return (
+      <div className="profile-track-player compact" style={getProfileStyle(profile)}>
+        <div className="profile-track-title">
+          <span><AppIcon name="music" size={16} /></span>
+          <div>
+            <small>Profile track</small>
+            <strong>{title}</strong>
+          </div>
+        </div>
+        {trackUrl ? <CustomAudioPlayer src={trackUrl} title={title} variant="track" /> : null}
+      </div>
+    );
+  }
+
   return (
-    <div className={compact ? 'profile-track-player compact' : 'profile-track-player'} style={getProfileStyle(profile)}>
-      <div className="profile-track-title">
-        <span><AppIcon name="music" size={16} /></span>
-        <div>
-          <small>Profile track</small>
-          <strong>{title}</strong>
+    <div className="profile-playlist-panel" style={getProfileStyle(profile)}>
+      <div className="profile-playlist-heading">
+        <h3>Ваш плейлист</h3>
+        <div className="profile-playlist-actions" aria-hidden="true">
+          <span><AppIcon name="plus" size={22} /></span>
+          <span><AppIcon name="search" size={22} /></span>
         </div>
       </div>
-      {trackUrl ? <CustomAudioPlayer src={trackUrl} title={title} variant="track" /> : null}
+      <div className="profile-playlist-list">
+        <div className="profile-playlist-row active">
+          <span className="profile-playlist-cover" style={getProfileStyle(profile)}>
+            {profile?.avatarUrl ? <img src={getAttachmentUrl(profile.avatarUrl)} alt="" aria-hidden="true" /> : <AppIcon name="music" size={20} />}
+            <i><AppIcon name="pause" size={16} /></i>
+          </span>
+          <div>
+            <strong>{track.title}</strong>
+            <small>{track.artist}</small>
+          </div>
+          <span className="profile-playlist-drag"><AppIcon name="menu" size={20} /></span>
+        </div>
+      </div>
+      {trackUrl ? (
+        <div className="profile-playlist-now">
+          <div>
+            <strong>{track.title}</strong>
+            <small>{track.artist}</small>
+          </div>
+          {profile?.avatarUrl ? <img src={getAttachmentUrl(profile.avatarUrl)} alt="" aria-hidden="true" /> : null}
+        </div>
+      ) : null}
+      {trackUrl ? <CustomAudioPlayer src={trackUrl} title={title} variant="track" /> : (
+        <div>
+          <p className="muted">Track title is attached to the profile. Upload an audio file in settings to make it playable.</p>
+        </div>
+      )}
     </div>
   );
 }
@@ -998,6 +1052,156 @@ function CircleVideoPlayer({ src, title = 'Video circle', onOpen, large = false 
             <AppIcon name="expand" size={15} />
           </button>
         ) : null}
+      </div>
+    </div>
+  );
+}
+
+function StreamPreviewVideo({ stream, className = '' }) {
+  const videoRef = useRef(null);
+
+  useEffect(() => {
+    if (videoRef.current && stream && videoRef.current.srcObject !== stream) {
+      videoRef.current.srcObject = stream;
+    }
+  }, [stream]);
+
+  return <video ref={videoRef} className={className} autoPlay playsInline muted />;
+}
+
+function CircleRecordingOverlay({
+  stream,
+  elapsed,
+  paused,
+  torchEnabled,
+  facingMode,
+  onCancel,
+  onSend,
+  onPauseToggle,
+  onTorchToggle,
+  onSwitchCamera
+}) {
+  useEffect(() => {
+    const previousBodyOverflow = document.body.style.overflow;
+    const previousHtmlOverflow = document.documentElement.style.overflow;
+    document.body.style.overflow = 'hidden';
+    document.documentElement.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = previousBodyOverflow;
+      document.documentElement.style.overflow = previousHtmlOverflow;
+    };
+  }, []);
+
+  return (
+    <div className="circle-recording-overlay" role="dialog" aria-modal="true">
+      <div className="circle-recording-backdrop" aria-hidden="true">
+        {stream ? <StreamPreviewVideo stream={stream} /> : null}
+      </div>
+      <div className="circle-recording-stage">
+        <span className="circle-recording-grabber" aria-hidden="true" />
+        <div className="circle-recording-preview">
+          {stream ? <StreamPreviewVideo stream={stream} /> : <span className="circle-recording-empty"><AppIcon name="camera" size={42} /></span>}
+        </div>
+        <div className="circle-recording-side-actions">
+          <button type="button" aria-label="Pause recording" title={paused ? 'Resume recording' : 'Pause recording'} onClick={onPauseToggle}>
+            <AppIcon name={paused ? 'play' : 'pause'} size={22} />
+          </button>
+        </div>
+        <div className="circle-recording-tools">
+          <button type="button" aria-label="Switch camera for next circle" title={`Next circle: ${facingMode === 'user' ? 'rear camera' : 'front camera'}`} onClick={onSwitchCamera}>
+            <AppIcon name="switchCamera" size={22} />
+          </button>
+          <button type="button" aria-label="Toggle torch" title={torchEnabled ? 'Turn torch off' : 'Turn torch on'} onClick={onTorchToggle}>
+            <AppIcon name="zap" size={22} />
+          </button>
+        </div>
+        <div className="circle-recording-bottom">
+          <div className="circle-recording-timer">
+            <span className="recording-dot" />
+            <strong>{formatShortDuration(elapsed)}</strong>
+          </div>
+          <button className="circle-recording-cancel" type="button" onClick={onCancel}>ОТМЕНА</button>
+          <button className="circle-recording-send" type="button" aria-label="Attach video circle" title="Attach video circle" onClick={onSend}>
+            <AppIcon name="send" size={34} />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MobileHomePanel({
+  title,
+  user,
+  stories,
+  uploading,
+  activeFolder,
+  search,
+  counts,
+  onCreateStory,
+  onOpenStory,
+  onFolderChange,
+  onSearchChange,
+  onOpenSettings
+}) {
+  const groups = stories.reduce((acc, story) => {
+    const authorId = String(story.author?.id || story.authorId || 'unknown');
+    if (!acc.has(authorId)) acc.set(authorId, []);
+    acc.get(authorId).push(story);
+    return acc;
+  }, new Map());
+  const orderedGroups = [...groups.values()].sort((left, right) => {
+    const leftOwn = String(left[0]?.author?.id) === String(user?.id);
+    const rightOwn = String(right[0]?.author?.id) === String(user?.id);
+    if (leftOwn !== rightOwn) return leftOwn ? -1 : 1;
+    return new Date(right[0]?.createdAt || 0).getTime() - new Date(left[0]?.createdAt || 0).getTime();
+  });
+  const folders = [
+    ['all', 'Все', counts.all],
+    ['personal', 'Личные', counts.personal],
+    ['important', 'Важные', counts.important],
+    ['plugins', 'Plugins', counts.plugins]
+  ];
+
+  return (
+    <div className="mobile-home-panel">
+      <div className="mobile-home-top">
+        <h1>{title}</h1>
+        <button className="icon-btn mobile-home-more" type="button" aria-label="Settings" title="Settings" onClick={onOpenSettings}>
+          <AppIcon name="more" />
+        </button>
+      </div>
+      <section className="mobile-home-stories" aria-label="Stories">
+        <button className="mobile-story-item add" type="button" onClick={onCreateStory}>
+          <span className="mobile-story-ring">
+            <UserAvatar user={user} />
+            <i><AppIcon name="plus" size={14} /></i>
+          </span>
+          <strong>{uploading ? 'Загрузка' : 'Моя история'}</strong>
+        </button>
+        {orderedGroups.slice(0, 8).map((group) => {
+          const firstStory = group[0];
+          const unread = group.some((story) => !story.viewed);
+          return (
+            <button key={firstStory.author?.id || firstStory.id} className={unread ? 'mobile-story-item unread' : 'mobile-story-item'} type="button" onClick={() => onOpenStory(firstStory)}>
+              <span className="mobile-story-ring">
+                <UserAvatar user={firstStory.author} />
+              </span>
+              <strong>{getDisplayName(firstStory.author)}</strong>
+            </button>
+          );
+        })}
+      </section>
+      <label className="mobile-chat-search">
+        <AppIcon name="search" size={22} />
+        <input value={search} onChange={(event) => onSearchChange(event.target.value)} placeholder="Поиск чатов" />
+      </label>
+      <div className="mobile-folder-tabs" role="tablist" aria-label="Folders">
+        {folders.map(([id, label, count]) => (
+          <button key={id} className={activeFolder === id ? 'active' : ''} type="button" role="tab" aria-selected={activeFolder === id} onClick={() => onFolderChange(id)}>
+            {label}<span>{count}</span>
+          </button>
+        ))}
       </div>
     </div>
   );
@@ -1979,6 +2183,8 @@ export default function App() {
   const [replyTarget, setReplyTarget] = useState(null);
   const [editingMessage, setEditingMessage] = useState(null);
   const [dmSearch, setDmSearch] = useState('');
+  const [mobileChatSearch, setMobileChatSearch] = useState('');
+  const [mobileFolder, setMobileFolder] = useState('all');
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [settingsSection, setSettingsSection] = useState('account');
@@ -1996,6 +2202,10 @@ export default function App() {
   const [voiceRecording, setVoiceRecording] = useState(false);
   const [circleRecording, setCircleRecording] = useState(false);
   const [recordingElapsed, setRecordingElapsed] = useState(0);
+  const [recordingPreviewStream, setRecordingPreviewStream] = useState(null);
+  const [recordingPaused, setRecordingPaused] = useState(false);
+  const [circleTorchEnabled, setCircleTorchEnabled] = useState(false);
+  const [circleFacingMode, setCircleFacingMode] = useState('user');
   const [voiceJoined, setVoiceJoined] = useState(false);
   const [micMuted, setMicMuted] = useState(false);
   const [screenSharing, setScreenSharing] = useState(false);
@@ -2075,8 +2285,11 @@ export default function App() {
   const activeTextChannel = textChannels.find((item) => String(item.id) === String(channelId));
   const activeVoiceChannel = voiceChannels.find((item) => String(item.id) === String(voiceChannelId));
   const activeConversation = social.conversations.find((item) => String(item.id) === String(dmConversationId));
+  const mobileQuery = mobileChatSearch.trim().toLowerCase();
+  const filteredTextChannels = textChannels.filter((channel) => !mobileQuery || String(channel.name || '').toLowerCase().includes(mobileQuery));
+  const filteredVoiceChannels = voiceChannels.filter((channel) => !mobileQuery || String(channel.name || '').toLowerCase().includes(mobileQuery));
   const filteredConversations = social.conversations.filter((conversation) => {
-    const query = dmSearch.trim().toLowerCase();
+    const query = (isMobile ? mobileChatSearch : dmSearch).trim().toLowerCase();
     if (!query) return true;
     return `${getConversationTitle(conversation)} ${getConversationSubtitle(conversation)} ${conversation.user?.username || ''} ${conversation.user?.statusText || ''} ${conversation.lastMessage?.content || ''} ${conversation.lastMessage?.attachmentName || ''}`.toLowerCase().includes(query);
   });
@@ -3157,6 +3370,8 @@ export default function App() {
   function stopMessageRecordingStream() {
     messageRecordingStreamRef.current?.getTracks?.().forEach((track) => track.stop());
     messageRecordingStreamRef.current = null;
+    setRecordingPreviewStream(null);
+    setCircleTorchEnabled(false);
   }
 
   function cleanupMessageRecording({ cancel = false } = {}) {
@@ -3176,6 +3391,53 @@ export default function App() {
     setVoiceRecording(false);
     setCircleRecording(false);
     setRecordingElapsed(0);
+    setRecordingPaused(false);
+  }
+
+  function toggleMessageRecordingPause() {
+    const recorder = messageRecorderRef.current;
+    if (!recorder || recorder.state === 'inactive') return;
+
+    if (recorder.state === 'recording' && typeof recorder.pause === 'function') {
+      recorder.pause();
+      setRecordingPaused(true);
+      return;
+    }
+
+    if (recorder.state === 'paused' && typeof recorder.resume === 'function') {
+      recorder.resume();
+      setRecordingPaused(false);
+    }
+  }
+
+  async function toggleCircleTorch() {
+    const [track] = messageRecordingStreamRef.current?.getVideoTracks?.() || [];
+    if (!track?.applyConstraints) {
+      pushToast('Torch is not supported on this device', 'error');
+      return;
+    }
+
+    const capabilities = typeof track.getCapabilities === 'function' ? track.getCapabilities() : {};
+    if (!capabilities?.torch) {
+      pushToast('Torch is not supported on this device', 'error');
+      return;
+    }
+
+    try {
+      const nextTorch = !circleTorchEnabled;
+      await track.applyConstraints({ advanced: [{ torch: nextTorch }] });
+      setCircleTorchEnabled(nextTorch);
+    } catch (err) {
+      reportError(err, 'Could not toggle torch');
+    }
+  }
+
+  function switchCircleCameraForNextTake() {
+    setCircleFacingMode((value) => {
+      const next = value === 'user' ? 'environment' : 'user';
+      pushToast(`Next video circle will use ${next === 'user' ? 'front' : 'rear'} camera`);
+      return next;
+    });
   }
 
   async function uploadRecordedAttachment(blob, kind) {
@@ -3228,13 +3490,13 @@ export default function App() {
         ...VOICE_AUDIO_CONSTRAINTS,
         ...(clientSettings.micDeviceId ? { deviceId: { exact: clientSettings.micDeviceId } } : {})
       };
-      const video = {
-        width: { ideal: 720 },
-        height: { ideal: 720 },
-        aspectRatio: { ideal: 1 },
-        facingMode: 'user',
-        ...(clientSettings.cameraDeviceId ? { deviceId: { exact: clientSettings.cameraDeviceId } } : {})
-      };
+        const video = {
+          width: { ideal: 720 },
+          height: { ideal: 720 },
+          aspectRatio: { ideal: 1 },
+          facingMode: { ideal: circleFacingMode },
+          ...(clientSettings.cameraDeviceId ? { deviceId: { exact: clientSettings.cameraDeviceId } } : {})
+        };
       const stream = await navigator.mediaDevices.getUserMedia(kind === 'circle' ? { audio, video } : { audio, video: false });
       const mimeType = kind === 'circle'
         ? getSupportedRecorderMimeType(VIDEO_RECORDER_MIME_TYPES)
@@ -3243,6 +3505,7 @@ export default function App() {
 
       messageRecordingChunksRef.current = [];
       messageRecordingStreamRef.current = stream;
+      setRecordingPreviewStream(kind === 'circle' ? stream : null);
       messageRecorderRef.current = recorder;
       messageRecordingKindRef.current = kind;
       messageRecordingCancelledRef.current = false;
@@ -3264,6 +3527,8 @@ export default function App() {
         messageRecordingKindRef.current = '';
         setVoiceRecording(false);
         setCircleRecording(false);
+        setRecordingPaused(false);
+        setCircleTorchEnabled(false);
 
         if (!cancelled && chunks.length > 0) {
           await uploadRecordedAttachment(new Blob(chunks, { type }), recordedKind);
@@ -3274,6 +3539,7 @@ export default function App() {
 
       recorder.start(1000);
       setRecordingElapsed(0);
+      setRecordingPaused(false);
       setVoiceRecording(kind === 'voice');
       setCircleRecording(kind === 'circle');
       messageRecordingTimerRef.current = window.setInterval(() => {
@@ -3995,6 +4261,7 @@ export default function App() {
           : activeTextChannel
             ? `# ${activeTextChannel.name}`
             : 'Server chat';
+  const chatHeaderAvatarUser = workspace === 'dm' && activeConversation?.user ? activeConversation.user : user;
   const realtimeStatus = networkOnline ? socketStatus : 'offline';
   const realtimeLabel = SOCKET_STATUS_LABELS[realtimeStatus] || SOCKET_STATUS_LABELS.disconnected;
   const syncTime = lastRealtimeSync
@@ -4023,6 +4290,23 @@ export default function App() {
     }))
   ];
   const userCanManageChannels = canManageChannels(user);
+  const mobileFolderCounts = {
+    all: textChannels.length + voiceChannels.length + social.conversations.length,
+    personal: social.conversations.length,
+    important: incomingRequests.length + (voiceJoined ? 1 : 0),
+    plugins: stories.length
+  };
+  const mobileFolderForWorkspace =
+    workspace === 'dm' ? 'personal' : workspace === 'friends' ? 'important' : workspace === 'stories' ? 'plugins' : 'all';
+
+  function selectMobileFolder(folder) {
+    setMobileFolder(folder);
+    if (folder === 'personal') setWorkspace('dm');
+    if (folder === 'important') setWorkspace('friends');
+    if (folder === 'plugins') setWorkspace('stories');
+    if (folder === 'all') setWorkspace('server');
+    setMobileChatOpen(false);
+  }
 
   if (!isAuthed) {
     if (!isAdminRoute) {
@@ -4095,10 +4379,10 @@ export default function App() {
       <main className={`${isMobile && mobileChatOpen ? 'app-shell mobile-chat-open' : 'app-shell'}${isDesktopShell ? ' desktop-shell' : ''}${voiceExpanded && voiceJoined ? ' voice-expanded-mode' : ''}`}>
         <aside className="rail">
           {[
-            ['server', 'brand', 'Server'],
-            ['friends', 'smile', 'Friends'],
+            ['server', 'menu', 'Чаты'],
+            ['friends', 'smile', 'Контакты'],
             ['dm', 'browser', 'DMs'],
-            ['stories', 'story', 'Stories']
+            ['stories', 'story', 'Сторис']
           ].map(([item, icon, label]) => (
             <button
               key={item}
@@ -4113,23 +4397,29 @@ export default function App() {
               }}
             >
               <span>{icon === 'brand' ? <BrandLogo className="rail-logo" /> : <AppIcon name={icon} size={22} />}</span>
+              <em>{label}</em>
             </button>
           ))}
         </aside>
 
         <aside className={mobileSidebarOpen ? 'sidebar mobile-open' : 'sidebar'}>
-          <div className="mobile-telegram-header">
-            <div className="mobile-telegram-brand">
-              <span className="mobile-telegram-avatar" style={getProfileStyle(user)}>
-                {user?.avatarUrl ? <img src={getAttachmentUrl(user.avatarUrl)} alt={getDisplayName(user)} /> : getDisplayName(user).slice(0, 1).toUpperCase()}
-              </span>
-              <div>
-                <strong><BrandLogo className="inline-brand-logo" /> WebCord</strong>
-                <p className="muted">{workspace === 'server' ? 'Chats' : workspace === 'friends' ? 'Friends' : workspace === 'stories' ? 'Stories' : 'Direct messages'}</p>
-              </div>
-            </div>
-            <button className="icon-btn" type="button" title="Appearance" aria-label="Appearance" onClick={() => { setSettingsSection('appearance'); setShowSettingsModal(true); }}><AppIcon name="settings" /></button>
-          </div>
+          <MobileHomePanel
+            title={guild?.name || 'Обновление'}
+            user={user}
+            stories={stories}
+            uploading={storyUploading}
+            activeFolder={mobileFolderForWorkspace}
+            search={mobileChatSearch}
+            counts={mobileFolderCounts}
+            onCreateStory={() => storyInputRef.current?.click()}
+            onOpenStory={(story) => openStory(story)}
+            onFolderChange={selectMobileFolder}
+            onSearchChange={(value) => {
+              setMobileChatSearch(value);
+              if (workspace === 'dm') setDmSearch(value);
+            }}
+            onOpenSettings={() => { setSettingsSection('appearance'); setShowSettingsModal(true); }}
+          />
 
           <div className="profile-card" style={getProfileBannerStyle(user)}>
             <div className="profile-card-overlay">
@@ -4157,11 +4447,11 @@ export default function App() {
             <div className="stack">
               <section className="sidebar-card">
                 <p className="section-label">Text channels</p>
-                {textChannels.length === 0 ? <p className="muted empty-copy">No text channels yet.</p> : textChannels.map((channel) => <button key={channel.id} className={String(channel.id) === String(channelId) ? 'channel-btn active' : 'channel-btn'} type="button" onClick={() => selectTextChannel(channel.id)}><span className="channel-icon"><AppIcon name="hash" size={16} /></span><span>{channel.name}</span></button>)}
+                {filteredTextChannels.length === 0 ? <p className="muted empty-copy">No text channels yet.</p> : filteredTextChannels.map((channel) => <button key={channel.id} className={String(channel.id) === String(channelId) ? 'channel-btn active' : 'channel-btn'} type="button" onClick={() => selectTextChannel(channel.id)}><span className="channel-icon"><AppIcon name="hash" size={16} /></span><span>{channel.name}</span></button>)}
                 <p className="section-label">Voice channels</p>
-                {voiceChannels.length === 0 ? <p className="muted empty-copy">No voice channels yet.</p> : voiceChannels.map((channel) => <button key={channel.id} className={String(channel.id) === String(voiceChannelId) ? 'channel-btn active' : 'channel-btn'} type="button" onClick={() => selectVoiceChannel(channel.id)}><span className="channel-icon"><AppIcon name="wave" size={16} /></span><span>{channel.name}</span></button>)}
+                {filteredVoiceChannels.length === 0 ? <p className="muted empty-copy">No voice channels yet.</p> : filteredVoiceChannels.map((channel) => <button key={channel.id} className={String(channel.id) === String(voiceChannelId) ? 'channel-btn active' : 'channel-btn'} type="button" onClick={() => selectVoiceChannel(channel.id)}><span className="channel-icon"><AppIcon name="wave" size={16} /></span><span>{channel.name}</span></button>)}
               </section>
-              <section className="sidebar-card">
+              <section className="sidebar-card create-channel-card">
                 <p className="section-label">Create channel</p>
                 {userCanManageChannels ? (
                   <form className="channel-form" onSubmit={handleCreateChannel}>
@@ -4205,7 +4495,7 @@ export default function App() {
             <div className="stack">
               <section className="sidebar-card">
                 <p className="section-label">Direct messages</p>
-                <input value={dmSearch} onChange={(e) => setDmSearch(e.target.value)} placeholder="Search DMs" />
+                <input value={isMobile ? mobileChatSearch : dmSearch} onChange={(e) => (isMobile ? setMobileChatSearch(e.target.value) : setDmSearch(e.target.value))} placeholder="Search DMs" />
                 {social.conversations.length === 0 ? <p className="muted">Accept a friend request to unlock DMs.</p> : filteredConversations.map((conversation) => <button key={conversation.id} className={String(conversation.id) === String(dmConversationId) ? 'channel-btn active conversation-btn' : 'channel-btn conversation-btn'} type="button" onClick={() => selectConversation(conversation.id)}><strong>{getConversationTitle(conversation)}</strong><span>{getConversationSubtitle(conversation)} - {conversation.lastMessage?.content || conversation.lastMessage?.attachmentName || 'Start talking'}</span></button>)}
                 {social.conversations.length > 0 && filteredConversations.length === 0 ? <p className="muted">No DMs match this search.</p> : null}
               </section>
@@ -4249,18 +4539,21 @@ export default function App() {
 
         <section className={`${voiceJoined ? 'chat-panel voice-mode' : 'chat-panel'}${voiceExpanded && voiceJoined ? ' voice-expanded' : ''}`}>
           <header className="chat-header">
-            <div>
+            <div className="chat-header-main">
               {isMobile ? (
-                <button className="mobile-sidebar-toggle" type="button" onClick={() => setMobileChatOpen(false)}>
-                  <AppIcon name="arrowLeft" size={16} />Back
+                <button className="mobile-sidebar-toggle round" type="button" aria-label="Back to chats" onClick={() => setMobileChatOpen(false)}>
+                  <AppIcon name="arrowLeft" size={22} />
                 </button>
               ) : (
                 <button className="mobile-sidebar-toggle" type="button" onClick={() => setMobileSidebarOpen((prev) => !prev)}>
                   <AppIcon name="menu" size={16} />Menu
                 </button>
               )}
-              <strong>{chatTitle}</strong>
-              <p className="muted">{workspace === 'friends' ? 'Requests, friends, and direct conversations.' : workspace === 'dm' ? 'Private messages synced through the backend.' : workspace === 'stories' ? 'Image and video stories expire after 24 hours.' : 'Server chat synced through the backend.'}</p>
+              {isMobile ? <UserAvatar user={chatHeaderAvatarUser} className="chat-title-avatar" /> : null}
+              <div className="chat-title-copy">
+                <strong>{chatTitle}</strong>
+                <p className="muted">{workspace === 'friends' ? 'Requests, friends, and direct conversations.' : workspace === 'dm' ? (activeConversation?.user?.statusText || 'в сети') : workspace === 'stories' ? 'Image and video stories expire after 24 hours.' : 'Server chat synced through the backend.'}</p>
+              </div>
             </div>
             <div className="header-badges">
               <span className={`live-pill realtime-pill ${realtimeStatus}`}>
@@ -4269,6 +4562,7 @@ export default function App() {
               <span className="live-pill">{social.friends.length} friends</span>
               {workspace === 'stories' ? <span className="live-pill">{stories.filter((story) => !story.viewed).length} unseen</span> : null}
               {voiceJoined ? <span className="live-pill">Voice active</span> : null}
+              {isMobile ? <button className="icon-btn mobile-chat-more" type="button" aria-label="Chat menu" title="Chat menu"><AppIcon name="more" /></button> : null}
             </div>
           </header>
           {realtimeStatus !== 'connected' ? (
@@ -4383,10 +4677,10 @@ export default function App() {
                 <button className="icon-btn" type="button" aria-label="Remove attachment" title="Remove attachment" onClick={() => setPendingAttachment(null)}><AppIcon name="close" /></button>
               </div>
             ) : null}
-            {voiceRecording || circleRecording ? (
+            {voiceRecording ? (
               <div className="recording-preview">
                 <span className="recording-dot" />
-                <strong>{circleRecording ? 'Recording video circle' : 'Recording voice'}</strong>
+                <strong>Recording voice</strong>
                 <span>{formatShortDuration(recordingElapsed)}</span>
                 <button className="ghost-btn" type="button" onClick={() => cleanupMessageRecording({ cancel: true })}>Cancel</button>
               </div>
@@ -4422,6 +4716,21 @@ export default function App() {
             ))}
           </div>
         </section>
+
+        {circleRecording ? (
+          <CircleRecordingOverlay
+            stream={recordingPreviewStream}
+            elapsed={recordingElapsed}
+            paused={recordingPaused}
+            torchEnabled={circleTorchEnabled}
+            facingMode={circleFacingMode}
+            onCancel={() => cleanupMessageRecording({ cancel: true })}
+            onSend={() => cleanupMessageRecording()}
+            onPauseToggle={toggleMessageRecordingPause}
+            onTorchToggle={toggleCircleTorch}
+            onSwitchCamera={switchCircleCameraForNextTake}
+          />
+        ) : null}
 
         <aside className="activity-panel">
           <section>
