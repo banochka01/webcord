@@ -29,7 +29,7 @@
     "native:android:release": "powershell -ExecutionPolicy Bypass -File scripts/flutter-native.ps1 build apk --release --dart-define=WEBCORD_API_URL=https://webcordes.ru/api",
     "native:windows:release": "powershell -ExecutionPolicy Bypass -File scripts/flutter-native.ps1 build windows --release --dart-define=WEBCORD_API_URL=https://webcordes.ru/api",
     "native:release": "npm.cmd run native:android:release && npm.cmd run native:windows:release",
-    "clients:release": "npm.cmd run android:release:apk && npm.cmd run desktop:build"
+    "clients:release": "npm.cmd run native:release"
   },
   "dependencies": {
     "@capacitor/android": "^8.0.0",

@@ -290,15 +290,19 @@ model ModerationAction {
 }
 
 model Story {
-  id        Int            @id @default(autoincrement())
-  caption   String         @default("")
-  mediaUrl  String
-  mediaType StoryMediaType @default(IMAGE)
-  authorId  Int
-  createdAt DateTime       @default(now())
-  expiresAt DateTime
-  author    User           @relation(fields: [authorId], references: [id], onDelete: Cascade)
-  views     StoryView[]
+  id              Int            @id @default(autoincrement())
+  caption         String         @default("")
+  mediaUrl        String
+  mediaType       StoryMediaType @default(IMAGE)
+  musicUrl        String?
+  musicTitle      String         @default("")
+  musicArtist     String         @default("")
+  musicAttachment String         @default("")
+  authorId        Int
+  createdAt       DateTime       @default(now())
+  expiresAt       DateTime
+  author          User           @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  views           StoryView[]
 
   @@index([expiresAt])
   @@index([authorId, createdAt])

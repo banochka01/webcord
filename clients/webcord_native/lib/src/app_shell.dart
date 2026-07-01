@@ -830,7 +830,12 @@ class MainSurface extends StatelessWidget {
           if (state.voiceJoined) VoiceCallBanner(state: state),
           if (state.voiceJoined) VoiceStage(state: state),
           const Divider(height: 1, color: WebCordColors.border),
-          Expanded(child: MessageList(state: state)),
+          Expanded(
+            child: ChatWallpaper(
+              state: state,
+              child: MessageList(state: state),
+            ),
+          ),
           Composer(state: state),
         ],
       ),
@@ -881,6 +886,15 @@ class ChatHeader extends StatelessWidget {
             ),
           ),
           LivePill(status: state.socketStatus),
+          if (state.workspace == WorkspaceKind.server ||
+              state.workspace == WorkspaceKind.direct) ...[
+            const SizedBox(width: 8),
+            IconButton.filledTonal(
+              tooltip: 'Set chat wallpaper',
+              onPressed: state.setCurrentChatWallpaper,
+              icon: const Icon(Icons.wallpaper_rounded),
+            ),
+          ],
           if (state.workspace == WorkspaceKind.direct &&
               state.activeConversation != null) ...[
             const SizedBox(width: 8),
@@ -1595,6 +1609,64 @@ class MessageList extends StatelessWidget {
   }
 }
 
+class ChatWallpaper extends StatelessWidget {
+  const ChatWallpaper({required this.state, required this.child, super.key});
+
+  final WebCordState state;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = WebCordPalette.of(context);
+    final path = state.chatWallpaperPath.trim();
+    final wallpaper = path.isEmpty ? null : File(path);
+    final hasWallpaper = wallpaper != null && wallpaper.existsSync();
+    final dimAlpha = ((state.chatWallpaperDim / 100) * 255).round();
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 260),
+      curve: Curves.easeOutCubic,
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [palette.bgAlt.withAlpha(210), palette.panel.withAlpha(185)],
+        ),
+        image: hasWallpaper
+            ? DecorationImage(
+                image: FileImage(wallpaper),
+                fit: BoxFit.cover,
+                colorFilter: ColorFilter.mode(
+                  Colors.black.withAlpha(dimAlpha),
+                  BlendMode.darken,
+                ),
+              )
+            : null,
+      ),
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    palette.bg.withAlpha(hasWallpaper ? 70 : 28),
+                    Colors.transparent,
+                    palette.bg.withAlpha(hasWallpaper ? 126 : 48),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          child,
+        ],
+      ),
+    );
+  }
+}
+
 class MessageTile extends StatelessWidget {
   const MessageTile({
     required this.message,
@@ -1679,7 +1751,11 @@ class MessageTile extends StatelessWidget {
                               }
                             },
                             itemBuilder: (context) => [
-                              if (own) const PopupMenuItem(value: 'edit', child: Text('Edit')),
+                              if (own)
+                                const PopupMenuItem(
+                                  value: 'edit',
+                                  child: Text('Edit'),
+                                ),
                               if (own)
                                 const PopupMenuItem(
                                   value: 'delete',
@@ -2173,7 +2249,9 @@ class StoriesHome extends StatelessWidget {
               ),
               const SizedBox(width: 8),
               FilledButton.icon(
-                onPressed: state.uploading ? null : state.createStoryFromFile,
+                onPressed: state.uploading
+                    ? null
+                    : () => showStoryComposer(context, state),
                 icon: state.uploading
                     ? const SizedBox(
                         width: 16,
@@ -2190,7 +2268,7 @@ class StoriesHome extends StatelessWidget {
             const EmptyState(
               icon: Icons.auto_stories_outlined,
               title: 'No stories yet',
-              body: 'Share a photo or video for 24 hours.',
+              body: 'Share a photo or video with music and a short caption.',
             )
           else
             Wrap(
@@ -2208,6 +2286,131 @@ class StoriesHome extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+Future<void> showStoryComposer(BuildContext context, WebCordState state) async {
+  final caption = TextEditingController();
+  final musicTitle = TextEditingController();
+  final musicArtist = TextEditingController();
+  var attachMusic = false;
+
+  try {
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        final palette = WebCordPalette.of(dialogContext);
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return Dialog(
+              backgroundColor: Colors.transparent,
+              insetPadding: const EdgeInsets.all(18),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 460),
+                child: Panel(
+                  padding: const EdgeInsets.all(18),
+                  color: palette.panel,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.auto_stories_rounded, color: palette.cyan),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              'New story',
+                              style: Theme.of(context).textTheme.headlineMedium,
+                            ),
+                          ),
+                          IconButton(
+                            tooltip: 'Close',
+                            onPressed: () => Navigator.pop(dialogContext),
+                            icon: const Icon(Icons.close_rounded),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: caption,
+                        maxLength: 180,
+                        minLines: 2,
+                        maxLines: 4,
+                        decoration: const InputDecoration(
+                          labelText: 'Description',
+                          hintText: 'What is happening?',
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: musicTitle,
+                        maxLength: 96,
+                        decoration: const InputDecoration(
+                          labelText: 'Music title',
+                          prefixIcon: Icon(Icons.music_note_rounded),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: musicArtist,
+                        maxLength: 96,
+                        decoration: const InputDecoration(
+                          labelText: 'Artist',
+                          prefixIcon: Icon(Icons.person_rounded),
+                        ),
+                      ),
+                      SwitchListTile(
+                        value: attachMusic,
+                        contentPadding: EdgeInsets.zero,
+                        onChanged: (value) =>
+                            setDialogState(() => attachMusic = value),
+                        secondary: const Icon(Icons.audio_file_rounded),
+                        title: const Text('Attach audio file'),
+                        subtitle: const Text(
+                          'After choosing story media, select the track file.',
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: () => Navigator.pop(dialogContext),
+                              child: const Text('Cancel'),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: FilledButton.icon(
+                              onPressed: () async {
+                                Navigator.pop(dialogContext);
+                                await state.createStoryFromFile(
+                                  caption: caption.text,
+                                  musicTitle: musicTitle.text,
+                                  musicArtist: musicArtist.text,
+                                  attachMusic: attachMusic,
+                                );
+                              },
+                              icon: const Icon(Icons.upload_rounded),
+                              label: const Text('Choose media'),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  } finally {
+    caption.dispose();
+    musicTitle.dispose();
+    musicArtist.dispose();
   }
 }
 
@@ -2230,12 +2433,12 @@ class StoryCard extends StatelessWidget {
     return SizedBox(
       width: 136,
       child: InkWell(
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(20),
         onTap: onTap,
         child: DecoratedBox(
           decoration: BoxDecoration(
             color: palette.panelSoft,
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(20),
             border: Border.all(
               color: story.viewed ? palette.border : palette.cyan,
               width: story.viewed ? 1 : 2,
@@ -2246,7 +2449,7 @@ class StoryCard extends StatelessWidget {
             children: [
               ClipRRect(
                 borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(6),
+                  top: Radius.circular(18),
                 ),
                 child: SizedBox(
                   height: 178,
@@ -2274,21 +2477,61 @@ class StoryCard extends StatelessWidget {
                 ),
               ),
               Padding(
-                padding: const EdgeInsets.all(8),
-                child: Row(
+                padding: const EdgeInsets.all(9),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    UserAvatar(user: story.author, size: 26),
-                    const SizedBox(width: 7),
-                    Expanded(
-                      child: Text(
-                        story.author.displayLabel,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w800,
-                          fontSize: 12,
+                    Row(
+                      children: [
+                        UserAvatar(user: story.author, size: 26),
+                        const SizedBox(width: 7),
+                        Expanded(
+                          child: Text(
+                            story.author.displayLabel,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w800,
+                              fontSize: 12,
+                            ),
+                          ),
                         ),
-                      ),
+                      ],
                     ),
+                    if (story.caption.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        story.caption,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(color: palette.muted, fontSize: 11),
+                      ),
+                    ],
+                    if (story.hasMusic) ...[
+                      const SizedBox(height: 6),
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.music_note_rounded,
+                            size: 14,
+                            color: palette.cyan,
+                          ),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              story.musicLabel.isEmpty
+                                  ? 'Story music'
+                                  : story.musicLabel,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w800,
+                                fontSize: 11,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -2316,7 +2559,7 @@ Future<void> showStoryViewer(
     attachmentName: story.caption.isEmpty ? 'Story' : story.caption,
   );
   if (!context.mounted) return;
-  await showMediaViewer(context, message, state);
+  await showMediaViewer(context, message, state, story: story);
 }
 
 class ProfileHome extends StatelessWidget {
@@ -2953,8 +3196,11 @@ class MobileNavigationSheet extends StatelessWidget {
               const Expanded(child: SectionLabel('Voice rooms')),
               if (state.canManageChannels)
                 TextButton.icon(
-                  onPressed: () =>
-                      showCreateChannelDialog(context, state, ChannelKind.voice),
+                  onPressed: () => showCreateChannelDialog(
+                    context,
+                    state,
+                    ChannelKind.voice,
+                  ),
                   icon: const Icon(Icons.add_rounded, size: 18),
                   label: const Text('Create'),
                 ),
@@ -5119,12 +5365,14 @@ Future<void> showEditMessageDialog(
 Future<void> showMediaViewer(
   BuildContext context,
   ChatMessage message,
-  WebCordState state,
-) {
+  WebCordState state, {
+  StoryItem? story,
+}) {
   return showDialog<void>(
     context: context,
     barrierColor: Colors.black.withAlpha(235),
-    builder: (context) => MediaViewerDialog(message: message, state: state),
+    builder: (context) =>
+        MediaViewerDialog(message: message, state: state, story: story),
   );
 }
 
@@ -5132,11 +5380,13 @@ class MediaViewerDialog extends StatefulWidget {
   const MediaViewerDialog({
     required this.message,
     required this.state,
+    this.story,
     super.key,
   });
 
   final ChatMessage message;
   final WebCordState state;
+  final StoryItem? story;
 
   @override
   State<MediaViewerDialog> createState() => _MediaViewerDialogState();
@@ -5198,6 +5448,17 @@ class _MediaViewerDialogState extends State<MediaViewerDialog> {
         child: Stack(
           children: [
             Positioned.fill(child: Center(child: _viewerBody())),
+            if (widget.story != null &&
+                (widget.story!.caption.isNotEmpty || widget.story!.hasMusic))
+              Positioned(
+                left: 14,
+                right: 14,
+                bottom: 14,
+                child: _StoryViewerInfo(
+                  story: widget.story!,
+                  state: widget.state,
+                ),
+              ),
             Positioned(
               left: 12,
               right: 12,
@@ -5282,6 +5543,57 @@ class _MediaViewerDialogState extends State<MediaViewerDialog> {
       Icons.insert_drive_file_rounded,
       color: Colors.white,
       size: 52,
+    );
+  }
+}
+
+class _StoryViewerInfo extends StatelessWidget {
+  const _StoryViewerInfo({required this.story, required this.state});
+
+  final StoryItem story;
+  final WebCordState state;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = WebCordPalette.of(context);
+    return Align(
+      alignment: Alignment.bottomCenter,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 560),
+        child: Panel(
+          padding: const EdgeInsets.all(14),
+          color: Colors.black.withAlpha(138),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (story.caption.isNotEmpty)
+                Text(
+                  story.caption,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 15,
+                  ),
+                ),
+              if (story.caption.isNotEmpty && story.hasMusic)
+                const SizedBox(height: 10),
+              if (story.hasMusic)
+                ProfileTrackPlayer(
+                  url: state.api.attachmentUri(story.musicUrl!).toString(),
+                  title: story.musicLabel.isEmpty
+                      ? 'Story music'
+                      : story.musicLabel,
+                ),
+              if (!story.hasMusic)
+                Text(
+                  '${story.viewCount} views',
+                  style: TextStyle(color: palette.muted, fontSize: 12),
+                ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
@@ -6009,6 +6321,8 @@ class SettingsDialog extends StatelessWidget {
                       secondary: const Icon(Icons.density_small_rounded),
                       title: const Text('Compact messages'),
                     ),
+                    const SizedBox(height: 8),
+                    _WallpaperSettingsPanel(state: state),
                     const SectionLabel('Media'),
                     SwitchListTile(
                       value: state.inlineMediaPreviews,
@@ -6506,6 +6820,114 @@ class _ProfileSettingsPanelState extends State<_ProfileSettingsPanel> {
   }
 }
 
+class _WallpaperSettingsPanel extends StatelessWidget {
+  const _WallpaperSettingsPanel({required this.state});
+
+  final WebCordState state;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = WebCordPalette.of(context);
+    final hasWallpaper = state.chatWallpaperPath.trim().isNotEmpty;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: palette.panelSoft,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: palette.border),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.wallpaper_rounded, color: palette.cyan),
+                const SizedBox(width: 10),
+                const Expanded(
+                  child: Text(
+                    'Chat wallpapers',
+                    style: TextStyle(fontWeight: FontWeight.w900),
+                  ),
+                ),
+                if (hasWallpaper)
+                  Icon(Icons.check_circle_rounded, color: palette.cyan),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Text(
+              hasWallpaper
+                  ? state.chatWallpaperPath
+                  : 'No wallpaper selected for the current chat.',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: palette.muted, fontSize: 12),
+            ),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                FilledButton.tonalIcon(
+                  onPressed: state.setCurrentChatWallpaper,
+                  icon: const Icon(Icons.chat_bubble_rounded, size: 18),
+                  label: const Text('Current chat'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: state.setGlobalChatWallpaper,
+                  icon: const Icon(Icons.public_rounded, size: 18),
+                  label: const Text('Global'),
+                ),
+                TextButton.icon(
+                  onPressed: state.clearCurrentChatWallpaper,
+                  icon: const Icon(Icons.cleaning_services_rounded, size: 18),
+                  label: const Text('Clear chat'),
+                ),
+                TextButton.icon(
+                  onPressed: state.clearGlobalChatWallpaper,
+                  icon: const Icon(Icons.layers_clear_rounded, size: 18),
+                  label: const Text('Clear global'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                const Icon(Icons.dark_mode_rounded, size: 18),
+                const SizedBox(width: 10),
+                const SizedBox(
+                  width: 86,
+                  child: Text(
+                    'Dim',
+                    style: TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                ),
+                Expanded(
+                  child: Slider(
+                    value: state.chatWallpaperDim.toDouble(),
+                    min: 0,
+                    max: 90,
+                    divisions: 18,
+                    onChanged: state.setChatWallpaperDim,
+                  ),
+                ),
+                SizedBox(
+                  width: 44,
+                  child: Text(
+                    '${state.chatWallpaperDim}%',
+                    textAlign: TextAlign.right,
+                    style: TextStyle(color: palette.muted),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _SettingsDeviceDropdown extends StatelessWidget {
   const _SettingsDeviceDropdown({
     required this.icon,
@@ -6643,6 +7065,7 @@ class _SettingsSlider extends StatelessWidget {
 
 IconData _themeIcon(AppThemeMode mode) {
   return switch (mode) {
+    AppThemeMode.liquid => Icons.blur_circular_rounded,
     AppThemeMode.nebula => Icons.auto_awesome_rounded,
     AppThemeMode.graphite => Icons.contrast_rounded,
     AppThemeMode.aurora => Icons.blur_on_rounded,

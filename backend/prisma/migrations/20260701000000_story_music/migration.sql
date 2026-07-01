@@ -1,0 +1,5 @@
+ALTER TABLE "Story"
+  ADD COLUMN "musicUrl" TEXT,
+  ADD COLUMN "musicTitle" TEXT NOT NULL DEFAULT '',
+  ADD COLUMN "musicArtist" TEXT NOT NULL DEFAULT '',
+  ADD COLUMN "musicAttachment" TEXT NOT NULL DEFAULT '';

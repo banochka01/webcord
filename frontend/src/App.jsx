@@ -49,7 +49,10 @@ const DEFAULT_CLIENT_SETTINGS = {
   notificationsEnabled: true,
   micDeviceId: '',
   cameraDeviceId: '',
-  outputDeviceId: ''
+  outputDeviceId: '',
+  chatWallpaper: '',
+  chatWallpaperName: '',
+  chatWallpaperDim: 42
 };
 const DEFAULT_VOICE_QUALITY = {
   label: 'Idle',
@@ -143,6 +146,25 @@ function splitTrackTitle(value = '') {
   const parts = clean.split(/\s+-\s+|\s+–\s+/).map((item) => item.trim()).filter(Boolean);
   if (parts.length >= 2) return { artist: parts[0], title: parts.slice(1).join(' - ') };
   return { title: clean, artist: 'Profile playlist' };
+}
+
+function getStoryMusicLabel(story = {}) {
+  const title = String(story.musicTitle || '').trim();
+  const artist = String(story.musicArtist || '').trim();
+  const attachment = String(story.musicAttachment || '').trim();
+  if (artist && title) return `${artist} - ${title}`;
+  if (title) return title;
+  if (artist) return artist;
+  return attachment || 'Story music';
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(reader.error || new Error('Could not read file'));
+    reader.readAsDataURL(file);
+  });
 }
 
 function getConversationTitle(conversation = {}) {
@@ -1321,6 +1343,8 @@ function StoriesPanel({ stories, user, loading, uploading, onCreateStory, onOpen
                 </span>
                 <span className="story-card-copy">
                   <strong>{getDisplayName(story.author)}</strong>
+                  {story.caption ? <small className="story-card-caption">{story.caption}</small> : null}
+                  {story.musicUrl ? <small className="story-card-music"><AppIcon name="music" size={12} />{getStoryMusicLabel(story)}</small> : null}
                   <small>{new Date(story.createdAt).toLocaleString([], { hour: '2-digit', minute: '2-digit' })}{story.viewed ? ' · viewed' : ''}</small>
                 </span>
               </button>
@@ -1363,7 +1387,79 @@ function StoryViewer({ story, stories, onClose, onNext, onPrev }) {
           {isVideo ? <video autoPlay controls playsInline src={url} /> : <img src={url} alt={story.caption || `${getDisplayName(story.author)} story`} />}
         </div>
         {story.caption ? <p className="story-caption">{story.caption}</p> : null}
+        {story.musicUrl ? (
+          <div className="story-music-player">
+            <span><AppIcon name="music" size={16} />{getStoryMusicLabel(story)}</span>
+            <audio controls src={getAttachmentUrl(story.musicUrl)} />
+          </div>
+        ) : null}
       </div>
+    </div>
+  );
+}
+
+function StoryComposerModal({
+  open,
+  draft,
+  uploading,
+  onClose,
+  onDraftChange,
+  onPickMedia,
+  onPickMusic,
+  onPublish
+}) {
+  if (!open) return null;
+  return (
+    <div className="story-composer-backdrop" role="dialog" aria-modal="true" onClick={onClose}>
+      <section className="story-composer" onClick={(event) => event.stopPropagation()}>
+        <div className="story-composer-top">
+          <div>
+            <span className="section-label">New story</span>
+            <h3>Moment with music</h3>
+          </div>
+          <button className="icon-btn" type="button" aria-label="Close" title="Close" onClick={onClose}><AppIcon name="close" /></button>
+        </div>
+        <label>
+          Description
+          <textarea
+            value={draft.caption}
+            maxLength={180}
+            rows={3}
+            placeholder="Short text for the story"
+            onChange={(event) => onDraftChange({ ...draft, caption: event.target.value.slice(0, 180) })}
+          />
+        </label>
+        <div className="story-composer-grid">
+          <label>
+            Music title
+            <input
+              value={draft.musicTitle}
+              maxLength={96}
+              placeholder="Track name"
+              onChange={(event) => onDraftChange({ ...draft, musicTitle: event.target.value.slice(0, 96) })}
+            />
+          </label>
+          <label>
+            Artist
+            <input
+              value={draft.musicArtist}
+              maxLength={96}
+              placeholder="Artist"
+              onChange={(event) => onDraftChange({ ...draft, musicArtist: event.target.value.slice(0, 96) })}
+            />
+          </label>
+        </div>
+        <div className="story-file-picks">
+          <button type="button" onClick={onPickMedia}><AppIcon name="story" size={16} />{draft.mediaFile ? draft.mediaFile.name : 'Choose photo/video'}</button>
+          <button className="ghost-btn" type="button" onClick={onPickMusic}><AppIcon name="music" size={16} />{draft.musicFile ? draft.musicFile.name : 'Attach music'}</button>
+        </div>
+        <div className="settings-actions-row">
+          <button className="ghost-btn" type="button" onClick={onClose}>Cancel</button>
+          <button className="primary-btn" type="button" disabled={uploading || !draft.mediaFile} onClick={onPublish}>
+            {uploading ? 'Publishing...' : 'Publish story'}
+          </button>
+        </div>
+      </section>
     </div>
   );
 }
@@ -1856,6 +1952,9 @@ function SettingsModal({
   onDeleteFolder,
   onToggleFolderChannel,
   onToggleFolderFriend,
+  onUploadChatWallpaper,
+  onClearChatWallpaper,
+  onChatWallpaperDimChange,
   onLogout
 }) {
   if (!open) return null;
@@ -2077,6 +2176,27 @@ function SettingsModal({
               {['bg', 'panel', 'accent', 'text'].map((key) => (
                 <label key={key}>{key}<input type="color" value={theme[key]} onChange={(e) => onThemeChange({ ...theme, [key]: e.target.value })} /></label>
               ))}
+            </div>
+            <div className="settings-card-list wallpaper-settings">
+              <div className="settings-row">
+                <span>Chat wallpaper</span>
+                <strong>{clientSettings.chatWallpaperName || 'Not set'}</strong>
+              </div>
+              <label className="settings-slider">
+                Wallpaper dim
+                <span>{Number(clientSettings.chatWallpaperDim ?? 42)}%</span>
+                <input
+                  type="range"
+                  min="0"
+                  max="90"
+                  value={Number(clientSettings.chatWallpaperDim ?? 42)}
+                  onChange={(e) => onChatWallpaperDimChange(Number(e.target.value))}
+                />
+              </label>
+              <div className="settings-actions-row">
+                <button type="button" onClick={onUploadChatWallpaper}>Choose Wallpaper</button>
+                <button className="ghost-btn" type="button" onClick={onClearChatWallpaper}>Clear Wallpaper</button>
+              </div>
             </div>
             <button className="ghost-btn" type="button" onClick={onThemeReset}>Reset Theme</button>
           </div>
@@ -2324,6 +2444,14 @@ export default function App() {
   const [storiesLoading, setStoriesLoading] = useState(false);
   const [stories, setStories] = useState([]);
   const [activeStoryId, setActiveStoryId] = useState(null);
+  const [showStoryComposer, setShowStoryComposer] = useState(false);
+  const [storyDraft, setStoryDraft] = useState({
+    caption: '',
+    musicTitle: '',
+    musicArtist: '',
+    mediaFile: null,
+    musicFile: null
+  });
   const [voiceRecording, setVoiceRecording] = useState(false);
   const [circleRecording, setCircleRecording] = useState(false);
   const [recordingElapsed, setRecordingElapsed] = useState(0);
@@ -2371,6 +2499,8 @@ export default function App() {
   const bannerInputRef = useRef(null);
   const trackInputRef = useRef(null);
   const storyInputRef = useRef(null);
+  const storyMusicInputRef = useRef(null);
+  const wallpaperInputRef = useRef(null);
   const peersRef = useRef({});
   const localStreamRef = useRef(null);
   const rawLocalStreamRef = useRef(null);
@@ -2432,6 +2562,12 @@ export default function App() {
     return `${getConversationTitle(conversation)} ${getConversationSubtitle(conversation)} ${conversation.user?.username || ''} ${conversation.user?.statusText || ''} ${conversation.lastMessage?.content || ''} ${conversation.lastMessage?.attachmentName || ''}`.toLowerCase().includes(query);
   });
   const activeStory = stories.find((story) => String(story.id) === String(activeStoryId)) || null;
+  const chatWallpaperStyle = clientSettings.chatWallpaper
+    ? {
+        '--chat-wallpaper': `url("${clientSettings.chatWallpaper}")`,
+        '--chat-wallpaper-dim': Math.min(0.9, Math.max(0, Number(clientSettings.chatWallpaperDim ?? 42) / 100))
+      }
+    : undefined;
   const incomingRequests = social.requests.filter((item) => item.direction === 'INCOMING' && item.status === 'PENDING');
   const outgoingRequests = social.requests.filter((item) => item.direction === 'OUTGOING' && item.status === 'PENDING');
   const peerConfig = useMemo(
@@ -3261,27 +3397,72 @@ export default function App() {
     pushToast('Profile track file removed');
   }
 
-  async function uploadStoryFile(file) {
-    if (!file || !token) return;
+  function openStoryComposer() {
+    setStoryDraft({
+      caption: '',
+      musicTitle: '',
+      musicArtist: '',
+      mediaFile: null,
+      musicFile: null
+    });
+    setShowStoryComposer(true);
+  }
+
+  function selectStoryMedia(file) {
+    if (!file) return;
     if (!isStoryFile(file)) {
       setError('Choose an image or video for stories');
       if (storyInputRef.current) storyInputRef.current.value = '';
+      return;
+    }
+    setStoryDraft((prev) => ({ ...prev, mediaFile: file }));
+    if (storyInputRef.current) storyInputRef.current.value = '';
+  }
+
+  function selectStoryMusic(file) {
+    if (!file) return;
+    if (!isAudioFile(file)) {
+      setError('Choose an audio file for story music');
+      if (storyMusicInputRef.current) storyMusicInputRef.current.value = '';
+      return;
+    }
+    setStoryDraft((prev) => ({
+      ...prev,
+      musicFile: file,
+      musicTitle: prev.musicTitle || file.name.replace(/\.[^.]+$/, '')
+    }));
+    if (storyMusicInputRef.current) storyMusicInputRef.current.value = '';
+  }
+
+  async function publishStoryDraft() {
+    if (!token || !storyDraft.mediaFile) {
+      setError('Choose an image or video for the story');
       return;
     }
 
     try {
       setStoryUploading(true);
       const formData = new FormData();
-      formData.append('file', file);
+      formData.append('file', storyDraft.mediaFile);
       const uploaded = await apiFetch('/upload', { method: 'POST', body: formData }, token);
+      let uploadedMusic = null;
+      if (storyDraft.musicFile) {
+        const musicForm = new FormData();
+        musicForm.append('file', storyDraft.musicFile);
+        uploadedMusic = await apiFetch('/upload', { method: 'POST', body: musicForm }, token);
+      }
       const story = await apiFetch(
         '/stories',
         {
           method: 'POST',
           body: JSON.stringify({
             mediaUrl: uploaded.url,
-            mediaType: getStoryMediaType(file),
-            caption: ''
+            mediaType: getStoryMediaType(storyDraft.mediaFile),
+            caption: storyDraft.caption,
+            musicUrl: uploadedMusic?.url || null,
+            musicTitle: storyDraft.musicTitle,
+            musicArtist: storyDraft.musicArtist,
+            musicAttachment: uploadedMusic?.name || ''
           })
         },
         token
@@ -3289,12 +3470,41 @@ export default function App() {
       setStories((prev) => [story, ...prev.filter((item) => String(item.id) !== String(story.id))]);
       setWorkspace('stories');
       setActiveStoryId(story.id);
+      setShowStoryComposer(false);
       pushToast('Story published');
     } catch (err) {
       reportError(err, 'Could not publish story');
     } finally {
       setStoryUploading(false);
       if (storyInputRef.current) storyInputRef.current.value = '';
+      if (storyMusicInputRef.current) storyMusicInputRef.current.value = '';
+    }
+  }
+
+  async function uploadChatWallpaper(file) {
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      setError('Choose an image for chat wallpaper');
+      if (wallpaperInputRef.current) wallpaperInputRef.current.value = '';
+      return;
+    }
+    if (file.size > 4 * 1024 * 1024) {
+      setError('Wallpaper must be 4 MB or smaller for browser storage');
+      if (wallpaperInputRef.current) wallpaperInputRef.current.value = '';
+      return;
+    }
+    try {
+      const chatWallpaper = await readFileAsDataUrl(file);
+      setClientSettings((prev) => ({
+        ...prev,
+        chatWallpaper,
+        chatWallpaperName: file.name
+      }));
+      pushToast('Chat wallpaper updated');
+    } catch (err) {
+      reportError(err, 'Could not load wallpaper');
+    } finally {
+      if (wallpaperInputRef.current) wallpaperInputRef.current.value = '';
     }
   }
 
@@ -4579,7 +4789,9 @@ export default function App() {
       <input ref={avatarInputRef} type="file" accept="image/*" hidden onChange={(e) => uploadProfileAsset('avatar', e.target.files?.[0])} />
       <input ref={bannerInputRef} type="file" accept="image/*" hidden onChange={(e) => uploadProfileAsset('banner', e.target.files?.[0])} />
       <input ref={trackInputRef} type="file" accept="audio/*,.mp3,.m4a,.aac,.ogg,.oga,.opus,.wav,.flac,.webm" hidden onChange={(e) => uploadProfileTrack(e.target.files?.[0])} />
-      <input ref={storyInputRef} type="file" accept="image/*,video/*,.webp,.avif,.mp4,.webm,.mov,.m4v" hidden onChange={(e) => uploadStoryFile(e.target.files?.[0])} />
+      <input ref={storyInputRef} type="file" accept="image/*,video/*,.webp,.avif,.mp4,.webm,.mov,.m4v" hidden onChange={(e) => selectStoryMedia(e.target.files?.[0])} />
+      <input ref={storyMusicInputRef} type="file" accept="audio/*,.mp3,.m4a,.aac,.ogg,.oga,.opus,.wav,.flac,.webm" hidden onChange={(e) => selectStoryMusic(e.target.files?.[0])} />
+      <input ref={wallpaperInputRef} type="file" accept="image/*" hidden onChange={(e) => uploadChatWallpaper(e.target.files?.[0])} />
       {isDesktopShell ? <DesktopTitleBar user={user} onOpenSettings={() => setShowSettingsModal(true)} onWindowAction={handleWindowAction} /> : null}
       <div className={mobileSidebarOpen ? 'mobile-overlay active' : 'mobile-overlay'} onClick={() => setMobileSidebarOpen(false)} />
 
@@ -4618,7 +4830,7 @@ export default function App() {
             activeFolder={activeMobileFolderId}
             customFolders={customFolders}
             search={mobileChatSearch}
-            onCreateStory={() => storyInputRef.current?.click()}
+            onCreateStory={openStoryComposer}
             onOpenStory={(story) => openStory(story)}
             onFolderChange={selectMobileFolder}
             onSearchChange={(value) => {
@@ -4723,7 +4935,7 @@ export default function App() {
             <div className="stack">
               <section className="sidebar-card">
                 <p className="section-label">Stories</p>
-                <button type="button" onClick={() => storyInputRef.current?.click()}><AppIcon name="plus" size={16} />Add story</button>
+                <button type="button" onClick={openStoryComposer}><AppIcon name="plus" size={16} />Add story</button>
                 <p className="muted empty-copy">{stories.length} active stories from you and friends.</p>
               </section>
               <section className="sidebar-card">
@@ -4818,7 +5030,7 @@ export default function App() {
               user={user}
               loading={storiesLoading}
               uploading={storyUploading}
-              onCreateStory={() => storyInputRef.current?.click()}
+              onCreateStory={openStoryComposer}
               onOpenStory={(story) => openStory(story)}
               onRefresh={() => refreshStories().catch((err) => setError(err.message))}
             />
@@ -4835,7 +5047,7 @@ export default function App() {
             </div>
           ) : (
             <>
-              <div className="messages" ref={messagesRef} onScroll={handleMessagesScroll}>
+              <div className="messages" ref={messagesRef} style={chatWallpaperStyle} onScroll={handleMessagesScroll}>
                 {messages.length === 0 ? <div className="empty-state"><h3>{workspace === 'dm' ? 'No direct messages yet' : 'No messages yet'}</h3><p className="muted">{workspace === 'dm' ? 'This thread is ready.' : 'Start the conversation in this channel.'}</p></div> : messages.map((message) => <MessageItem key={message.id} message={message} workspace={workspace} currentUserId={user?.id} onAvatarClick={setViewedProfile} onReply={beginReply} onEdit={beginEdit} onDelete={deleteMessage} onReport={openReportForMessage} onOpenMedia={setViewedMedia} />)}
                 <div ref={endRef} />
               </div>
@@ -5031,6 +5243,9 @@ export default function App() {
         onDeleteFolder={deleteCustomFolder}
         onToggleFolderChannel={toggleFolderChannel}
         onToggleFolderFriend={toggleFolderFriend}
+        onUploadChatWallpaper={() => wallpaperInputRef.current?.click()}
+        onClearChatWallpaper={() => setClientSettings((prev) => ({ ...prev, chatWallpaper: '', chatWallpaperName: '' }))}
+        onChatWallpaperDimChange={(value) => setClientSettings((prev) => ({ ...prev, chatWallpaperDim: value }))}
         onLogout={handleLogout}
       />
       <UserProfileModal
@@ -5048,6 +5263,16 @@ export default function App() {
       <ReportModal target={reportTarget} onClose={() => setReportTarget(null)} onSubmit={(payload) => submitReport(payload)} />
       <MediaViewer message={viewedMedia} onClose={() => setViewedMedia(null)} />
       <StoryViewer story={activeStory} stories={stories} onClose={() => setActiveStoryId(null)} onNext={() => stepStory(1)} onPrev={() => stepStory(-1)} />
+      <StoryComposerModal
+        open={showStoryComposer}
+        draft={storyDraft}
+        uploading={storyUploading}
+        onClose={() => setShowStoryComposer(false)}
+        onDraftChange={setStoryDraft}
+        onPickMedia={() => storyInputRef.current?.click()}
+        onPickMusic={() => storyMusicInputRef.current?.click()}
+        onPublish={() => publishStoryDraft()}
+      />
     </>
   );
 }

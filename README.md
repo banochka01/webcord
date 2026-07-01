@@ -2,6 +2,8 @@
 
 WebCord is a Discord-like web chat with channels, direct messages, friends, file uploads, voice rooms, screen sharing support, and a dark responsive client UI.
 
+The primary installable clients are the Flutter native Windows and Android builds in `clients/webcord_native`. They authenticate through the WebCord API directly and are not PWA/WebView wrappers. Electron, Tauri and Capacitor scripts remain in the repository as legacy shells around the web UI.
+
 The canonical project logo is `webcord.png` in the repository root. The web favicon/PWA icons, Tauri/Electron icon, Android launcher icon, and Android splash assets are generated from that source image.
 
 ## Stack

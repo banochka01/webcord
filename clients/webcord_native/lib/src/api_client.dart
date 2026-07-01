@@ -297,17 +297,11 @@ class WebCordApi {
     return DirectConversation.fromJson(json);
   }
 
-  Future<void> blockUser({
-    required String token,
-    required int userId,
-  }) async {
+  Future<void> blockUser({required String token, required int userId}) async {
     await _send('POST', '/users/$userId/block', token: token);
   }
 
-  Future<void> unblockUser({
-    required String token,
-    required int userId,
-  }) async {
+  Future<void> unblockUser({required String token, required int userId}) async {
     await _send('DELETE', '/users/$userId/block', token: token);
   }
 
@@ -406,12 +400,26 @@ class WebCordApi {
     required String mediaUrl,
     required String mediaType,
     String caption = '',
+    String? musicUrl,
+    String musicTitle = '',
+    String musicArtist = '',
+    String musicAttachment = '',
   }) async {
     final json = await _send(
       'POST',
       '/stories',
       token: token,
-      body: {'mediaUrl': mediaUrl, 'mediaType': mediaType, 'caption': caption},
+      body: {
+        'mediaUrl': mediaUrl,
+        'mediaType': mediaType,
+        'caption': caption,
+        if (musicUrl != null && musicUrl.trim().isNotEmpty)
+          'musicUrl': musicUrl.trim(),
+        if (musicTitle.trim().isNotEmpty) 'musicTitle': musicTitle.trim(),
+        if (musicArtist.trim().isNotEmpty) 'musicArtist': musicArtist.trim(),
+        if (musicAttachment.trim().isNotEmpty)
+          'musicAttachment': musicAttachment.trim(),
+      },
     );
     return StoryItem.fromJson(json);
   }

@@ -319,9 +319,9 @@ class SocialSnapshot {
       ).map(DirectConversation.fromJson).toList(),
       blockedUserIds: data['blockedUserIds'] is List
           ? (data['blockedUserIds'] as List)
-              .map(_asInt)
-              .where((id) => id > 0)
-              .toList()
+                .map(_asInt)
+                .where((id) => id > 0)
+                .toList()
           : const [],
     );
   }
@@ -370,6 +370,10 @@ class StoryItem {
     required this.author,
     required this.createdAt,
     required this.expiresAt,
+    this.musicUrl,
+    this.musicTitle = '',
+    this.musicArtist = '',
+    this.musicAttachment = '',
     this.viewed = false,
     this.viewCount = 0,
   });
@@ -381,10 +385,23 @@ class StoryItem {
   final PublicUser author;
   final DateTime createdAt;
   final DateTime expiresAt;
+  final String? musicUrl;
+  final String musicTitle;
+  final String musicArtist;
+  final String musicAttachment;
   final bool viewed;
   final int viewCount;
 
   bool get isVideo => kind == StoryKind.video;
+  bool get hasMusic => musicUrl != null && musicUrl!.isNotEmpty;
+  String get musicLabel {
+    final title = musicTitle.trim();
+    final artist = musicArtist.trim();
+    if (title.isEmpty && artist.isEmpty) return musicAttachment;
+    if (artist.isEmpty) return title;
+    if (title.isEmpty) return artist;
+    return '$artist - $title';
+  }
 
   factory StoryItem.fromJson(Map<String, dynamic> json) {
     final rawType = '${json['mediaType'] ?? 'IMAGE'}'.toUpperCase();
@@ -396,6 +413,10 @@ class StoryItem {
       author: PublicUser.fromJson(json['author'] as Map<String, dynamic>?),
       createdAt: _asDate(json['createdAt']),
       expiresAt: _asDate(json['expiresAt']),
+      musicUrl: _asNullableString(json['musicUrl']),
+      musicTitle: '${json['musicTitle'] ?? ''}',
+      musicArtist: '${json['musicArtist'] ?? ''}',
+      musicAttachment: '${json['musicAttachment'] ?? ''}',
       viewed: _asBool(json['viewed']),
       viewCount: _asInt(json['viewCount']),
     );

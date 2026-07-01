@@ -664,6 +664,10 @@ function serializeStory(story, currentUserId) {
     caption: story.caption || '',
     mediaUrl: story.mediaUrl,
     mediaType: story.mediaType || 'IMAGE',
+    musicUrl: story.musicUrl || null,
+    musicTitle: story.musicTitle || '',
+    musicArtist: story.musicArtist || '',
+    musicAttachment: story.musicAttachment || '',
     createdAt: story.createdAt,
     expiresAt: story.expiresAt,
     author: serializePublicUser(story.author),
@@ -680,6 +684,16 @@ function normalizeStoryMediaType(value, mediaUrl = '') {
     return 'VIDEO';
   }
   return 'IMAGE';
+}
+
+function sanitizeStoryMusicPayload(body = {}) {
+  const musicUrl = String(body.musicUrl || '').trim();
+  return {
+    musicUrl: musicUrl || null,
+    musicTitle: String(body.musicTitle || '').trim().slice(0, 96),
+    musicArtist: String(body.musicArtist || '').trim().slice(0, 96),
+    musicAttachment: String(body.musicAttachment || '').trim().slice(0, 128)
+  };
 }
 
 async function ensureBootstrapData() {
@@ -1674,6 +1688,7 @@ app.post('/api/stories', authMiddleware, async (req, res) => {
   try {
     const mediaUrl = String(req.body.mediaUrl || '').trim();
     const caption = String(req.body.caption || '').trim().slice(0, 180);
+    const music = sanitizeStoryMusicPayload(req.body);
     const mediaType = normalizeStoryMediaType(req.body.mediaType, mediaUrl);
     if (!mediaUrl) {
       return sendApiError(res, 400, 'STORY_MEDIA_REQUIRED', 'Story media is required');
@@ -1685,6 +1700,7 @@ app.post('/api/stories', authMiddleware, async (req, res) => {
         mediaUrl,
         mediaType,
         caption,
+        ...music,
         expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000)
       },
       include: {

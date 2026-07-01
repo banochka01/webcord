@@ -14,7 +14,8 @@ This is a real native Flutter application, not a PWA and not a WebView wrapper. 
 - Create text and voice channels.
 - Friend requests, accepting/declining requests, opening DMs.
 - File upload through native file selection and the existing `/api/upload` endpoint.
-- Native dark WebCord UI for desktop-width and phone-width layouts.
+- Native liquid-glass WebCord UI for desktop-width and phone-width layouts.
+- Local chat wallpapers with per-chat/global selection and dim control.
 - Full voice-room join/leave with WebRTC peer-to-peer microphone audio.
 - WebRTC camera sharing, screen sharing, remote media playback and voice signaling through the existing Socket.IO backend.
 - Voice quality layer: backend-provided STUN/TURN ICE config, Android communication audio mode, Opus SDP tuning, voice quality diagnostics and relay/direct route display.
@@ -25,6 +26,7 @@ This is a real native Flutter application, not a PWA and not a WebView wrapper. 
 - Voice messages: Android records `.m4a` through `MediaRecorder`; Windows records `.wav` through WinMM.
 - Video circles: Android opens native video capture; Windows uses a native video-file picker fallback.
 - In-app media viewing: images open in a zoomable fullscreen viewer; videos and circles play in-app with native controls; voice messages play inline in the chat bubble.
+- Stories support a text description and optional attached music track.
 
 Recorded voice messages and video circles are sent through the existing upload/message flow. Live voice/video/screen media uses `flutter_webrtc` and the backend `voice-offer`, `voice-answer` and `voice-ice-candidate` signaling events.
 

@@ -86,8 +86,9 @@ class WebCordState extends ChangeNotifier {
   static const _noiseSuppressionKey = 'webcord_native_noise_suppression';
   static const _notificationsKey = 'webcord_native_notifications';
   static const _compactMessagesKey = 'webcord_native_compact_messages';
-  static const _inlineMediaPreviewsKey =
-      'webcord_native_inline_media_previews';
+  static const _inlineMediaPreviewsKey = 'webcord_native_inline_media_previews';
+  static const _globalChatWallpaperKey = 'webcord_native_chat_wallpaper_global';
+  static const _chatWallpaperDimKey = 'webcord_native_chat_wallpaper_dim';
   static const _micDeviceKey = 'webcord_native_mic_device';
   static const _outputDeviceKey = 'webcord_native_output_device';
   static const _cameraDeviceKey = 'webcord_native_camera_device';
@@ -136,10 +137,11 @@ class WebCordState extends ChangeNotifier {
   AttachmentUpload? pendingAttachment;
   CallSession? activeCall;
   CallSession? incomingCall;
-  AppThemeMode themeMode = AppThemeMode.nebula;
+  AppThemeMode themeMode = AppThemeMode.liquid;
   String selectedMicDeviceId = '';
   String selectedOutputDeviceId = '';
   String selectedCameraDeviceId = '';
+  String chatWallpaperPath = '';
 
   bool initializing = true;
   bool busy = false;
@@ -160,6 +162,7 @@ class WebCordState extends ChangeNotifier {
   bool recordingVoice = false;
   int inputVolume = 100;
   int outputVolume = 100;
+  int chatWallpaperDim = 42;
   Duration voiceRecordingElapsed = Duration.zero;
   String socketStatus = 'offline';
   String voiceStatus = 'Voice idle';
@@ -307,6 +310,13 @@ class WebCordState extends ChangeNotifier {
     selectedOutputDeviceId = await _store?.getString(_outputDeviceKey) ?? '';
     selectedCameraDeviceId = await _store?.getString(_cameraDeviceKey) ?? '';
     themeMode = AppThemeMode.fromName(await _store?.getString(_themeModeKey));
+    chatWallpaperDim = _clampWallpaperDim(
+      await _store?.getInt(_chatWallpaperDimKey),
+    );
+    chatWallpaperPath =
+        await _store?.getString(_currentChatWallpaperKey) ??
+        await _store?.getString(_globalChatWallpaperKey) ??
+        '';
     inputVolume = _clampPercent(await _store?.getInt(_inputVolumeKey), 100);
     outputVolume = _clampPercent(await _store?.getInt(_outputVolumeKey), 100);
     noiseSuppressionEnabled = _storedFlag(
@@ -439,6 +449,7 @@ class WebCordState extends ChangeNotifier {
     if (selectedConversationId != null) {
       await _store?.setInt(_conversationKey, selectedConversationId!);
     }
+    await _loadCurrentChatWallpaper();
 
     _connectSocket(currentToken);
     unawaited(refreshMediaDevices());
@@ -547,9 +558,11 @@ class WebCordState extends ChangeNotifier {
   Future<void> selectWorkspace(WorkspaceKind next) async {
     workspace = next;
     if (next == WorkspaceKind.server) {
+      await _loadCurrentChatWallpaper();
       await loadChannelMessages(selectedTextChannelId);
       _joinRooms();
     } else if (next == WorkspaceKind.direct && selectedConversationId != null) {
+      await _loadCurrentChatWallpaper();
       await loadDirectMessages(selectedConversationId!);
       _joinRooms();
     } else if (next == WorkspaceKind.stories) {
@@ -574,6 +587,7 @@ class WebCordState extends ChangeNotifier {
     workspace = WorkspaceKind.server;
     selectedTextChannelId = channelId;
     await _store?.setInt(_textChannelKey, channelId);
+    await _loadCurrentChatWallpaper();
     _joinRooms();
     await loadChannelMessages(channelId);
   }
@@ -592,6 +606,7 @@ class WebCordState extends ChangeNotifier {
     workspace = WorkspaceKind.direct;
     selectedConversationId = conversationId;
     await _store?.setInt(_conversationKey, conversationId);
+    await _loadCurrentChatWallpaper();
     _joinRooms();
     await loadDirectMessages(conversationId);
   }
@@ -952,7 +967,10 @@ class WebCordState extends ChangeNotifier {
     });
   }
 
-  Future<void> reportUser(PublicUser targetUser, {String reason = 'Other'}) async {
+  Future<void> reportUser(
+    PublicUser targetUser, {
+    String reason = 'Other',
+  }) async {
     final currentToken = token;
     if (currentToken == null || user?.id == targetUser.id) return;
     await _runBusy(() async {
@@ -966,7 +984,10 @@ class WebCordState extends ChangeNotifier {
     });
   }
 
-  Future<void> reportMessage(ChatMessage message, {String reason = 'Other'}) async {
+  Future<void> reportMessage(
+    ChatMessage message, {
+    String reason = 'Other',
+  }) async {
     final currentToken = token;
     if (currentToken == null || user?.id == message.author.id) return;
     await _runBusy(() async {
@@ -984,7 +1005,12 @@ class WebCordState extends ChangeNotifier {
     });
   }
 
-  Future<void> createStoryFromFile({String caption = ''}) async {
+  Future<void> createStoryFromFile({
+    String caption = '',
+    String musicTitle = '',
+    String musicArtist = '',
+    bool attachMusic = false,
+  }) async {
     final currentToken = token;
     if (currentToken == null || uploading) return;
 
@@ -1005,11 +1031,28 @@ class WebCordState extends ChangeNotifier {
         error = 'Stories support photos and videos';
         return;
       }
+      AttachmentUpload? musicUpload;
+      if (attachMusic ||
+          musicTitle.trim().isNotEmpty ||
+          musicArtist.trim().isNotEmpty) {
+        final musicPath = await NativeBridge.pickFile();
+        if (musicPath != null) {
+          if (!_looksLikeAudioFile(musicPath)) {
+            error = 'Choose an audio file for story music';
+            return;
+          }
+          musicUpload = await api.upload(currentToken, File(musicPath));
+        }
+      }
       final story = await api.createStory(
         token: currentToken,
         mediaUrl: uploaded.url,
         mediaType: mediaType,
         caption: caption.trim(),
+        musicUrl: musicUpload?.url,
+        musicTitle: musicTitle.trim(),
+        musicArtist: musicArtist.trim(),
+        musicAttachment: musicUpload?.name ?? '',
       );
       stories = [story, ...stories.where((item) => item.id != story.id)];
     } catch (exception) {
@@ -1036,6 +1079,10 @@ class WebCordState extends ChangeNotifier {
                   author: item.author,
                   createdAt: item.createdAt,
                   expiresAt: item.expiresAt,
+                  musicUrl: item.musicUrl,
+                  musicTitle: item.musicTitle,
+                  musicArtist: item.musicArtist,
+                  musicAttachment: item.musicAttachment,
                   viewed: true,
                   viewCount: item.viewCount,
                 )
@@ -1220,6 +1267,30 @@ class WebCordState extends ChangeNotifier {
   Future<void> setThemeMode(AppThemeMode mode) async {
     themeMode = mode;
     await _store?.setString(_themeModeKey, mode.name);
+    notifyListeners();
+  }
+
+  Future<void> setGlobalChatWallpaper() async {
+    await _setChatWallpaper(_globalChatWallpaperKey);
+  }
+
+  Future<void> setCurrentChatWallpaper() async {
+    await _setChatWallpaper(_currentChatWallpaperKey);
+  }
+
+  Future<void> clearCurrentChatWallpaper() async {
+    await _store?.remove(_currentChatWallpaperKey);
+    await _loadCurrentChatWallpaper();
+  }
+
+  Future<void> clearGlobalChatWallpaper() async {
+    await _store?.remove(_globalChatWallpaperKey);
+    await _loadCurrentChatWallpaper();
+  }
+
+  Future<void> setChatWallpaperDim(double value) async {
+    chatWallpaperDim = value.round().clamp(0, 90).toInt();
+    await _store?.setInt(_chatWallpaperDimKey, chatWallpaperDim);
     notifyListeners();
   }
 
@@ -1934,15 +2005,19 @@ class WebCordState extends ChangeNotifier {
         );
       }
       params.addAll(desiredParams);
-      return params.entries.map((entry) => '${entry.key}=${entry.value}').join(
-        ';',
-      );
+      return params.entries
+          .map((entry) => '${entry.key}=${entry.value}')
+          .join(';');
     }
 
     if (fmtpIndex >= 0) {
-      lines[fmtpIndex] = 'a=fmtp:$payloadType ${mergedFmtpValue(lines[fmtpIndex])}';
+      lines[fmtpIndex] =
+          'a=fmtp:$payloadType ${mergedFmtpValue(lines[fmtpIndex])}';
     } else {
-      lines.insert(opusLineIndex + 1, 'a=fmtp:$payloadType ${mergedFmtpValue()}');
+      lines.insert(
+        opusLineIndex + 1,
+        'a=fmtp:$payloadType ${mergedFmtpValue()}',
+      );
     }
 
     return RTCSessionDescription(lines.join('\r\n'), description.type);
@@ -2800,6 +2875,41 @@ class WebCordState extends ChangeNotifier {
     return null;
   }
 
+  String get _currentChatWallpaperKey {
+    if (workspace == WorkspaceKind.direct && selectedConversationId != null) {
+      return 'webcord_native_chat_wallpaper_dm_$selectedConversationId';
+    }
+    if (workspace == WorkspaceKind.server && selectedTextChannelId != null) {
+      return 'webcord_native_chat_wallpaper_channel_$selectedTextChannelId';
+    }
+    return _globalChatWallpaperKey;
+  }
+
+  Future<void> _setChatWallpaper(String key) async {
+    try {
+      final path = await NativeBridge.pickFile();
+      if (path == null) return;
+      if (!_looksLikeImageFile(path)) {
+        error = 'Choose an image for chat wallpaper';
+        notifyListeners();
+        return;
+      }
+      await _store?.setString(key, path);
+      await _loadCurrentChatWallpaper();
+    } catch (exception) {
+      error = '$exception';
+      notifyListeners();
+    }
+  }
+
+  Future<void> _loadCurrentChatWallpaper() async {
+    chatWallpaperPath =
+        await _store?.getString(_currentChatWallpaperKey) ??
+        await _store?.getString(_globalChatWallpaperKey) ??
+        '';
+    notifyListeners();
+  }
+
   String _fileDisplayName(String path) {
     final normalized = path.replaceAll('\\', '/');
     final value = normalized.split('/').last.trim();
@@ -2818,5 +2928,9 @@ class WebCordState extends ChangeNotifier {
 
   int _clampPercent(int? value, int fallback) {
     return (value ?? fallback).clamp(0, 200).toInt();
+  }
+
+  int _clampWallpaperDim(int? value) {
+    return (value ?? 42).clamp(0, 90).toInt();
   }
 }

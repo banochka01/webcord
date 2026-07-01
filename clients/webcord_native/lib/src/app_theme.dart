@@ -1,6 +1,9 @@
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
 
 enum AppThemeMode {
+  liquid('Liquid Glass'),
   nebula('Nebula'),
   graphite('Graphite'),
   aurora('Aurora');
@@ -13,7 +16,7 @@ enum AppThemeMode {
     for (final mode in values) {
       if (mode.name == value) return mode;
     }
-    return AppThemeMode.nebula;
+    return AppThemeMode.liquid;
   }
 }
 
@@ -72,7 +75,7 @@ class WebCordPalette extends ThemeExtension<WebCordPalette> {
 
   static WebCordPalette of(BuildContext context) {
     return Theme.of(context).extension<WebCordPalette>() ??
-        palettes[AppThemeMode.nebula]!;
+        palettes[AppThemeMode.liquid]!;
   }
 
   @override
@@ -143,6 +146,28 @@ class WebCordPalette extends ThemeExtension<WebCordPalette> {
 }
 
 const palettes = <AppThemeMode, WebCordPalette>{
+  AppThemeMode.liquid: WebCordPalette(
+    bg: Color(0xFF060910),
+    bgAlt: Color(0xFF0B111D),
+    rail: Color(0xCC0B111D),
+    panel: Color(0xB8141B2A),
+    panelSoft: Color(0xA61B2638),
+    panelStrong: Color(0xE0222D41),
+    border: Color(0x42FFFFFF),
+    text: Color(0xFFF7FAFF),
+    muted: Color(0xFFB1BCD0),
+    accent: Color(0xFF70A7FF),
+    accentHot: Color(0xFF95C8FF),
+    cyan: Color(0xFF76E4FF),
+    danger: WebCordColors.danger,
+    success: WebCordColors.success,
+    backdrop: [
+      Color(0xFF05070C),
+      Color(0xFF0B1422),
+      Color(0xFF111C2C),
+      Color(0xFF182942),
+    ],
+  ),
   AppThemeMode.nebula: WebCordPalette(
     bg: WebCordColors.bg,
     bgAlt: WebCordColors.bgAlt,
@@ -211,7 +236,7 @@ const palettes = <AppThemeMode, WebCordPalette>{
   ),
 };
 
-ThemeData webCordTheme([AppThemeMode mode = AppThemeMode.nebula]) {
+ThemeData webCordTheme([AppThemeMode mode = AppThemeMode.liquid]) {
   final palette = palettes[mode]!;
   final scheme = ColorScheme.fromSeed(
     seedColor: palette.accent,
@@ -257,21 +282,58 @@ ThemeData webCordTheme([AppThemeMode mode = AppThemeMode.nebula]) {
     ),
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
-      fillColor: palette.bgAlt,
+      fillColor: palette.bgAlt.withAlpha(190),
       hintStyle: TextStyle(color: palette.muted.withAlpha(210)),
       contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
       border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(18),
         borderSide: BorderSide(color: palette.border),
       ),
       enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(18),
         borderSide: BorderSide(color: palette.border),
       ),
       focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(18),
         borderSide: BorderSide(color: palette.accent),
       ),
+    ),
+    filledButtonTheme: FilledButtonThemeData(
+      style: FilledButton.styleFrom(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+      ),
+    ),
+    outlinedButtonTheme: OutlinedButtonThemeData(
+      style: OutlinedButton.styleFrom(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        side: BorderSide(color: palette.border),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+      ),
+    ),
+    textButtonTheme: TextButtonThemeData(
+      style: TextButton.styleFrom(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      ),
+    ),
+    iconButtonTheme: IconButtonThemeData(
+      style: IconButton.styleFrom(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      ),
+    ),
+    navigationBarTheme: NavigationBarThemeData(
+      indicatorShape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(22),
+      ),
+      height: 72,
+    ),
+    pageTransitionsTheme: const PageTransitionsTheme(
+      builders: {
+        TargetPlatform.android: ZoomPageTransitionsBuilder(),
+        TargetPlatform.windows: FadeUpwardsPageTransitionsBuilder(),
+        TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+        TargetPlatform.macOS: CupertinoPageTransitionsBuilder(),
+      },
     ),
   );
 }
@@ -295,17 +357,9 @@ class AppBackdrop extends StatelessWidget {
       ),
       child: Stack(
         children: [
-          Positioned(
-            right: -120,
-            top: -80,
-            child: _Glow(size: 360, color: palette.accent.withAlpha(60)),
+          Positioned.fill(
+            child: CustomPaint(painter: _GlassVeilPainter(palette)),
           ),
-          Positioned(
-            left: -160,
-            bottom: -150,
-            child: _Glow(size: 420, color: palette.cyan.withAlpha(32)),
-          ),
-          Positioned.fill(child: CustomPaint(painter: _StarsPainter())),
           child,
         ],
       ),
@@ -328,22 +382,29 @@ class Panel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final palette = WebCordPalette.of(context);
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: (color == WebCordColors.panel ? palette.panel : color).withAlpha(
-          238,
-        ),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: palette.border),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x66000000),
-            blurRadius: 28,
-            offset: Offset(0, 18),
+    final panelColor = color == WebCordColors.panel ? palette.panel : color;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(24),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 22, sigmaY: 22),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOutCubic,
+          decoration: BoxDecoration(
+            color: panelColor.withAlpha(206),
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: palette.border),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x4D000000),
+                blurRadius: 34,
+                offset: Offset(0, 22),
+              ),
+            ],
           ),
-        ],
+          child: Padding(padding: padding, child: child),
+        ),
       ),
-      child: Padding(padding: padding, child: child),
     );
   }
 }
@@ -371,44 +432,35 @@ class SectionLabel extends StatelessWidget {
   }
 }
 
-class _Glow extends StatelessWidget {
-  const _Glow({required this.size, required this.color});
+class _GlassVeilPainter extends CustomPainter {
+  const _GlassVeilPainter(this.palette);
 
-  final double size;
-  final Color color;
+  final WebCordPalette palette;
 
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        gradient: RadialGradient(colors: [color, color.withAlpha(0)]),
-      ),
-    );
-  }
-}
-
-class _StarsPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
-    final paint = Paint()..color = Colors.white.withAlpha(80);
-    final points = <Offset>[
-      Offset(size.width * .08, size.height * .16),
-      Offset(size.width * .18, size.height * .64),
-      Offset(size.width * .36, size.height * .22),
-      Offset(size.width * .52, size.height * .12),
-      Offset(size.width * .72, size.height * .68),
-      Offset(size.width * .91, size.height * .24),
-      Offset(size.width * .82, size.height * .48),
-      Offset(size.width * .42, size.height * .83),
-    ];
-    for (final point in points) {
-      canvas.drawCircle(point, 1.6, paint);
+    final topLine = Paint()
+      ..color = Colors.white.withAlpha(18)
+      ..strokeWidth = 1;
+    for (var index = 0; index < 9; index += 1) {
+      final y = size.height * (index / 8);
+      canvas.drawLine(Offset(0, y), Offset(size.width, y + 34), topLine);
     }
+
+    final wash = Paint()
+      ..shader = LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: [
+          palette.accent.withAlpha(28),
+          Colors.transparent,
+          palette.cyan.withAlpha(16),
+        ],
+      ).createShader(Offset.zero & size);
+    canvas.drawRect(Offset.zero & size, wash);
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+  bool shouldRepaint(covariant _GlassVeilPainter oldDelegate) =>
+      oldDelegate.palette != palette;
 }
