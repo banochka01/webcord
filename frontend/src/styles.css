@@ -22,11 +22,14 @@
   --radius: 8px;
   --shadow: 0 22px 82px rgba(0, 0, 0, 0.52);
   --shadow-lift: 0 18px 48px rgba(0, 0, 0, 0.32), 0 0 0 1px rgba(255, 255, 255, 0.045);
-  --motion-fast: 150ms;
-  --motion-base: 220ms;
-  --motion-slow: 360ms;
+  --shadow-glow: 0 18px 52px color-mix(in srgb, var(--accent-color) 18%, transparent);
+  --focus-ring: 0 0 0 3px color-mix(in srgb, var(--accent-color) 32%, transparent), 0 0 0 1px color-mix(in srgb, var(--accent-cool) 52%, transparent);
+  --motion-fast: 180ms;
+  --motion-base: 280ms;
+  --motion-slow: 520ms;
   --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
   --ease-spring: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-smooth: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 * {
@@ -45,14 +48,16 @@ body {
   background:
     linear-gradient(135deg, rgba(79, 124, 255, 0.12), transparent 28%),
     linear-gradient(180deg, #090d14, var(--app-bg) 46%, #05070a);
+  background-size: 180% 180%, auto;
   font: 14px/1.45 Inter, "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
   letter-spacing: 0;
+  animation: body-ambient 20s var(--ease-smooth) infinite alternate;
 }
 
 body::before {
   content: "";
   position: fixed;
-  inset: 0;
+  inset: -12%;
   z-index: -1;
   pointer-events: none;
   background:
@@ -60,6 +65,23 @@ body::before {
     linear-gradient(180deg, rgba(255, 255, 255, 0.018) 1px, transparent 1px);
   background-size: 52px 52px;
   mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.68), transparent 76%);
+  animation: grid-drift 28s linear infinite;
+}
+
+body::after {
+  content: "";
+  position: fixed;
+  inset: -24% -14%;
+  z-index: -2;
+  pointer-events: none;
+  background:
+    linear-gradient(120deg, transparent 8%, rgba(79, 124, 255, 0.14) 24%, transparent 44%),
+    linear-gradient(245deg, transparent 18%, rgba(32, 231, 176, 0.09) 38%, transparent 56%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent 48%);
+  filter: blur(10px);
+  opacity: 0.78;
+  transform: translate3d(0, 0, 0);
+  animation: ambient-flow 18s var(--ease-smooth) infinite alternate;
 }
 
 button,
@@ -88,17 +110,18 @@ button {
   padding: 8px 12px;
   cursor: pointer;
   font-weight: 700;
-  transition: transform var(--motion-fast) var(--ease-out), background var(--motion-fast) ease, border-color var(--motion-fast) ease, color var(--motion-fast) ease, box-shadow var(--motion-fast) ease, opacity var(--motion-fast) ease;
+  transition: transform var(--motion-fast) var(--ease-smooth), background var(--motion-fast) ease, border-color var(--motion-fast) ease, color var(--motion-fast) ease, box-shadow var(--motion-fast) ease, opacity var(--motion-fast) ease, filter var(--motion-fast) ease;
 }
 
 button:hover {
   border-color: var(--border-strong);
   background: var(--surface-3);
   transform: translateY(-1px);
+  filter: brightness(1.04);
 }
 
 button:active {
-  transform: translateY(0) scale(0.98);
+  transform: translateY(0) scale(0.985);
 }
 
 button:disabled {
@@ -123,6 +146,20 @@ select:focus,
 textarea:focus {
   border-color: color-mix(in srgb, var(--accent-color) 78%, white 8%);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-color) 22%, transparent);
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[role="tab"]:focus-visible,
+.channel-btn:focus-visible,
+.conversation-btn:focus-visible,
+.rail-btn:focus-visible,
+.message-card:focus-within {
+  outline: none;
+  box-shadow: var(--focus-ring) !important;
 }
 
 textarea {
@@ -156,9 +193,45 @@ a {
   }
 }
 
+@keyframes mobile-drawer-in {
+  from {
+    opacity: 0;
+    transform: translateX(28px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
 @keyframes fade-in {
   from { opacity: 0; }
   to { opacity: 1; }
+}
+
+@keyframes grid-drift {
+  from { transform: translate3d(0, 0, 0); }
+  to { transform: translate3d(52px, 52px, 0); }
+}
+
+@keyframes body-ambient {
+  from { background-position: 0% 0%, 0 0; }
+  to { background-position: 100% 26%, 0 0; }
+}
+
+@keyframes ambient-flow {
+  0% {
+    transform: translate3d(-2%, -1%, 0) scale(1);
+    opacity: 0.58;
+  }
+  50% {
+    transform: translate3d(2%, 1.5%, 0) scale(1.03);
+    opacity: 0.82;
+  }
+  100% {
+    transform: translate3d(4%, -1%, 0) scale(1.01);
+    opacity: 0.68;
+  }
 }
 
 @keyframes message-pop {
@@ -170,6 +243,11 @@ a {
     opacity: 1;
     transform: translateY(0) scale(1);
   }
+}
+
+@keyframes surface-shimmer {
+  from { background-position: 0% 50%; }
+  to { background-position: 100% 50%; }
 }
 
 @keyframes ring-pulse {
@@ -281,11 +359,12 @@ p {
 .custom-audio-player,
 .folder-editor-card {
   transition:
-    transform var(--motion-base) var(--ease-out),
+    transform var(--motion-base) var(--ease-smooth),
     background var(--motion-base) ease,
     border-color var(--motion-base) ease,
     box-shadow var(--motion-base) ease,
-    opacity var(--motion-base) ease;
+    opacity var(--motion-base) ease,
+    filter var(--motion-base) ease;
 }
 
 .sidebar-card:hover,
@@ -299,6 +378,13 @@ p {
   box-shadow: var(--shadow-lift);
 }
 
+.message-card:hover,
+.activity-card.interactive:hover,
+.channel-btn:hover,
+.conversation-btn:hover {
+  filter: brightness(1.035);
+}
+
 .channel-btn,
 .conversation-btn,
 .rail-btn,
@@ -308,7 +394,7 @@ p {
 .request-pill,
 .voice-chip {
   transition:
-    transform var(--motion-fast) var(--ease-out),
+    transform var(--motion-fast) var(--ease-smooth),
     background var(--motion-fast) ease,
     border-color var(--motion-fast) ease,
     color var(--motion-fast) ease,
@@ -337,6 +423,18 @@ p {
 .attachment-preview,
 .recording-preview {
   animation: sheet-enter var(--motion-base) var(--ease-spring) both;
+}
+
+.sidebar,
+.chat-panel,
+.activity-panel,
+.rail {
+  transition:
+    background var(--motion-slow) ease,
+    border-color var(--motion-base) ease,
+    box-shadow var(--motion-base) ease,
+    opacity var(--motion-base) ease,
+    transform var(--motion-base) var(--ease-smooth);
 }
 
 .story-card,
@@ -1246,9 +1344,18 @@ p {
 .primary-btn,
 .composer-send,
 .sidebar-bottom button:first-child {
+  position: relative;
+  overflow: hidden;
   border-color: color-mix(in srgb, var(--accent-color) 68%, white 8%);
   background: var(--accent-color);
   color: white;
+}
+
+.auth-card > button[type="submit"]:hover,
+.primary-btn:hover,
+.composer-send:hover,
+.sidebar-bottom button:first-child:hover {
+  box-shadow: var(--shadow-glow);
 }
 
 .auth-switch button:not(.active) {
@@ -1532,13 +1639,15 @@ p {
 .app-shell::before {
   content: "";
   position: absolute;
-  inset: 0;
+  inset: -10%;
   z-index: -1;
   pointer-events: none;
   background:
     linear-gradient(105deg, transparent 0 18%, rgba(73, 204, 255, 0.07) 18.4%, transparent 19.2% 62%, rgba(32, 231, 176, 0.045) 62.4%, transparent 63%),
     repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.022) 0 1px, transparent 1px 96px);
+  background-size: 160% 160%, auto;
   opacity: 0.72;
+  animation: surface-shimmer 24s var(--ease-smooth) infinite alternate;
 }
 
 .app-shell.desktop-shell {
@@ -1596,6 +1705,21 @@ p {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.035));
   color: #c7cfda;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.055);
+  overflow: hidden;
+}
+
+.rail-btn::after,
+.composer-send::after,
+.primary-btn::after,
+.sidebar-bottom button:first-child::after {
+  content: "";
+  position: absolute;
+  inset: -80% -32%;
+  pointer-events: none;
+  background: linear-gradient(115deg, transparent 38%, rgba(255, 255, 255, 0.24), transparent 62%);
+  opacity: 0;
+  transform: translateX(-52%);
+  transition: opacity var(--motion-base) ease, transform var(--motion-slow) var(--ease-smooth);
 }
 
 .rail-btn span {
@@ -1620,6 +1744,14 @@ p {
   color: white;
   box-shadow: 0 14px 28px rgba(52, 111, 255, 0.26), inset 0 0 0 1px rgba(255, 255, 255, 0.16);
   transform: translateY(-1px) scale(1.02);
+}
+
+.rail-btn:hover::after,
+.composer-send:hover::after,
+.primary-btn:hover::after,
+.sidebar-bottom button:first-child:hover::after {
+  opacity: 1;
+  transform: translateX(52%);
 }
 
 .rail-btn.active::before {
@@ -2168,12 +2300,19 @@ p {
   background: color-mix(in srgb, var(--surface-1) 82%, transparent);
   backdrop-filter: blur(18px);
   text-align: left;
-  transition: transform 180ms ease, border-color 180ms ease, opacity 180ms ease;
+  transition:
+    transform var(--motion-base) var(--ease-smooth),
+    border-color var(--motion-base) ease,
+    opacity var(--motion-base) ease,
+    box-shadow var(--motion-base) ease,
+    filter var(--motion-base) ease;
 }
 
 .story-card:hover {
   border-color: color-mix(in srgb, var(--accent-color) 44%, var(--border-strong));
   transform: translateY(-2px);
+  box-shadow: var(--shadow-lift);
+  filter: brightness(1.035);
 }
 
 .story-card.viewed {
@@ -2320,12 +2459,14 @@ p {
   display: inline-flex;
   gap: 4px;
   opacity: 0;
-  transition: opacity 0.16s ease;
+  transform: translateY(2px);
+  transition: opacity var(--motion-fast) ease, transform var(--motion-fast) var(--ease-smooth);
 }
 
 .message-card:hover .message-actions,
 .message-card:focus-within .message-actions {
   opacity: 1;
+  transform: translateY(0);
 }
 
 .message-actions button {
@@ -4562,6 +4703,30 @@ p {
     display: none;
   }
 
+  .mobile-overlay.active {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 38;
+    background: rgba(2, 5, 12, 0.58);
+    backdrop-filter: blur(10px);
+    animation: fade-in var(--motion-base) ease both;
+  }
+
+  .app-shell.mobile-chat-open .sidebar.mobile-open {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: auto;
+    z-index: 39;
+    width: min(88vw, 360px);
+    display: flex;
+    transform: translateX(0);
+    animation: mobile-drawer-in var(--motion-base) var(--ease-spring) both;
+    box-shadow: -24px 0 60px rgba(0, 0, 0, 0.34);
+  }
+
   .app-shell.mobile-chat-open .chat-panel {
     display: grid;
   }
@@ -5154,7 +5319,19 @@ p {
   }
 
   .message-actions {
-    display: none;
+    grid-column: 1 / -1;
+    display: inline-flex;
+    justify-self: end;
+    margin-top: 4px;
+    opacity: 1;
+    transform: none;
+  }
+
+  .message-actions button {
+    min-height: 34px;
+    padding-inline: 10px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.07);
   }
 
   .message-form {

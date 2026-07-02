@@ -256,6 +256,7 @@ class MobileShell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final palette = WebCordPalette.of(context);
     final showLists =
         state.workspace == WorkspaceKind.friends ||
         (state.workspace == WorkspaceKind.server &&
@@ -268,7 +269,9 @@ class MobileShell extends StatelessWidget {
     return Scaffold(
       backgroundColor: Colors.transparent,
       appBar: AppBar(
-        backgroundColor: WebCordColors.bg.withAlpha(210),
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        backgroundColor: palette.bg.withAlpha(214),
         leading: IconButton(
           tooltip: 'Channels and calls',
           onPressed: () => showMobileNavigationSheet(context, state),
@@ -314,25 +317,45 @@ class MobileShell extends StatelessWidget {
       ),
       body: Padding(
         padding: const EdgeInsets.fromLTRB(10, 10, 10, 4),
-        child: showLists
-            ? Sidebar(state: state, compact: true)
-            : Column(
-                children: [
-                  if (showQuickSwitch) ...[
-                    MobileQuickSwitch(state: state),
-                    const SizedBox(height: 10),
-                  ],
-                  if (state.workspace == WorkspaceKind.server) ...[
-                    MobileVoiceDock(state: state),
-                    const SizedBox(height: 10),
-                  ],
-                  Expanded(child: MainSurface(state: state)),
-                ],
+        child: AnimatedSwitcher(
+          duration: wcBaseMotion,
+          switchInCurve: wcEase,
+          switchOutCurve: Curves.easeInCubic,
+          transitionBuilder: (child, animation) {
+            return FadeTransition(
+              opacity: animation,
+              child: SlideTransition(
+                position: Tween<Offset>(
+                  begin: const Offset(.025, .015),
+                  end: Offset.zero,
+                ).animate(animation),
+                child: child,
               ),
+            );
+          },
+          child: KeyedSubtree(
+            key: ValueKey('${state.workspace}-$showLists'),
+            child: showLists
+                ? Sidebar(state: state, compact: true)
+                : Column(
+                    children: [
+                      if (showQuickSwitch) ...[
+                        MobileQuickSwitch(state: state),
+                        const SizedBox(height: 10),
+                      ],
+                      if (state.workspace == WorkspaceKind.server) ...[
+                        MobileVoiceDock(state: state),
+                        const SizedBox(height: 10),
+                      ],
+                      Expanded(child: MainSurface(state: state)),
+                    ],
+                  ),
+          ),
+        ),
       ),
       bottomNavigationBar: NavigationBar(
-        backgroundColor: WebCordColors.bg.withAlpha(244),
-        indicatorColor: WebCordColors.accent.withAlpha(45),
+        backgroundColor: palette.bg.withAlpha(246),
+        indicatorColor: palette.accent.withAlpha(58),
         selectedIndex: switch (state.workspace) {
           WorkspaceKind.direct || WorkspaceKind.friends => 0,
           WorkspaceKind.server => 1,
@@ -809,36 +832,54 @@ class MainSurface extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    late final Widget content;
     if (state.workspace == WorkspaceKind.friends) {
-      return FriendsHome(state: state);
-    }
-    if (state.workspace == WorkspaceKind.calls) {
-      return CallsHome(state: state);
-    }
-    if (state.workspace == WorkspaceKind.stories) {
-      return StoriesHome(state: state);
-    }
-    if (state.workspace == WorkspaceKind.profile) {
-      return ProfileHome(state: state);
-    }
-    return Panel(
-      padding: EdgeInsets.zero,
-      color: WebCordColors.panel.withAlpha(238),
-      child: Column(
-        children: [
-          ChatHeader(state: state),
-          if (state.voiceJoined) VoiceCallBanner(state: state),
-          if (state.voiceJoined) VoiceStage(state: state),
-          const Divider(height: 1, color: WebCordColors.border),
-          Expanded(
-            child: ChatWallpaper(
-              state: state,
-              child: MessageList(state: state),
+      content = FriendsHome(state: state);
+    } else if (state.workspace == WorkspaceKind.calls) {
+      content = CallsHome(state: state);
+    } else if (state.workspace == WorkspaceKind.stories) {
+      content = StoriesHome(state: state);
+    } else if (state.workspace == WorkspaceKind.profile) {
+      content = ProfileHome(state: state);
+    } else {
+      content = Panel(
+        padding: EdgeInsets.zero,
+        color: WebCordColors.panel.withAlpha(238),
+        child: Column(
+          children: [
+            ChatHeader(state: state),
+            if (state.voiceJoined) VoiceCallBanner(state: state),
+            if (state.voiceJoined) VoiceStage(state: state),
+            const Divider(height: 1, color: WebCordColors.border),
+            Expanded(
+              child: ChatWallpaper(
+                state: state,
+                child: MessageList(state: state),
+              ),
             ),
+            Composer(state: state),
+          ],
+        ),
+      );
+    }
+
+    return AnimatedSwitcher(
+      duration: wcBaseMotion,
+      switchInCurve: wcEase,
+      switchOutCurve: Curves.easeInCubic,
+      transitionBuilder: (child, animation) {
+        return FadeTransition(
+          opacity: animation,
+          child: SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(.018, .018),
+              end: Offset.zero,
+            ).animate(animation),
+            child: child,
           ),
-          Composer(state: state),
-        ],
-      ),
+        );
+      },
+      child: KeyedSubtree(key: ValueKey(state.workspace), child: content),
     );
   }
 }
@@ -1571,6 +1612,10 @@ class MessageList extends StatelessWidget {
     }
     final extraTopItems = state.hasOlderMessages ? 1 : 0;
     return ListView.builder(
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+      physics: const BouncingScrollPhysics(
+        parent: AlwaysScrollableScrollPhysics(),
+      ),
       padding: EdgeInsets.fromLTRB(18, state.compactMessages ? 10 : 14, 18, 18),
       itemCount: state.messages.length + extraTopItems,
       itemBuilder: (context, index) {
@@ -1682,134 +1727,227 @@ class MessageTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final compact = state.compactMessages;
-    return Padding(
-      padding: EdgeInsets.only(bottom: compact ? 6 : 10),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: own
-            ? MainAxisAlignment.end
-            : MainAxisAlignment.start,
-        children: [
-          if (!own) UserAvatar(user: message.author, size: 34),
-          if (!own) const SizedBox(width: 10),
-          Flexible(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: own
-                    ? WebCordColors.accent.withAlpha(72)
-                    : WebCordColors.panelSoft,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: WebCordColors.border),
-              ),
-              child: Padding(
-                padding: EdgeInsets.all(compact ? 9 : 12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
+    final palette = WebCordPalette.of(context);
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final maxBubbleWidth = screenWidth < 640 ? screenWidth * .78 : 620.0;
+    final bubbleColor = own
+        ? palette.accent.withAlpha(118)
+        : palette.panelSoft.withAlpha(232);
+    final bubbleBorder = own
+        ? palette.accent.withAlpha(105)
+        : palette.border.withAlpha(170);
+    final radius = BorderRadius.only(
+      topLeft: Radius.circular(own ? 22 : 8),
+      topRight: Radius.circular(own ? 8 : 22),
+      bottomLeft: const Radius.circular(22),
+      bottomRight: const Radius.circular(22),
+    );
+
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0, end: 1),
+      duration: wcBaseMotion,
+      curve: wcEase,
+      builder: (context, value, child) {
+        return Opacity(
+          opacity: value,
+          child: Transform.translate(
+            offset: Offset(0, (1 - value) * 8),
+            child: child,
+          ),
+        );
+      },
+      child: Padding(
+        padding: EdgeInsets.only(bottom: compact ? 6 : 10),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          mainAxisAlignment: own
+              ? MainAxisAlignment.end
+              : MainAxisAlignment.start,
+          children: [
+            if (!own) UserAvatar(user: message.author, size: 34),
+            if (!own) const SizedBox(width: 8),
+            Flexible(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: maxBubbleWidth),
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: bubbleColor,
+                    borderRadius: radius,
+                    border: Border.all(color: bubbleBorder),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withAlpha(42),
+                        blurRadius: 18,
+                        offset: const Offset(0, 10),
+                      ),
+                    ],
+                  ),
+                  child: Padding(
+                    padding: EdgeInsets.fromLTRB(
+                      compact ? 10 : 13,
+                      compact ? 8 : 11,
+                      compact ? 8 : 10,
+                      compact ? 9 : 12,
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Flexible(
-                          child: Text(
-                            message.author.displayLabel,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(fontWeight: FontWeight.w900),
-                          ),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (!own)
+                              Flexible(
+                                child: Text(
+                                  message.author.displayLabel,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: palette.cyan,
+                                    fontWeight: FontWeight.w900,
+                                  ),
+                                ),
+                              ),
+                            if (!own) const SizedBox(width: 8),
+                            Text(
+                              _timeLabel(message.createdAt),
+                              style: TextStyle(
+                                color: own
+                                    ? Colors.white.withAlpha(205)
+                                    : palette.muted,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            if (message.editedAt != null)
+                              Text(
+                                ' edited',
+                                style: TextStyle(
+                                  color: own
+                                      ? Colors.white.withAlpha(185)
+                                      : palette.muted,
+                                  fontSize: 11,
+                                ),
+                              ),
+                            if (!message.isDeleted)
+                              PopupMenuButton<String>(
+                                tooltip: 'Message actions',
+                                padding: EdgeInsets.zero,
+                                icon: Icon(
+                                  Icons.more_horiz_rounded,
+                                  size: 18,
+                                  color: own
+                                      ? Colors.white.withAlpha(220)
+                                      : palette.muted,
+                                ),
+                                color: palette.panelStrong,
+                                onSelected: (value) {
+                                  if (value == 'edit') {
+                                    showEditMessageDialog(
+                                      context,
+                                      state,
+                                      message,
+                                    );
+                                  } else if (value == 'delete') {
+                                    state.deleteMessage(message);
+                                  } else if (value == 'report') {
+                                    state.reportMessage(message);
+                                  }
+                                },
+                                itemBuilder: (context) => [
+                                  if (own)
+                                    const PopupMenuItem(
+                                      value: 'edit',
+                                      child: Text('Edit'),
+                                    ),
+                                  if (own)
+                                    const PopupMenuItem(
+                                      value: 'delete',
+                                      child: Text('Delete'),
+                                    ),
+                                  if (!own)
+                                    const PopupMenuItem(
+                                      value: 'report',
+                                      child: Text('Report'),
+                                    ),
+                                ],
+                              ),
+                          ],
                         ),
-                        const SizedBox(width: 8),
-                        Text(
-                          _timeLabel(message.createdAt),
-                          style: const TextStyle(
-                            color: WebCordColors.muted,
-                            fontSize: 11,
-                          ),
-                        ),
-                        if (message.editedAt != null)
-                          const Text(
-                            ' edited',
-                            style: TextStyle(
-                              color: WebCordColors.muted,
-                              fontSize: 11,
+                        if (message.replyTo != null)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 7),
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                color: Colors.black.withAlpha(38),
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                              child: Padding(
+                                padding: const EdgeInsets.fromLTRB(9, 7, 10, 7),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Container(
+                                      width: 3,
+                                      height: 18,
+                                      decoration: BoxDecoration(
+                                        color: own
+                                            ? palette.cyan
+                                            : palette.accent,
+                                        borderRadius: BorderRadius.circular(99),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Flexible(
+                                      child: Text(
+                                        'Reply to ${message.replyTo!.author.displayLabel}: ${message.replyTo!.content}',
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          color: own
+                                              ? Colors.white.withAlpha(220)
+                                              : palette.muted,
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
                             ),
                           ),
-                        if (!message.isDeleted)
-                          PopupMenuButton<String>(
-                            tooltip: 'Message actions',
-                            padding: EdgeInsets.zero,
-                            icon: const Icon(
-                              Icons.more_horiz_rounded,
-                              size: 18,
+                        if (message.isDeleted)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 6),
+                            child: Text(
+                              'Message deleted',
+                              style: TextStyle(color: palette.muted),
                             ),
-                            color: WebCordColors.panelStrong,
-                            onSelected: (value) {
-                              if (value == 'edit') {
-                                showEditMessageDialog(context, state, message);
-                              } else if (value == 'delete') {
-                                state.deleteMessage(message);
-                              } else if (value == 'report') {
-                                state.reportMessage(message);
-                              }
-                            },
-                            itemBuilder: (context) => [
-                              if (own)
-                                const PopupMenuItem(
-                                  value: 'edit',
-                                  child: Text('Edit'),
-                                ),
-                              if (own)
-                                const PopupMenuItem(
-                                  value: 'delete',
-                                  child: Text('Delete'),
-                                ),
-                              if (!own)
-                                const PopupMenuItem(
-                                  value: 'report',
-                                  child: Text('Report'),
-                                ),
-                            ],
+                          )
+                        else if (message.content.isNotEmpty)
+                          Padding(
+                            padding: EdgeInsets.only(top: own ? 5 : 6),
+                            child: Text(
+                              message.content,
+                              style: const TextStyle(height: 1.34),
+                            ),
+                          ),
+                        if (!message.isDeleted && message.hasAttachment)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 10),
+                            child: AttachmentChip(
+                              message: message,
+                              state: state,
+                            ),
                           ),
                       ],
                     ),
-                    if (message.replyTo != null)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 7),
-                        child: Text(
-                          'Reply to ${message.replyTo!.author.displayLabel}: ${message.replyTo!.content}',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: WebCordColors.muted,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ),
-                    if (message.isDeleted)
-                      const Padding(
-                        padding: EdgeInsets.only(top: 6),
-                        child: Text(
-                          'Message deleted',
-                          style: TextStyle(color: WebCordColors.muted),
-                        ),
-                      )
-                    else if (message.content.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 6),
-                        child: Text(message.content),
-                      ),
-                    if (!message.isDeleted && message.hasAttachment)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 10),
-                        child: AttachmentChip(message: message, state: state),
-                      ),
-                  ],
+                  ),
                 ),
               ),
             ),
-          ),
-          if (own) const SizedBox(width: 10),
-          if (own) UserAvatar(user: message.author, size: 34),
-        ],
+            if (own) const SizedBox(width: 42),
+          ],
+        ),
       ),
     );
   }
@@ -1826,168 +1964,227 @@ class Composer extends StatefulWidget {
 
 class _ComposerState extends State<Composer> {
   final _controller = TextEditingController();
+  bool _hasText = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller.addListener(_syncTextState);
+  }
 
   @override
   void dispose() {
+    _controller.removeListener(_syncTextState);
     _controller.dispose();
     super.dispose();
+  }
+
+  void _syncTextState() {
+    final next = _controller.text.trim().isNotEmpty;
+    if (next != _hasText) setState(() => _hasText = next);
   }
 
   @override
   Widget build(BuildContext context) {
     final state = widget.state;
+    final palette = WebCordPalette.of(context);
+    final canSendPayload = _hasText || state.pendingAttachment != null;
     return Padding(
       padding: const EdgeInsets.fromLTRB(14, 8, 14, 14),
       child: Column(
         children: [
-          if (state.recordingVoice)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  color: WebCordColors.danger.withAlpha(34),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(
-                    color: WebCordColors.danger.withAlpha(120),
-                  ),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 8,
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(
-                        Icons.fiber_manual_record_rounded,
-                        color: WebCordColors.danger,
-                        size: 18,
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          'Recording voice ${_durationLabel(state.voiceRecordingElapsed)}',
-                          style: const TextStyle(fontWeight: FontWeight.w800),
-                        ),
-                      ),
-                      IconButton(
-                        tooltip: 'Cancel voice',
-                        onPressed: state.mediaBusy
-                            ? null
-                            : () => state.stopVoiceMessage(send: false),
-                        icon: const Icon(Icons.close_rounded),
-                      ),
-                      FilledButton.icon(
-                        onPressed: state.mediaBusy
-                            ? null
-                            : () => state.stopVoiceMessage(),
-                        icon: const Icon(Icons.send_rounded, size: 18),
-                        label: const Text('Send'),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          if (state.pendingAttachment != null)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: Row(
-                children: [
-                  Expanded(
+          AnimatedSwitcher(
+            duration: wcBaseMotion,
+            switchInCurve: wcEase,
+            switchOutCurve: Curves.easeInCubic,
+            child: state.recordingVoice
+                ? Padding(
+                    key: const ValueKey('recording'),
+                    padding: const EdgeInsets.only(bottom: 8),
                     child: DecoratedBox(
                       decoration: BoxDecoration(
-                        color: WebCordColors.panelStrong,
-                        borderRadius: BorderRadius.circular(8),
+                        color: WebCordColors.danger.withAlpha(34),
+                        borderRadius: BorderRadius.circular(22),
+                        border: Border.all(
+                          color: WebCordColors.danger.withAlpha(120),
+                        ),
                       ),
                       child: Padding(
                         padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
+                          horizontal: 10,
                           vertical: 8,
                         ),
-                        child: Text(
-                          state.pendingAttachment!.name,
-                          overflow: TextOverflow.ellipsis,
+                        child: Row(
+                          children: [
+                            const Icon(
+                              Icons.fiber_manual_record_rounded,
+                              color: WebCordColors.danger,
+                              size: 18,
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'Recording voice ${_durationLabel(state.voiceRecordingElapsed)}',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            ),
+                            IconButton(
+                              tooltip: 'Cancel voice',
+                              onPressed: state.mediaBusy
+                                  ? null
+                                  : () => state.stopVoiceMessage(send: false),
+                              icon: const Icon(Icons.close_rounded),
+                            ),
+                            FilledButton.icon(
+                              onPressed: state.mediaBusy
+                                  ? null
+                                  : () => state.stopVoiceMessage(),
+                              icon: const Icon(Icons.send_rounded, size: 18),
+                              label: const Text('Send'),
+                            ),
+                          ],
                         ),
                       ),
                     ),
+                  )
+                : state.pendingAttachment != null
+                ? Padding(
+                    key: const ValueKey('attachment'),
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              color: palette.panelStrong,
+                              borderRadius: BorderRadius.circular(18),
+                            ),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 8,
+                              ),
+                              child: Text(
+                                state.pendingAttachment!.name,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Remove attachment',
+                          onPressed: state.clearAttachment,
+                          icon: const Icon(Icons.close_rounded),
+                        ),
+                      ],
+                    ),
+                  )
+                : const SizedBox.shrink(key: ValueKey('empty')),
+          ),
+          DecoratedBox(
+            decoration: BoxDecoration(
+              color: palette.bgAlt.withAlpha(218),
+              borderRadius: BorderRadius.circular(30),
+              border: Border.all(color: palette.border),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withAlpha(54),
+                  blurRadius: 20,
+                  offset: const Offset(0, 10),
+                ),
+              ],
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 5),
+              child: Row(
+                children: [
+                  IconButton(
+                    tooltip: 'Attach file',
+                    onPressed: state.uploading || !state.canSend
+                        ? null
+                        : state.pickAttachment,
+                    icon: state.uploading
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.attach_file_rounded),
                   ),
                   IconButton(
-                    tooltip: 'Remove attachment',
-                    onPressed: state.clearAttachment,
-                    icon: const Icon(Icons.close_rounded),
+                    tooltip: state.recordingVoice
+                        ? 'Send voice message'
+                        : 'Record voice message',
+                    onPressed: !state.recordingVoice && !state.canRecordMedia
+                        ? null
+                        : state.recordingVoice
+                        ? () => state.stopVoiceMessage()
+                        : state.startVoiceMessage,
+                    icon: state.mediaBusy && !state.recordingVoice
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : Icon(
+                            state.recordingVoice
+                                ? Icons.stop_circle_rounded
+                                : Icons.mic_rounded,
+                          ),
+                  ),
+                  IconButton(
+                    tooltip: 'Record video circle',
+                    onPressed: state.canRecordMedia && !state.recordingVoice
+                        ? () => showCircleRecorder(context, state)
+                        : null,
+                    icon: const Icon(Icons.video_camera_front_rounded),
+                  ),
+                  Expanded(
+                    child: TextField(
+                      controller: _controller,
+                      enabled: state.canSend,
+                      minLines: 1,
+                      maxLines: 4,
+                      textInputAction: TextInputAction.send,
+                      onSubmitted: (_) => _send(),
+                      decoration: InputDecoration(
+                        filled: false,
+                        border: InputBorder.none,
+                        enabledBorder: InputBorder.none,
+                        focusedBorder: InputBorder.none,
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 10,
+                        ),
+                        hintText: state.workspace == WorkspaceKind.direct
+                            ? 'Message your friend'
+                            : 'Message #${state.activeTextChannel?.name ?? 'lobby'}',
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  AnimatedContainer(
+                    duration: wcFastMotion,
+                    curve: wcEase,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: canSendPayload && state.canSend
+                          ? palette.accent
+                          : palette.panelStrong,
+                    ),
+                    child: IconButton(
+                      tooltip: 'Send',
+                      onPressed: state.busy || !state.canSend || !canSendPayload
+                          ? null
+                          : _send,
+                      icon: const Icon(Icons.send_rounded),
+                    ),
                   ),
                 ],
               ),
             ),
-          Row(
-            children: [
-              IconButton.filledTonal(
-                tooltip: 'Attach file',
-                onPressed: state.uploading || !state.canSend
-                    ? null
-                    : state.pickAttachment,
-                icon: state.uploading
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.attach_file_rounded),
-              ),
-              const SizedBox(width: 8),
-              IconButton.filledTonal(
-                tooltip: state.recordingVoice
-                    ? 'Send voice message'
-                    : 'Record voice message',
-                onPressed: !state.recordingVoice && !state.canRecordMedia
-                    ? null
-                    : state.recordingVoice
-                    ? () => state.stopVoiceMessage()
-                    : state.startVoiceMessage,
-                icon: state.mediaBusy && !state.recordingVoice
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : Icon(
-                        state.recordingVoice
-                            ? Icons.stop_circle_rounded
-                            : Icons.mic_rounded,
-                      ),
-              ),
-              const SizedBox(width: 8),
-              IconButton.filledTonal(
-                tooltip: 'Record video circle',
-                onPressed: state.canRecordMedia && !state.recordingVoice
-                    ? () => showCircleRecorder(context, state)
-                    : null,
-                icon: const Icon(Icons.video_camera_front_rounded),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: TextField(
-                  controller: _controller,
-                  enabled: state.canSend,
-                  minLines: 1,
-                  maxLines: 4,
-                  textInputAction: TextInputAction.send,
-                  onSubmitted: (_) => _send(),
-                  decoration: InputDecoration(
-                    hintText: state.workspace == WorkspaceKind.direct
-                        ? 'Message your friend'
-                        : 'Message #${state.activeTextChannel?.name ?? 'lobby'}',
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              IconButton.filled(
-                tooltip: 'Send',
-                onPressed: state.busy || !state.canSend ? null : _send,
-                icon: const Icon(Icons.send_rounded),
-              ),
-            ],
           ),
         ],
       ),
@@ -3909,29 +4106,40 @@ class NavRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final palette = WebCordPalette.of(context);
     return Padding(
       padding: const EdgeInsets.only(bottom: 7),
       child: InkWell(
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(16),
         onTap: onTap,
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 140),
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+          duration: wcFastMotion,
+          curve: wcEase,
+          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 10),
           decoration: BoxDecoration(
-            color: selected
-                ? WebCordColors.accent.withAlpha(74)
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(8),
+            color: selected ? palette.accent.withAlpha(66) : Colors.transparent,
+            borderRadius: BorderRadius.circular(16),
             border: Border.all(
-              color: selected ? WebCordColors.accent : Colors.transparent,
+              color: selected
+                  ? palette.accent.withAlpha(170)
+                  : Colors.transparent,
             ),
+            boxShadow: selected
+                ? [
+                    BoxShadow(
+                      color: palette.accent.withAlpha(26),
+                      blurRadius: 18,
+                      offset: const Offset(0, 8),
+                    ),
+                  ]
+                : null,
           ),
           child: Row(
             children: [
               Icon(
                 icon,
                 size: 18,
-                color: selected ? WebCordColors.cyan : WebCordColors.muted,
+                color: selected ? palette.cyan : palette.muted,
               ),
               const SizedBox(width: 9),
               Expanded(
@@ -4003,17 +4211,24 @@ class UserRow extends StatelessWidget {
         ? subtitle
         : user.statusText.trim();
     final track = user.favoriteTrack.trim();
+    final palette = WebCordPalette.of(context);
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(8),
-        child: Padding(
-          padding: const EdgeInsets.all(8),
+        borderRadius: BorderRadius.circular(16),
+        child: AnimatedContainer(
+          duration: wcFastMotion,
+          curve: wcEase,
+          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 8),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            color: palette.panelSoft.withAlpha(70),
+          ),
           child: Row(
             children: [
-              UserAvatar(user: user, size: 34),
+              UserAvatar(user: user, size: 38),
               const SizedBox(width: 10),
               Expanded(
                 child: Column(
@@ -4749,7 +4964,14 @@ class UserAvatar extends StatelessWidget {
       decoration: BoxDecoration(
         shape: BoxShape.circle,
         gradient: LinearGradient(colors: [accent, secondary]),
-        border: Border.all(color: accent.withAlpha(112)),
+        border: Border.all(color: accent.withAlpha(144)),
+        boxShadow: [
+          BoxShadow(
+            color: accent.withAlpha(48),
+            blurRadius: 14,
+            offset: const Offset(0, 6),
+          ),
+        ],
       ),
       child: ClipOval(
         child: avatar == null
@@ -4790,12 +5012,12 @@ class ConversationAvatar extends StatelessWidget {
       width: size,
       height: size,
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(14),
         gradient: LinearGradient(colors: [palette.accent, palette.cyan]),
         border: Border.all(color: palette.cyan.withAlpha(120)),
       ),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(7),
+        borderRadius: BorderRadius.circular(13),
         child: avatarUrl == null
             ? Icon(Icons.groups_rounded, color: Colors.white, size: size * .54)
             : Image.network(_resolveMediaUrl(avatarUrl), fit: BoxFit.cover),

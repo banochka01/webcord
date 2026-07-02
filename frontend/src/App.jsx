@@ -4990,7 +4990,18 @@ export default function App() {
               <span className="live-pill">{social.friends.length} friends</span>
               {workspace === 'stories' ? <span className="live-pill">{stories.filter((story) => !story.viewed).length} unseen</span> : null}
               {voiceJoined ? <span className="live-pill">Voice active</span> : null}
-              {isMobile ? <button className="icon-btn mobile-chat-more" type="button" aria-label="Chat menu" title="Chat menu"><AppIcon name="more" /></button> : null}
+              {isMobile ? (
+                <button
+                  className="icon-btn mobile-chat-more"
+                  type="button"
+                  aria-label="Chat menu"
+                  title="Chat menu"
+                  onClick={() => setMobileSidebarOpen((prev) => !prev)}
+                  aria-expanded={mobileSidebarOpen}
+                >
+                  <AppIcon name="more" />
+                </button>
+              ) : null}
             </div>
           </header>
           {realtimeStatus !== 'connected' ? (

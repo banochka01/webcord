@@ -55,7 +55,7 @@ void main() {
     expect(find.text('Join'), findsOneWidget);
 
     await tester.tap(find.byIcon(Icons.menu_rounded));
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 500));
 
     expect(find.text('TEXT CHANNELS'), findsOneWidget);
     expect(find.text('VOICE ROOMS'), findsOneWidget);

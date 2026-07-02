@@ -1,6 +1,12 @@
 import 'dart:ui';
 
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+
+const wcFastMotion = Duration(milliseconds: 190);
+const wcBaseMotion = Duration(milliseconds: 320);
+const wcSlowMotion = Duration(milliseconds: 620);
+const wcEase = Curves.easeOutCubic;
 
 enum AppThemeMode {
   liquid('Liquid Glass'),
@@ -284,41 +290,41 @@ ThemeData webCordTheme([AppThemeMode mode = AppThemeMode.liquid]) {
       filled: true,
       fillColor: palette.bgAlt.withAlpha(190),
       hintStyle: TextStyle(color: palette.muted.withAlpha(210)),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(24),
         borderSide: BorderSide(color: palette.border),
       ),
       enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(24),
         borderSide: BorderSide(color: palette.border),
       ),
       focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(24),
         borderSide: BorderSide(color: palette.accent),
       ),
     ),
     filledButtonTheme: FilledButtonThemeData(
       style: FilledButton.styleFrom(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
       ),
     ),
     outlinedButtonTheme: OutlinedButtonThemeData(
       style: OutlinedButton.styleFrom(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
         side: BorderSide(color: palette.border),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
       ),
     ),
     textButtonTheme: TextButtonThemeData(
       style: TextButton.styleFrom(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
       ),
     ),
     iconButtonTheme: IconButtonThemeData(
       style: IconButton.styleFrom(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
       ),
     ),
     navigationBarTheme: NavigationBarThemeData(
@@ -338,14 +344,38 @@ ThemeData webCordTheme([AppThemeMode mode = AppThemeMode.liquid]) {
   );
 }
 
-class AppBackdrop extends StatelessWidget {
+class AppBackdrop extends StatefulWidget {
   const AppBackdrop({required this.child, super.key});
 
   final Widget child;
 
   @override
+  State<AppBackdrop> createState() => _AppBackdropState();
+}
+
+class _AppBackdropState extends State<AppBackdrop>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ambient;
+
+  @override
+  void initState() {
+    super.initState();
+    _ambient = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 26),
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _ambient.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final palette = WebCordPalette.of(context);
+    final disabled = MediaQuery.maybeOf(context)?.disableAnimations ?? false;
     return DecoratedBox(
       decoration: BoxDecoration(
         gradient: LinearGradient(
@@ -358,9 +388,19 @@ class AppBackdrop extends StatelessWidget {
       child: Stack(
         children: [
           Positioned.fill(
-            child: CustomPaint(painter: _GlassVeilPainter(palette)),
+            child: AnimatedBuilder(
+              animation: disabled ? kAlwaysDismissedAnimation : _ambient,
+              builder: (context, _) {
+                return CustomPaint(
+                  painter: _GlassVeilPainter(
+                    palette,
+                    disabled ? 0 : _ambient.value,
+                  ),
+                );
+              },
+            ),
           ),
-          child,
+          widget.child,
         ],
       ),
     );
@@ -388,17 +428,22 @@ class Panel extends StatelessWidget {
       child: BackdropFilter(
         filter: ImageFilter.blur(sigmaX: 22, sigmaY: 22),
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 180),
-          curve: Curves.easeOutCubic,
+          duration: wcBaseMotion,
+          curve: wcEase,
           decoration: BoxDecoration(
             color: panelColor.withAlpha(206),
             borderRadius: BorderRadius.circular(24),
             border: Border.all(color: palette.border),
-            boxShadow: const [
+            boxShadow: [
               BoxShadow(
-                color: Color(0x4D000000),
+                color: Colors.black.withAlpha(82),
                 blurRadius: 34,
                 offset: Offset(0, 22),
+              ),
+              BoxShadow(
+                color: palette.accent.withAlpha(18),
+                blurRadius: 32,
+                offset: const Offset(0, 10),
               ),
             ],
           ),
@@ -433,18 +478,53 @@ class SectionLabel extends StatelessWidget {
 }
 
 class _GlassVeilPainter extends CustomPainter {
-  const _GlassVeilPainter(this.palette);
+  const _GlassVeilPainter(this.palette, this.progress);
 
   final WebCordPalette palette;
+  final double progress;
 
   @override
   void paint(Canvas canvas, Size size) {
+    final bandShift = lerpDouble(
+      -size.width * .22,
+      size.width * .18,
+      progress,
+    )!;
+    final gridShift = lerpDouble(-42, 42, progress)!;
+
+    final bandPaint = Paint()
+      ..shader =
+          LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              Colors.transparent,
+              palette.accent.withAlpha(22),
+              palette.cyan.withAlpha(14),
+              Colors.transparent,
+            ],
+            stops: const [0.1, 0.38, 0.58, 0.9],
+          ).createShader(
+            Rect.fromLTWH(bandShift, 0, size.width * 1.35, size.height),
+          );
+    final bandPath = Path()
+      ..moveTo(size.width * .16 + bandShift, 0)
+      ..lineTo(size.width * .72 + bandShift, 0)
+      ..lineTo(size.width * .92 + bandShift, size.height)
+      ..lineTo(size.width * .32 + bandShift, size.height)
+      ..close();
+    canvas.drawPath(bandPath, bandPaint);
+
     final topLine = Paint()
       ..color = Colors.white.withAlpha(18)
       ..strokeWidth = 1;
     for (var index = 0; index < 9; index += 1) {
-      final y = size.height * (index / 8);
-      canvas.drawLine(Offset(0, y), Offset(size.width, y + 34), topLine);
+      final y = size.height * (index / 8) + gridShift;
+      canvas.drawLine(
+        Offset(0, y),
+        Offset(size.width, y + 34 + gridShift * .12),
+        topLine,
+      );
     }
 
     final wash = Paint()
@@ -462,5 +542,5 @@ class _GlassVeilPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _GlassVeilPainter oldDelegate) =>
-      oldDelegate.palette != palette;
+      oldDelegate.palette != palette || oldDelegate.progress != progress;
 }
