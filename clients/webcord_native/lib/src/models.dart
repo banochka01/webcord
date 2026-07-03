@@ -489,6 +489,8 @@ class VoiceParticipant {
     this.camera = false,
     this.screen = false,
     this.speaking = false,
+    this.audioProfile = 'voiceFocus',
+    this.audioBitrate = 64000,
   });
 
   final String socketId;
@@ -499,8 +501,17 @@ class VoiceParticipant {
   final bool camera;
   final bool screen;
   final bool speaking;
+  final String audioProfile;
+  final int audioBitrate;
 
   String get displayLabel => user?.displayLabel ?? username;
+  String get audioProfileLabel {
+    return switch (audioProfile) {
+      'highFidelity' => 'Hi-Fi',
+      'lowData' => 'Low',
+      _ => 'Voice',
+    };
+  }
 
   factory VoiceParticipant.fromJson(Map<String, dynamic> json) {
     return VoiceParticipant(
@@ -514,6 +525,10 @@ class VoiceParticipant {
       camera: _asBool(json['camera']),
       screen: _asBool(json['screen']),
       speaking: _asBool(json['speaking']),
+      audioProfile: '${json['audioProfile'] ?? 'voiceFocus'}',
+      audioBitrate: _asInt(json['audioBitrate']) == 0
+          ? 64000
+          : _asInt(json['audioBitrate']),
     );
   }
 }

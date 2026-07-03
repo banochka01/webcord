@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 import 'dart:io';
 
 import 'package:camera/camera.dart';
@@ -3083,16 +3083,30 @@ class VoiceParticipantPresence extends StatelessWidget {
                 Icon(Icons.circle, size: 9, color: activeColor),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: Text(
-                    participant.displayLabel,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontWeight: participant.speaking
-                          ? FontWeight.w900
-                          : FontWeight.w700,
-                    ),
+                  child: Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          participant.displayLabel,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontWeight: participant.speaking
+                                ? FontWeight.w900
+                                : FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      if (!dense) ...[
+                        const SizedBox(width: 8),
+                        _VoiceProfileBadge(participant: participant),
+                      ],
+                    ],
                   ),
                 ),
+                if (dense) ...[
+                  const SizedBox(width: 6),
+                  _VoiceProfileBadge(participant: participant, compact: true),
+                ],
                 _PresenceIcon(
                   active: !participant.muted,
                   icon: participant.muted
@@ -3112,6 +3126,46 @@ class VoiceParticipantPresence extends StatelessWidget {
                   ),
               ],
             ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _VoiceProfileBadge extends StatelessWidget {
+  const _VoiceProfileBadge({required this.participant, this.compact = false});
+
+  final VoiceParticipant participant;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = WebCordPalette.of(context);
+    final color = switch (participant.audioProfile) {
+      'highFidelity' => palette.cyan,
+      'lowData' => WebCordColors.success,
+      _ => palette.accent,
+    };
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: color.withAlpha(24),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withAlpha(92)),
+      ),
+      child: Padding(
+        padding: EdgeInsets.symmetric(
+          horizontal: compact ? 6 : 8,
+          vertical: compact ? 2 : 4,
+        ),
+        child: Text(
+          compact
+              ? participant.audioProfileLabel
+              : '${participant.audioProfileLabel} ${participant.audioBitrate ~/ 1000}k',
+          style: TextStyle(
+            color: color,
+            fontSize: compact ? 10 : 11,
+            fontWeight: FontWeight.w900,
           ),
         ),
       ),

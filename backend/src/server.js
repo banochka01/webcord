@@ -192,6 +192,17 @@ function booleanFromPayload(value) {
   return value === true || value === 'true' || value === 1 || value === '1';
 }
 
+function normalizeVoiceAudioProfile(value) {
+  const profile = String(value || '').trim();
+  return ['voiceFocus', 'highFidelity', 'lowData'].includes(profile) ? profile : 'voiceFocus';
+}
+
+function normalizeVoiceAudioBitrate(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return 64000;
+  return Math.max(24000, Math.min(128000, Math.round(parsed)));
+}
+
 function looksCircleVideoName(fileName = '') {
   const source = String(fileName || '').toLowerCase();
   return (
@@ -2704,7 +2715,9 @@ function serializeVoiceParticipant(socketId, participant = {}) {
     muted: Boolean(participant.muted),
     camera: Boolean(participant.camera),
     screen: Boolean(participant.screen),
-    speaking: Boolean(participant.speaking)
+    speaking: Boolean(participant.speaking),
+    audioProfile: normalizeVoiceAudioProfile(participant.audioProfile),
+    audioBitrate: normalizeVoiceAudioBitrate(participant.audioBitrate)
   };
 }
 
@@ -2928,7 +2941,9 @@ io.on('connection', (socket) => {
         muted: false,
         camera: false,
         screen: false,
-        speaking: false
+        speaking: false,
+        audioProfile: 'voiceFocus',
+        audioBitrate: 64000
       });
       callParticipants.set(roomKey, participants);
       socket.data.callRoomKey = roomKey;
@@ -2962,6 +2977,8 @@ io.on('connection', (socket) => {
     participant.camera = booleanFromPayload(payload.camera);
     participant.screen = booleanFromPayload(payload.screen);
     participant.speaking = booleanFromPayload(payload.speaking);
+    participant.audioProfile = normalizeVoiceAudioProfile(payload.audioProfile);
+    participant.audioBitrate = normalizeVoiceAudioBitrate(payload.audioBitrate);
     participants.set(socket.id, participant);
 
     io.to(roomKey).emit('call-state', {
@@ -3016,7 +3033,9 @@ io.on('connection', (socket) => {
         muted: false,
         camera: false,
         screen: false,
-        speaking: false
+        speaking: false,
+        audioProfile: 'voiceFocus',
+        audioBitrate: 64000
       });
       voiceParticipants.set(roomKey, participants);
 
@@ -3043,6 +3062,8 @@ io.on('connection', (socket) => {
     participant.camera = booleanFromPayload(payload.camera);
     participant.screen = booleanFromPayload(payload.screen);
     participant.speaking = booleanFromPayload(payload.speaking);
+    participant.audioProfile = normalizeVoiceAudioProfile(payload.audioProfile);
+    participant.audioBitrate = normalizeVoiceAudioBitrate(payload.audioBitrate);
     participants.set(socket.id, participant);
 
     io.to(roomKey).emit('voice-state', serializeVoiceParticipant(socket.id, participant));
