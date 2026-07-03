@@ -260,6 +260,10 @@ function createVoiceAudioConstraints(deviceId = '', includeVoiceTuning = true) {
   return constraints;
 }
 
+function isMediaPermissionDenied(error) {
+  return error?.name === 'NotAllowedError' || error?.name === 'PermissionDeniedError';
+}
+
 function createCircleVideoConstraints(deviceId = '', facingMode = 'user', includeQuality = true) {
   const constraints = includeQuality
     ? {
@@ -287,6 +291,7 @@ async function requestVoiceAudioStream(deviceId = '') {
       return await navigator.mediaDevices.getUserMedia(constraints);
     } catch (error) {
       lastError = error;
+      if (isMediaPermissionDenied(error)) break;
     }
   }
 
@@ -551,14 +556,17 @@ function areMessageListsEqual(left = [], right = []) {
 }
 
 function getMediaErrorMessage(error, fallback) {
-  if (error?.name === 'NotAllowedError' || error?.name === 'PermissionDeniedError') {
-    return 'Permission was denied or cancelled';
+  if (isMediaPermissionDenied(error)) {
+    return 'Microphone or camera permission is blocked. Click the icon in the address bar and allow access.';
   }
   if (error?.name === 'NotFoundError' || error?.name === 'DevicesNotFoundError') {
     return 'No matching media device was found';
   }
   if (error?.name === 'NotReadableError') {
     return 'The media device is already in use';
+  }
+  if (error?.name === 'OverconstrainedError') {
+    return 'The selected media device is unavailable. Refresh devices or use the default device.';
   }
   return fallback;
 }
@@ -4346,6 +4354,16 @@ export default function App() {
     });
   }
 
+  async function acquireVoiceInputStream() {
+    const rawStream = await requestVoiceAudioStream(clientSettings.micDeviceId);
+    const { stream, audioContext } = noiseSuppressionEnabled
+      ? await createEnhancedVoiceStream(rawStream)
+      : { stream: rawStream, audioContext: null };
+    applyLocalVoiceTrackConstraints(rawStream);
+    applyLocalVoiceTrackConstraints(stream);
+    return { rawStream, stream, audioContext };
+  }
+
   function addStreamTracksToPeer(peer, stream) {
     if (!peer || !stream) return;
     const senderTrackIds = new Set(peer.getSenders().map((sender) => sender.track?.id).filter(Boolean));
@@ -4355,6 +4373,17 @@ export default function App() {
       }
     });
     applyVoiceSenderParameters(peer);
+  }
+
+  function ensurePeerReceiveTransceivers(peer) {
+    if (!peer?.addTransceiver || !peer.getTransceivers) return;
+    const existingKinds = new Set(
+      peer.getTransceivers()
+        .map((transceiver) => transceiver.sender?.track?.kind || transceiver.receiver?.track?.kind)
+        .filter(Boolean)
+    );
+    if (!existingKinds.has('audio')) peer.addTransceiver('audio', { direction: 'recvonly' });
+    if (!existingKinds.has('video')) peer.addTransceiver('video', { direction: 'recvonly' });
   }
 
   function removeStreamTracksFromPeers(stream) {
@@ -4379,6 +4408,7 @@ export default function App() {
     addStreamTracksToPeer(peer, localStreamRef.current);
     addStreamTracksToPeer(peer, screenStreamRef.current);
     addStreamTracksToPeer(peer, cameraStreamRef.current);
+    ensurePeerReceiveTransceivers(peer);
 
     peer.onicecandidate = (event) => {
       if (event.candidate && socketRef.current) {
@@ -4558,7 +4588,7 @@ export default function App() {
   }
 
   async function createPeerAndOffer(remoteSocketId, options = {}) {
-    if (!voiceJoinedRef.current || !localStreamRef.current || !socketRef.current || !remoteSocketId || !voiceChannelIdRef.current) {
+    if (!voiceJoinedRef.current || !socketRef.current || !remoteSocketId || !voiceChannelIdRef.current) {
       return;
     }
     const peer = await getOrCreatePeer(remoteSocketId);
@@ -4770,24 +4800,30 @@ export default function App() {
 
       setError('');
       setVoiceStatus('Requesting microphone...');
-      const rawStream = await requestVoiceAudioStream(clientSettings.micDeviceId);
-      await refreshMediaDevices();
-      const { stream, audioContext } = noiseSuppressionEnabled
-        ? await createEnhancedVoiceStream(rawStream)
-        : { stream: rawStream, audioContext: null };
-      applyLocalVoiceTrackConstraints(rawStream);
-      applyLocalVoiceTrackConstraints(stream);
+      let voiceInput = null;
+      let microphoneError = null;
+      try {
+        voiceInput = await acquireVoiceInputStream();
+      } catch (err) {
+        microphoneError = err;
+      }
+      await refreshMediaDevices({ silent: true });
 
-      rawLocalStreamRef.current = rawStream;
-      localStreamRef.current = stream;
-      voiceAudioContextRef.current = audioContext;
+      rawLocalStreamRef.current = voiceInput?.rawStream || null;
+      localStreamRef.current = voiceInput?.stream || new MediaStream();
+      voiceAudioContextRef.current = voiceInput?.audioContext || null;
       if (String(joinChannelId) !== String(voiceChannelId)) setVoiceChannelId(String(joinChannelId));
-      setMicMuted(false);
+      const joinedMuted = !voiceInput?.stream?.getAudioTracks?.().length;
+      setMicMuted(joinedMuted);
       setVoiceJoined(true);
-      setVoiceStatus(noiseSuppressionEnabled ? 'Noise suppression active' : 'Voice connected');
+      setVoiceStatus(
+        joinedMuted
+          ? `Listening only. ${getMediaErrorMessage(microphoneError, 'Microphone is unavailable')}`
+          : (noiseSuppressionEnabled ? 'Noise suppression active' : 'Voice connected')
+      );
       startVoiceStats();
       socketRef.current?.emit('join-voice', { channelId: Number(joinChannelId) });
-      window.setTimeout(() => emitVoiceState({ muted: false }), 0);
+      window.setTimeout(() => emitVoiceState({ muted: joinedMuted }), 0);
     } catch (err) {
       cleanupVoice({ emitLeave: false });
       setError(getMediaErrorMessage(err, 'Could not access the microphone'));
@@ -4795,14 +4831,38 @@ export default function App() {
     }
   }
 
-  function toggleMicrophone() {
-    if (!localStreamRef.current) return;
-    const nextMuted = !micMuted;
-    const tracks = new Set([
+  async function toggleMicrophone() {
+    if (!voiceJoinedRef.current) return;
+    if (!localStreamRef.current) localStreamRef.current = new MediaStream();
+
+    const currentAudioTracks = new Set([
       ...localStreamRef.current.getAudioTracks(),
       ...(rawLocalStreamRef.current?.getAudioTracks?.() || [])
     ]);
-    tracks.forEach((track) => {
+
+    if (currentAudioTracks.size === 0) {
+      try {
+        setError('');
+        setVoiceStatus('Requesting microphone...');
+        const voiceInput = await acquireVoiceInputStream();
+        rawLocalStreamRef.current = voiceInput.rawStream;
+        localStreamRef.current = voiceInput.stream;
+        voiceAudioContextRef.current = voiceInput.audioContext;
+        Object.values(peersRef.current).forEach((peer) => addStreamTracksToPeer(peer, voiceInput.stream));
+        setMicMuted(false);
+        setVoiceStatus(noiseSuppressionEnabled ? 'Noise suppression active' : 'Microphone connected');
+        emitVoiceState({ muted: false });
+        await refreshMediaDevices({ silent: true });
+        await renegotiatePeers();
+      } catch (err) {
+        setError(getMediaErrorMessage(err, 'Could not access the microphone'));
+        setVoiceStatus('Listening only');
+      }
+      return;
+    }
+
+    const nextMuted = !micMuted;
+    currentAudioTracks.forEach((track) => {
       track.enabled = !nextMuted;
     });
     setMicMuted(nextMuted);
