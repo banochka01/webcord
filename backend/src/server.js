@@ -451,6 +451,14 @@ async function assertUserCanSend(userId) {
   if (isFutureDate(user.mutedUntil)) throw createApiError(403, 'ACCOUNT_MUTED', 'This account is muted.');
 }
 
+async function userCanModerateMessages(userId) {
+  const user = await prisma.user.findUnique({
+    where: { id: Number(userId) },
+    select: publicUserSelect
+  });
+  return isAdminUser(user);
+}
+
 function normalizeTargetSocketId(value) {
   const socketId = String(value || '').trim();
   return /^[A-Za-z0-9_-]{3,120}$/.test(socketId) ? socketId : '';
@@ -2509,8 +2517,11 @@ app.delete('/api/messages/:messageId', authMiddleware, messageRateLimit, async (
       return sendApiError(res, 400, 'INVALID_MESSAGE_ID', 'Invalid message id');
     }
 
-    const existing = await prisma.message.findUnique({ where: { id: messageId } });
-    if (!existing || existing.authorId !== req.user.userId) {
+    const [existing, canModerate] = await Promise.all([
+      prisma.message.findUnique({ where: { id: messageId } }),
+      userCanModerateMessages(req.user.userId)
+    ]);
+    if (!existing || existing.deletedAt || (existing.authorId !== req.user.userId && !canModerate)) {
       return sendApiError(res, 404, 'MESSAGE_NOT_FOUND', 'Message not found');
     }
 
@@ -2594,17 +2605,21 @@ app.delete('/api/dms/:conversationId/messages/:messageId', authMiddleware, messa
       return sendApiError(res, 400, 'INVALID_MESSAGE_ID', 'Invalid message id');
     }
 
-    const conversation = await prisma.directConversation.findUnique({
-      where: { id: conversationId },
-      include: { members: true }
-    });
-    const existing = await prisma.directMessage.findUnique({ where: { id: messageId } });
+    const [conversation, existing, canModerate] = await Promise.all([
+      prisma.directConversation.findUnique({
+        where: { id: conversationId },
+        include: { members: true }
+      }),
+      prisma.directMessage.findUnique({ where: { id: messageId } }),
+      userCanModerateMessages(req.user.userId)
+    ]);
+    const isMember = conversation ? getConversationMemberIds(conversation).includes(req.user.userId) : false;
     if (
       !conversation ||
-      !getConversationMemberIds(conversation).includes(req.user.userId) ||
       !existing ||
       existing.conversationId !== conversationId ||
-      existing.authorId !== req.user.userId
+      existing.deletedAt ||
+      (!canModerate && (!isMember || existing.authorId !== req.user.userId))
     ) {
       return sendApiError(res, 404, 'MESSAGE_NOT_FOUND', 'Message not found');
     }

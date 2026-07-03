@@ -35,10 +35,11 @@ const KEYS = {
 const ADMIN_PATH = '/admin';
 
 const PRESETS = {
-  Webcord: { bg: '#0b1020', panel: '#10182d', accent: '#5865f2', text: '#f8fbff' },
-  Aurora: { bg: '#101114', panel: '#181d20', accent: '#42d3a7', text: '#f7f7f2' },
-  Ember: { bg: '#190f0a', panel: '#2a1a14', accent: '#ff8c42', text: '#fff3eb' },
-  Moss: { bg: '#0d1510', panel: '#15211a', accent: '#7bd389', text: '#f3fff7' }
+  'Liquid Glass': { bg: '#07111d', panel: '#172337', accent: '#76e4ff', text: '#f7fbff', mode: 'liquid' },
+  Webcord: { bg: '#0b1020', panel: '#10182d', accent: '#5865f2', text: '#f8fbff', mode: 'solid' },
+  Aurora: { bg: '#101114', panel: '#181d20', accent: '#42d3a7', text: '#f7f7f2', mode: 'solid' },
+  Ember: { bg: '#190f0a', panel: '#2a1a14', accent: '#ff8c42', text: '#fff3eb', mode: 'solid' },
+  Moss: { bg: '#0d1510', panel: '#15211a', accent: '#7bd389', text: '#f3fff7', mode: 'solid' }
 };
 
 const DEFAULT_THEME = PRESETS.Webcord;
@@ -252,6 +253,119 @@ const VOICE_AUDIO_CONSTRAINTS = {
   sampleSize: { ideal: 16 },
   latency: { ideal: 0.02 }
 };
+
+function createVoiceAudioConstraints(deviceId = '', includeVoiceTuning = true) {
+  const constraints = includeVoiceTuning ? { ...VOICE_AUDIO_CONSTRAINTS } : {};
+  if (deviceId) constraints.deviceId = { exact: deviceId };
+  return constraints;
+}
+
+function createCircleVideoConstraints(deviceId = '', facingMode = 'user', includeQuality = true) {
+  const constraints = includeQuality
+    ? {
+        width: { ideal: 720 },
+        height: { ideal: 720 },
+        aspectRatio: { ideal: 1 },
+        frameRate: { ideal: 30 },
+        facingMode: { ideal: facingMode }
+      }
+    : { facingMode: { ideal: facingMode } };
+  if (deviceId) constraints.deviceId = { exact: deviceId };
+  return constraints;
+}
+
+async function requestVoiceAudioStream(deviceId = '') {
+  const attempts = [
+    { audio: createVoiceAudioConstraints(deviceId, true), video: false },
+    { audio: createVoiceAudioConstraints('', true), video: false },
+    { audio: true, video: false }
+  ];
+  let lastError = null;
+
+  for (const constraints of attempts) {
+    try {
+      return await navigator.mediaDevices.getUserMedia(constraints);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError || new Error('Could not access the microphone');
+}
+
+async function requestCircleRecordingStream({ micDeviceId = '', cameraDeviceId = '', facingMode = 'user' } = {}) {
+  const attempts = [
+    {
+      audio: createVoiceAudioConstraints(micDeviceId, true),
+      video: createCircleVideoConstraints(cameraDeviceId, facingMode, true)
+    },
+    {
+      audio: createVoiceAudioConstraints('', true),
+      video: createCircleVideoConstraints('', facingMode, true)
+    },
+    {
+      audio: true,
+      video: createCircleVideoConstraints('', facingMode, false)
+    },
+    {
+      audio: false,
+      video: createCircleVideoConstraints('', facingMode, false)
+    }
+  ];
+  let lastError = null;
+
+  for (const constraints of attempts) {
+    try {
+      return await navigator.mediaDevices.getUserMedia(constraints);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError || new Error('Could not access the camera');
+}
+
+async function requestCameraStream(cameraDeviceId = '', facingMode = 'user') {
+  const attempts = [
+    { video: createCircleVideoConstraints(cameraDeviceId, facingMode, true), audio: false },
+    { video: createCircleVideoConstraints('', facingMode, true), audio: false },
+    { video: true, audio: false }
+  ];
+  let lastError = null;
+
+  for (const constraints of attempts) {
+    try {
+      return await navigator.mediaDevices.getUserMedia(constraints);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError || new Error('Could not access the camera');
+}
+
+async function requestMediaDeviceProbe({ micDeviceId = '', cameraDeviceId = '' } = {}) {
+  const attempts = [
+    {
+      audio: createVoiceAudioConstraints(micDeviceId, true),
+      video: createCircleVideoConstraints(cameraDeviceId, 'user', false)
+    },
+    { audio: true, video: true },
+    { audio: true, video: false },
+    { audio: false, video: true }
+  ];
+  let lastError = null;
+
+  for (const constraints of attempts) {
+    try {
+      return await navigator.mediaDevices.getUserMedia(constraints);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError || new Error('Could not access media devices');
+}
 
 function readClientSettings() {
   try {
@@ -1187,7 +1301,7 @@ function CircleRecordingOverlay({
             <span className="recording-dot" />
             <strong>{formatShortDuration(elapsed)}</strong>
           </div>
-          <button className="circle-recording-cancel" type="button" onClick={onCancel}>ОТМЕНА</button>
+          <button className="circle-recording-cancel" type="button" onClick={onCancel}>Cancel</button>
           <button className="circle-recording-send" type="button" aria-label="Attach video circle" title="Attach video circle" onClick={onSend}>
             <AppIcon name="send" size={34} />
           </button>
@@ -1533,9 +1647,10 @@ function MediaViewer({ message, onClose }) {
   );
 }
 
-function MessageItem({ message, currentUserId, workspace, onAvatarClick, onReply, onEdit, onDelete, onReport, onOpenMedia }) {
+function MessageItem({ message, currentUserId, workspace, canModerateMessages = false, onAvatarClick, onReply, onEdit, onDelete, onReport, onOpenMedia }) {
   const isOwn = String(message.author?.id) === String(currentUserId);
   const isDeleted = Boolean(message.deletedAt);
+  const canDelete = (isOwn || canModerateMessages) && !isDeleted;
   const statusText = workspace === 'dm' && isOwn
     ? message.readAt
       ? 'Read'
@@ -1554,7 +1669,7 @@ function MessageItem({ message, currentUserId, workspace, onAvatarClick, onReply
           {!isDeleted ? <button type="button" onClick={() => onReply?.(message)}>Reply</button> : null}
           {!isOwn && !isDeleted ? <button type="button" onClick={() => onReport?.(message)}>Report</button> : null}
           {isOwn && !isDeleted && message.content ? <button type="button" onClick={() => onEdit?.(message)}>Edit</button> : null}
-          {isOwn && !isDeleted ? <button className="danger-text" type="button" onClick={() => onDelete?.(message)}>Delete</button> : null}
+          {canDelete ? <button className="danger-text" type="button" onClick={() => onDelete?.(message)}>Delete</button> : null}
         </div>
       </div>
       {message.replyTo ? (
@@ -1759,15 +1874,38 @@ function UserAvatar({ user, label, className = '' }) {
   );
 }
 
-function VoiceParticipantTile({ participant, compact = false }) {
+function VoiceParticipantTile({ participant, compact = false, volume = 100, onVolumeChange, onOpenProfile }) {
+  const isSelf = participant.socketId === 'self';
+
   return (
     <div className={compact ? 'voice-person compact' : 'voice-person'}>
-      <UserAvatar user={participant.user} label={participant.username} className="voice-avatar" />
+      <button
+        className="voice-profile-button"
+        type="button"
+        aria-label={`Open ${participant.username} profile`}
+        title={`Open ${participant.username} profile`}
+        onClick={() => onOpenProfile?.(participant.user)}
+      >
+        <UserAvatar user={participant.user} label={participant.username} className="voice-avatar" />
+      </button>
       <div className="voice-person-copy">
         <strong>{participant.username}</strong>
         <span>{participant.status}</span>
       </div>
       {participant.muted ? <span className="voice-chip">Muted</span> : null}
+      {!isSelf ? (
+        <label className="voice-volume-control">
+          <span>Volume</span>
+          <input
+            type="range"
+            min="0"
+            max="200"
+            value={volume}
+            onChange={(event) => onVolumeChange?.(participant.socketId, Number(event.target.value))}
+          />
+          <em>{volume}%</em>
+        </label>
+      ) : null}
     </div>
   );
 }
@@ -1806,7 +1944,10 @@ function VoiceStage({
   remoteStreams,
   voiceParticipants,
   voiceStatus,
-  voiceQuality
+  voiceQuality,
+  participantVolumes,
+  onParticipantVolumeChange,
+  onParticipantProfileOpen
 }) {
   const remoteVideoEntries = Object.entries(remoteStreams)
     .filter(([, stream]) => stream?.getVideoTracks?.().length)
@@ -1849,7 +1990,7 @@ function VoiceStage({
             <video
               autoPlay
               playsInline
-              muted={spotlight.socketId.startsWith('local-')}
+              muted
               ref={(node) => {
                 if (node && node.srcObject !== spotlight.stream) node.srcObject = spotlight.stream;
               }}
@@ -1860,13 +2001,22 @@ function VoiceStage({
             </div>
           </div>
           <div className="voice-filmstrip">
-            {participants.map((participant) => <VoiceParticipantTile key={participant.socketId} participant={participant} compact />)}
+            {participants.map((participant) => (
+              <VoiceParticipantTile
+                key={participant.socketId}
+                participant={participant}
+                compact
+                volume={participantVolumes[participant.socketId] ?? 100}
+                onVolumeChange={onParticipantVolumeChange}
+                onOpenProfile={onParticipantProfileOpen}
+              />
+            ))}
             {videoEntries.slice(1).map((entry) => (
               <div className="voice-mini-video" key={entry.socketId}>
                 <video
                   autoPlay
                   playsInline
-                  muted={entry.socketId.startsWith('local-')}
+                  muted
                   ref={(node) => {
                     if (node && node.srcObject !== entry.stream) node.srcObject = entry.stream;
                   }}
@@ -1878,7 +2028,15 @@ function VoiceStage({
         </div>
       ) : (
         <div className="voice-grid">
-          {participants.map((participant) => <VoiceParticipantTile key={participant.socketId} participant={participant} />)}
+          {participants.map((participant) => (
+            <VoiceParticipantTile
+              key={participant.socketId}
+              participant={participant}
+              volume={participantVolumes[participant.socketId] ?? 100}
+              onVolumeChange={onParticipantVolumeChange}
+              onOpenProfile={onParticipantProfileOpen}
+            />
+          ))}
         </div>
       )}
     </section>
@@ -2153,7 +2311,7 @@ function SettingsModal({
                 <button type="button" onClick={onToggleCamera}>{cameraEnabled ? 'Turn Camera Off' : 'Turn Camera On'}</button>
                 <button type="button" onClick={onTestCamera}>{cameraTesting ? 'Testing Camera...' : 'Test Camera'}</button>
                 <button type="button" onClick={onToggleCameraPreview}>{cameraPreviewStream ? 'Stop Preview' : 'Preview Camera'}</button>
-                <button className="ghost-btn" type="button" onClick={onRefreshDevices}>Refresh Devices</button>
+                <button className="ghost-btn" type="button" onClick={onRefreshDevices}>Grant / Refresh Devices</button>
                 <button className="ghost-btn" type="button" onClick={onToggleNoiseSuppression}>Noise Suppression: {noiseSuppressionEnabled ? 'On' : 'Off'}</button>
               </div>
             </div>
@@ -2623,6 +2781,7 @@ export default function App() {
       '--accent-color': theme.accent,
       '--text-color': theme.text
     }).forEach(([key, value]) => document.documentElement.style.setProperty(key, value));
+    document.documentElement.dataset.themeMode = theme.mode || 'solid';
     localStorage.setItem(KEYS.theme, JSON.stringify(theme));
   }, [theme]);
 
@@ -2632,7 +2791,7 @@ export default function App() {
 
   useEffect(() => {
     if (!showSettingsModal) return;
-    refreshMediaDevices().catch(() => {});
+    refreshMediaDevices({ silent: true }).catch(() => {});
   }, [showSettingsModal]);
 
   useEffect(() => {
@@ -3206,18 +3365,56 @@ export default function App() {
     }
   }
 
-  async function refreshMediaDevices() {
+  async function refreshMediaDevices({ silent = false } = {}) {
     if (!navigator.mediaDevices?.enumerateDevices) return;
-    const devices = await navigator.mediaDevices.enumerateDevices();
-    setMediaDevices({
-      audioinput: devices.filter((device) => device.kind === 'audioinput'),
-      videoinput: devices.filter((device) => device.kind === 'videoinput'),
-      audiooutput: devices.filter((device) => device.kind === 'audiooutput')
-    });
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      setMediaDevices({
+        audioinput: devices.filter((device) => device.kind === 'audioinput'),
+        videoinput: devices.filter((device) => device.kind === 'videoinput'),
+        audiooutput: devices.filter((device) => device.kind === 'audiooutput')
+      });
+      if (!silent && devices.length === 0) {
+        pushToast('No media devices were reported by the browser', 'error');
+      }
+    } catch (err) {
+      if (!silent) reportError(err, 'Could not refresh devices');
+    }
+  }
+
+  async function requestMediaDeviceAccess() {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setError('Media devices are not supported in this browser');
+      return;
+    }
+
+    let stream = null;
+    try {
+      setError('');
+      stream = await requestMediaDeviceProbe({
+        micDeviceId: clientSettings.micDeviceId,
+        cameraDeviceId: clientSettings.cameraDeviceId
+      });
+      pushToast('Device access granted');
+    } catch (err) {
+      reportError(new Error(getMediaErrorMessage(err, 'Could not access media devices')));
+    } finally {
+      stream?.getTracks?.().forEach((track) => track.stop());
+      await refreshMediaDevices({ silent: true });
+    }
   }
 
   function updateClientSetting(key, value) {
     setClientSettings((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function updateParticipantVolume(socketId, value) {
+    const nextVolume = Math.max(0, Math.min(200, Math.round(Number(value) || 0)));
+    setParticipantVolumes((prev) => ({ ...prev, [socketId]: nextVolume }));
+    const node = remoteAudioRef.current[socketId];
+    if (node) {
+      node.volume = Math.min(1, (nextVolume / 100) * (outputVolume / 100));
+    }
   }
 
   async function toggleNotifications() {
@@ -3247,10 +3444,7 @@ export default function App() {
     }
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: clientSettings.cameraDeviceId ? { deviceId: { exact: clientSettings.cameraDeviceId } } : true,
-        audio: false
-      });
+      const stream = await requestCameraStream(clientSettings.cameraDeviceId);
       cameraPreviewStreamRef.current = stream;
       setCameraPreviewStream(stream);
       await refreshMediaDevices();
@@ -3898,18 +4092,13 @@ export default function App() {
 
     try {
       setError('');
-      const audio = {
-        ...VOICE_AUDIO_CONSTRAINTS,
-        ...(clientSettings.micDeviceId ? { deviceId: { exact: clientSettings.micDeviceId } } : {})
-      };
-        const video = {
-          width: { ideal: 720 },
-          height: { ideal: 720 },
-          aspectRatio: { ideal: 1 },
-          facingMode: { ideal: circleFacingMode },
-          ...(clientSettings.cameraDeviceId ? { deviceId: { exact: clientSettings.cameraDeviceId } } : {})
-        };
-      const stream = await navigator.mediaDevices.getUserMedia(kind === 'circle' ? { audio, video } : { audio, video: false });
+      const stream = kind === 'circle'
+        ? await requestCircleRecordingStream({
+            micDeviceId: clientSettings.micDeviceId,
+            cameraDeviceId: clientSettings.cameraDeviceId,
+            facingMode: circleFacingMode
+          })
+        : await requestVoiceAudioStream(clientSettings.micDeviceId);
       const mimeType = kind === 'circle'
         ? getSupportedRecorderMimeType(VIDEO_RECORDER_MIME_TYPES)
         : getSupportedRecorderMimeType(AUDIO_RECORDER_MIME_TYPES);
@@ -3959,7 +4148,7 @@ export default function App() {
       }, 1000);
     } catch (err) {
       cleanupMessageRecording({ cancel: true });
-      reportError(err, kind === 'circle' ? 'Could not record a video circle' : 'Could not record a voice message');
+      reportError(new Error(getMediaErrorMessage(err, kind === 'circle' ? 'Could not access the camera' : 'Could not access the microphone')));
     }
   }
 
@@ -4477,15 +4666,7 @@ export default function App() {
     try {
       setError('');
       setVoiceStatus('Requesting camera...');
-      const cameraStream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          ...(clientSettings.cameraDeviceId ? { deviceId: { exact: clientSettings.cameraDeviceId } } : {}),
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-          frameRate: { ideal: 30 }
-        },
-        audio: false
-      });
+      const cameraStream = await requestCameraStream(clientSettings.cameraDeviceId);
       cameraStreamRef.current = cameraStream;
       const [videoTrack] = cameraStream.getVideoTracks();
       if (videoTrack) videoTrack.onended = () => stopCamera().catch(() => {});
@@ -4589,13 +4770,7 @@ export default function App() {
 
       setError('');
       setVoiceStatus('Requesting microphone...');
-      const rawStream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          ...VOICE_AUDIO_CONSTRAINTS,
-          ...(clientSettings.micDeviceId ? { deviceId: { exact: clientSettings.micDeviceId } } : {})
-        },
-        video: false
-      });
+      const rawStream = await requestVoiceAudioStream(clientSettings.micDeviceId);
       await refreshMediaDevices();
       const { stream, audioContext } = noiseSuppressionEnabled
         ? await createEnhancedVoiceStream(rawStream)
@@ -4613,9 +4788,10 @@ export default function App() {
       startVoiceStats();
       socketRef.current?.emit('join-voice', { channelId: Number(joinChannelId) });
       window.setTimeout(() => emitVoiceState({ muted: false }), 0);
-    } catch {
+    } catch (err) {
       cleanupVoice({ emitLeave: false });
-      setError('Could not access the microphone');
+      setError(getMediaErrorMessage(err, 'Could not access the microphone'));
+      setVoiceStatus('Voice idle');
     }
   }
 
@@ -4642,10 +4818,7 @@ export default function App() {
     try {
       setError('');
       setCameraTesting(true);
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: clientSettings.cameraDeviceId ? { deviceId: { exact: clientSettings.cameraDeviceId } } : true,
-        audio: false
-      });
+      const stream = await requestCameraStream(clientSettings.cameraDeviceId);
       await refreshMediaDevices();
       setVoiceStatus('Camera permission granted');
       window.setTimeout(() => {
@@ -4708,6 +4881,7 @@ export default function App() {
     }))
   ];
   const userCanManageChannels = canManageChannels(user);
+  const userCanModerateMessages = Boolean(user?.isAdmin) || ['ADMIN', 'OWNER'].includes(normalizeUserRole(user?.role));
   const visibleVoiceChannelForJoin = hasMobileFolderFilter
     ? (filteredVoiceChannels.find((channel) => String(channel.id) === String(voiceChannelId)) || filteredVoiceChannels[0] || null)
     : activeVoiceChannel;
@@ -5032,6 +5206,9 @@ export default function App() {
               voiceParticipants={voiceParticipants}
               voiceStatus={voiceStatus}
               voiceQuality={voiceQuality}
+              participantVolumes={participantVolumes}
+              onParticipantVolumeChange={updateParticipantVolume}
+              onParticipantProfileOpen={(profile) => profile && setViewedProfile(profile)}
             />
           ) : null}
 
@@ -5059,7 +5236,7 @@ export default function App() {
           ) : (
             <>
               <div className="messages" ref={messagesRef} style={chatWallpaperStyle} onScroll={handleMessagesScroll}>
-                {messages.length === 0 ? <div className="empty-state"><h3>{workspace === 'dm' ? 'No direct messages yet' : 'No messages yet'}</h3><p className="muted">{workspace === 'dm' ? 'This thread is ready.' : 'Start the conversation in this channel.'}</p></div> : messages.map((message) => <MessageItem key={message.id} message={message} workspace={workspace} currentUserId={user?.id} onAvatarClick={setViewedProfile} onReply={beginReply} onEdit={beginEdit} onDelete={deleteMessage} onReport={openReportForMessage} onOpenMedia={setViewedMedia} />)}
+                {messages.length === 0 ? <div className="empty-state"><h3>{workspace === 'dm' ? 'No direct messages yet' : 'No messages yet'}</h3><p className="muted">{workspace === 'dm' ? 'This thread is ready.' : 'Start the conversation in this channel.'}</p></div> : messages.map((message) => <MessageItem key={message.id} message={message} workspace={workspace} currentUserId={user?.id} canModerateMessages={userCanModerateMessages} onAvatarClick={setViewedProfile} onReply={beginReply} onEdit={beginEdit} onDelete={deleteMessage} onReport={openReportForMessage} onOpenMedia={setViewedMedia} />)}
                 <div ref={endRef} />
               </div>
               <form className="message-form composer" onSubmit={sendMessage}>
@@ -5240,7 +5417,7 @@ export default function App() {
         onTestCamera={testCamera}
         onToggleCameraPreview={toggleCameraPreview}
         onClientSettingChange={updateClientSetting}
-        onRefreshDevices={() => refreshMediaDevices().catch((err) => reportError(err, 'Could not refresh devices'))}
+        onRefreshDevices={() => requestMediaDeviceAccess().catch((err) => reportError(err, 'Could not refresh devices'))}
         onToggleNotifications={() => toggleNotifications().catch((err) => reportError(err, 'Could not update notifications'))}
         onCheckUpdates={() => {
           const bridge = getNativeBridge();
