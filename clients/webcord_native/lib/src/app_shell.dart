@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'dart:io';
 
 import 'package:camera/camera.dart';
@@ -1268,14 +1268,24 @@ class VoiceMiniPanel extends StatelessWidget {
         child: DecoratedBox(
           decoration: BoxDecoration(
             color: palette.panel.withAlpha(238),
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: palette.border),
-            boxShadow: const [
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(
+              color: state.voiceQuality.speaking
+                  ? WebCordColors.success.withAlpha(130)
+                  : palette.border,
+            ),
+            boxShadow: [
               BoxShadow(
-                color: Color(0x66000000),
+                color: Colors.black.withAlpha(102),
                 blurRadius: 24,
                 offset: Offset(0, 12),
               ),
+              if (state.voiceQuality.speaking)
+                BoxShadow(
+                  color: WebCordColors.success.withAlpha(38),
+                  blurRadius: 24,
+                  offset: const Offset(0, 8),
+                ),
             ],
           ),
           child: Padding(
@@ -5161,7 +5171,7 @@ class VoiceQualityPill extends StatelessWidget {
     );
     final details = compact
         ? '${stats.rttMs}ms ${stats.routeLabel}'
-        : '${stats.rttMs}ms · ${stats.jitterMs}j · $loss% loss · ${stats.routeLabel}';
+        : '${stats.rttMs}ms | ${stats.jitterMs}j | $loss% loss | ${stats.routeLabel}';
 
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -5181,7 +5191,7 @@ class VoiceQualityPill extends StatelessWidget {
             ),
             const SizedBox(width: 6),
             Text(
-              '${stats.label} · $details',
+              '${stats.label} | $details',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w900),
@@ -5202,11 +5212,14 @@ class VoiceDiagnosticsPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final palette = WebCordPalette.of(context);
     final stats = state.voiceQuality;
+    final warning = stats.packetLossPercent >= 4 || stats.jitterMs >= 40;
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: palette.panelSoft,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: palette.border),
+        color: palette.panelSoft.withAlpha(230),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: warning ? WebCordColors.danger.withAlpha(130) : palette.border,
+        ),
       ),
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -5231,6 +5244,10 @@ class VoiceDiagnosticsPanel extends StatelessWidget {
               spacing: 8,
               runSpacing: 8,
               children: [
+                _DiagnosticChip(
+                  label: 'Mode',
+                  value: state.voiceAudioProfile.label,
+                ),
                 _DiagnosticChip(label: 'RTT', value: '${stats.rttMs} ms'),
                 _DiagnosticChip(label: 'Jitter', value: '${stats.jitterMs} ms'),
                 _DiagnosticChip(
@@ -5248,6 +5265,19 @@ class VoiceDiagnosticsPanel extends StatelessWidget {
                 _DiagnosticChip(label: 'Route', value: stats.routeLabel),
               ],
             ),
+            if (warning) ...[
+              const SizedBox(height: 10),
+              Text(
+                stats.usingRelay
+                    ? 'Relay route is active. Quality depends on TURN and the network path.'
+                    : 'Jitter or packet loss is high. Try Low Data mode or switch network.',
+                style: TextStyle(
+                  color: WebCordColors.danger.withAlpha(230),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
           ],
         ),
       ),
@@ -6564,6 +6594,8 @@ class SettingsDialog extends StatelessWidget {
                       ),
                     ),
                     const SectionLabel('Voice & Video'),
+                    _VoiceAudioProfileSelector(state: state),
+                    const SizedBox(height: 10),
                     LayoutBuilder(
                       builder: (context, constraints) {
                         final stacked = constraints.maxWidth < 560;
@@ -6633,6 +6665,12 @@ class SettingsDialog extends StatelessWidget {
                       onChanged: state.setNoiseSuppression,
                       secondary: const Icon(Icons.hearing_rounded),
                       title: const Text('Noise suppression'),
+                      subtitle: Text(
+                        state.voiceAudioProfile ==
+                                VoiceAudioProfile.highFidelity
+                            ? 'High Fidelity keeps the mic signal cleaner by bypassing suppression.'
+                            : 'Reduces room noise before the voice stream is encoded.',
+                      ),
                     ),
                     if (state.voiceJoined) ...[
                       const SizedBox(height: 8),
@@ -7150,6 +7188,78 @@ class _WallpaperSettingsPanel extends StatelessWidget {
   }
 }
 
+class _VoiceAudioProfileSelector extends StatelessWidget {
+  const _VoiceAudioProfileSelector({required this.state});
+
+  final WebCordState state;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = WebCordPalette.of(context);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: palette.panelSoft.withAlpha(220),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: palette.border),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.tune_rounded, color: palette.cyan),
+                const SizedBox(width: 10),
+                const Expanded(
+                  child: Text(
+                    'Voice profile',
+                    style: TextStyle(fontWeight: FontWeight.w900),
+                  ),
+                ),
+                Text(
+                  '${state.voiceAudioProfile.opusBitrate ~/ 1000} kbps',
+                  style: TextStyle(
+                    color: palette.muted,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: SegmentedButton<VoiceAudioProfile>(
+                segments: [
+                  for (final profile in VoiceAudioProfile.values)
+                    ButtonSegment(
+                      value: profile,
+                      label: Text(profile.label),
+                      icon: Icon(_voiceProfileIcon(profile)),
+                    ),
+                ],
+                selected: {state.voiceAudioProfile},
+                onSelectionChanged: (value) =>
+                    state.setVoiceAudioProfile(value.first),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              state.voiceAudioProfile.caption,
+              style: TextStyle(
+                color: palette.muted,
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _SettingsDeviceDropdown extends StatelessWidget {
   const _SettingsDeviceDropdown({
     required this.icon,
@@ -7291,6 +7401,14 @@ IconData _themeIcon(AppThemeMode mode) {
     AppThemeMode.nebula => Icons.auto_awesome_rounded,
     AppThemeMode.graphite => Icons.contrast_rounded,
     AppThemeMode.aurora => Icons.blur_on_rounded,
+  };
+}
+
+IconData _voiceProfileIcon(VoiceAudioProfile profile) {
+  return switch (profile) {
+    VoiceAudioProfile.voiceFocus => Icons.record_voice_over_rounded,
+    VoiceAudioProfile.highFidelity => Icons.high_quality_rounded,
+    VoiceAudioProfile.lowData => Icons.network_check_rounded,
   };
 }
 

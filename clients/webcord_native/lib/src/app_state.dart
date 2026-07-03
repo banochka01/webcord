@@ -71,6 +71,45 @@ class VoiceQualityStats {
   String get routeLabel => usingRelay ? 'relay' : 'direct';
 }
 
+enum VoiceAudioProfile {
+  voiceFocus('Voice Focus', 'Cleaner speech', 64000, true, true, true, 0.02),
+  highFidelity(
+    'High Fidelity',
+    'Best mic quality',
+    96000,
+    false,
+    true,
+    false,
+    0.03,
+  ),
+  lowData('Low Data', 'Stable on weak network', 36000, true, true, true, 0.04);
+
+  const VoiceAudioProfile(
+    this.label,
+    this.caption,
+    this.opusBitrate,
+    this.useDtx,
+    this.echoCancellation,
+    this.autoGainControl,
+    this.latency,
+  );
+
+  final String label;
+  final String caption;
+  final int opusBitrate;
+  final bool useDtx;
+  final bool echoCancellation;
+  final bool autoGainControl;
+  final double latency;
+
+  static VoiceAudioProfile fromName(String? value) {
+    for (final profile in values) {
+      if (profile.name == value) return profile;
+    }
+    return VoiceAudioProfile.voiceFocus;
+  }
+}
+
 enum ProfileAssetKind { avatar, banner }
 
 class WebCordState extends ChangeNotifier {
@@ -84,6 +123,7 @@ class WebCordState extends ChangeNotifier {
   static const _inputVolumeKey = 'webcord_native_input_volume';
   static const _outputVolumeKey = 'webcord_native_output_volume';
   static const _noiseSuppressionKey = 'webcord_native_noise_suppression';
+  static const _voiceAudioProfileKey = 'webcord_native_voice_audio_profile';
   static const _notificationsKey = 'webcord_native_notifications';
   static const _compactMessagesKey = 'webcord_native_compact_messages';
   static const _inlineMediaPreviewsKey = 'webcord_native_inline_media_previews';
@@ -159,6 +199,7 @@ class WebCordState extends ChangeNotifier {
   bool notificationsEnabled = true;
   bool compactMessages = false;
   bool inlineMediaPreviews = true;
+  VoiceAudioProfile voiceAudioProfile = VoiceAudioProfile.voiceFocus;
   bool recordingVoice = false;
   int inputVolume = 100;
   int outputVolume = 100;
@@ -322,6 +363,9 @@ class WebCordState extends ChangeNotifier {
     noiseSuppressionEnabled = _storedFlag(
       await _store?.getInt(_noiseSuppressionKey),
       fallback: true,
+    );
+    voiceAudioProfile = VoiceAudioProfile.fromName(
+      await _store?.getString(_voiceAudioProfileKey),
     );
     notificationsEnabled = _storedFlag(
       await _store?.getInt(_notificationsKey),
@@ -1222,9 +1266,7 @@ class WebCordState extends ChangeNotifier {
 
       voiceJoined = true;
       micMuted = false;
-      voiceStatus = noiseSuppressionEnabled
-          ? 'Noise suppression active'
-          : 'Voice connected';
+      voiceStatus = _voiceProfileStatus();
       _socket?.emit('join-voice', {'channelId': selectedVoiceChannelId});
       _startVoiceStats();
       _emitVoiceState();
@@ -1325,6 +1367,18 @@ class WebCordState extends ChangeNotifier {
     await _store?.setInt(_noiseSuppressionKey, value ? 1 : 0);
     if (voiceJoined) {
       await _restartVoiceInput();
+    }
+    notifyListeners();
+  }
+
+  Future<void> setVoiceAudioProfile(VoiceAudioProfile profile) async {
+    voiceAudioProfile = profile;
+    await _store?.setString(_voiceAudioProfileKey, profile.name);
+    if (voiceJoined) {
+      voiceStatus = 'Applying ${profile.label} audio...';
+      notifyListeners();
+      await _restartVoiceInput();
+      voiceStatus = '${profile.label} active';
     }
     notifyListeners();
   }
@@ -1576,28 +1630,33 @@ class WebCordState extends ChangeNotifier {
   }
 
   Map<String, dynamic> _audioConstraints({bool forceDefaultDevice = false}) {
+    final profile = voiceAudioProfile;
+    final effectiveNoiseSuppression =
+        noiseSuppressionEnabled && profile != VoiceAudioProfile.highFidelity;
     if (!WebRTC.platformIsWeb) {
       final optional = <Map<String, dynamic>>[
         if (!forceDefaultDevice && selectedMicDeviceId.isNotEmpty)
           {'sourceId': selectedMicDeviceId},
       ];
       return {
-        'echoCancellation': true,
-        'noiseSuppression': noiseSuppressionEnabled,
-        'autoGainControl': true,
+        'echoCancellation': profile.echoCancellation,
+        'noiseSuppression': effectiveNoiseSuppression,
+        'autoGainControl': profile.autoGainControl,
         'channelCount': 1,
+        'sampleRate': 48000,
+        'sampleSize': 16,
         if (optional.isNotEmpty) 'optional': optional,
       };
     }
 
     return {
-      'echoCancellation': {'ideal': true},
-      'noiseSuppression': {'ideal': noiseSuppressionEnabled},
-      'autoGainControl': {'ideal': true},
+      'echoCancellation': {'ideal': profile.echoCancellation},
+      'noiseSuppression': {'ideal': effectiveNoiseSuppression},
+      'autoGainControl': {'ideal': profile.autoGainControl},
       'channelCount': {'ideal': 1},
       'sampleRate': {'ideal': 48000},
       'sampleSize': {'ideal': 16},
-      'latency': {'ideal': 0.02},
+      'latency': {'ideal': profile.latency},
       if (!forceDefaultDevice && selectedMicDeviceId.isNotEmpty)
         'deviceId': {'exact': selectedMicDeviceId},
     };
@@ -1638,7 +1697,7 @@ class WebCordState extends ChangeNotifier {
         _disposeStream(previous);
       }
       await _renegotiatePeers();
-      voiceStatus = 'Microphone ready';
+      voiceStatus = _voiceProfileStatus();
     } catch (exception) {
       _localVoiceStream = previous;
       error = _mediaError(exception, 'Could not switch microphone');
@@ -1979,11 +2038,11 @@ class WebCordState extends ChangeNotifier {
     final payloadType = match?.group(1);
     if (payloadType == null) return description;
 
-    const desiredParams = {
+    final desiredParams = {
       'minptime': '10',
       'useinbandfec': '1',
-      'usedtx': '0',
-      'maxaveragebitrate': '64000',
+      'usedtx': voiceAudioProfile.useDtx ? '1' : '0',
+      'maxaveragebitrate': '${voiceAudioProfile.opusBitrate}',
       'maxplaybackrate': '48000',
       'stereo': '0',
       'sprop-stereo': '0',
@@ -2240,6 +2299,10 @@ class WebCordState extends ChangeNotifier {
       return 'Connecting';
     }
     return 'Good';
+  }
+
+  String _voiceProfileStatus() {
+    return '${voiceAudioProfile.label} audio active';
   }
 
   Future<void> _attachRemoteStream(String socketId, MediaStream stream) async {
@@ -2684,6 +2747,8 @@ class WebCordState extends ChangeNotifier {
       'screen': screenSharing,
       'speaking': voiceQuality.speaking,
       'noiseSuppression': noiseSuppressionEnabled,
+      'audioProfile': voiceAudioProfile.name,
+      'audioBitrate': voiceAudioProfile.opusBitrate,
       'inputVolume': inputVolume,
       'outputVolume': outputVolume,
     };
