@@ -10,6 +10,7 @@ const wcEase = Curves.easeOutCubic;
 
 enum AppThemeMode {
   liquid('Liquid Glass'),
+  material('Material 3 Expressive'),
   nebula('Nebula'),
   graphite('Graphite'),
   aurora('Aurora');
@@ -174,6 +175,28 @@ const palettes = <AppThemeMode, WebCordPalette>{
       Color(0xFF182942),
     ],
   ),
+  AppThemeMode.material: WebCordPalette(
+    bg: Color(0xFF141218),
+    bgAlt: Color(0xFF1D1B20),
+    rail: Color(0xFF18151D),
+    panel: Color(0xFF211F26),
+    panelSoft: Color(0xFF2B2930),
+    panelStrong: Color(0xFF36343B),
+    border: Color(0x2FE7E0EC),
+    text: Color(0xFFF7F2FA),
+    muted: Color(0xFFCAC4D0),
+    accent: Color(0xFFD0BCFF),
+    accentHot: Color(0xFFEFB8C8),
+    cyan: Color(0xFF9BD8EF),
+    danger: Color(0xFFFFB4AB),
+    success: Color(0xFFB8F0C2),
+    backdrop: [
+      Color(0xFF141218),
+      Color(0xFF1D1B20),
+      Color(0xFF24212A),
+      Color(0xFF322E3B),
+    ],
+  ),
   AppThemeMode.nebula: WebCordPalette(
     bg: WebCordColors.bg,
     bgAlt: WebCordColors.bgAlt,
@@ -244,6 +267,9 @@ const palettes = <AppThemeMode, WebCordPalette>{
 
 ThemeData webCordTheme([AppThemeMode mode = AppThemeMode.liquid]) {
   final palette = palettes[mode]!;
+  final materialExpressive = mode == AppThemeMode.material;
+  final controlRadius = materialExpressive ? 28.0 : 22.0;
+  final fieldRadius = materialExpressive ? 28.0 : 24.0;
   final scheme = ColorScheme.fromSeed(
     seedColor: palette.accent,
     brightness: Brightness.dark,
@@ -292,34 +318,40 @@ ThemeData webCordTheme([AppThemeMode mode = AppThemeMode.liquid]) {
       hintStyle: TextStyle(color: palette.muted.withAlpha(210)),
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(fieldRadius),
         borderSide: BorderSide(color: palette.border),
       ),
       enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(fieldRadius),
         borderSide: BorderSide(color: palette.border),
       ),
       focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(fieldRadius),
         borderSide: BorderSide(color: palette.accent),
       ),
     ),
     filledButtonTheme: FilledButtonThemeData(
       style: FilledButton.styleFrom(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(controlRadius),
+        ),
         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
       ),
     ),
     outlinedButtonTheme: OutlinedButtonThemeData(
       style: OutlinedButton.styleFrom(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(controlRadius),
+        ),
         side: BorderSide(color: palette.border),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
       ),
     ),
     textButtonTheme: TextButtonThemeData(
       style: TextButton.styleFrom(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(materialExpressive ? 24 : 18),
+        ),
       ),
     ),
     iconButtonTheme: IconButtonThemeData(
@@ -423,26 +455,38 @@ class Panel extends StatelessWidget {
   Widget build(BuildContext context) {
     final palette = WebCordPalette.of(context);
     final panelColor = color == WebCordColors.panel ? palette.panel : color;
+    final panelAlpha = (panelColor.a * 255).round().clamp(0, 255);
+    final glassAlpha = panelAlpha < 255 ? panelAlpha : 174;
     return ClipRRect(
       borderRadius: BorderRadius.circular(24),
       child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 22, sigmaY: 22),
+        filter: ImageFilter.blur(sigmaX: 30, sigmaY: 30),
         child: AnimatedContainer(
           duration: wcBaseMotion,
           curve: wcEase,
           decoration: BoxDecoration(
-            color: panelColor.withAlpha(206),
+            color: panelColor.withAlpha(glassAlpha),
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                Colors.white.withAlpha(27),
+                Colors.white.withAlpha(9),
+                palette.accent.withAlpha(14),
+              ],
+              stops: const [0, 0.46, 1],
+            ),
             borderRadius: BorderRadius.circular(24),
-            border: Border.all(color: palette.border),
+            border: Border.all(color: palette.border.withAlpha(112)),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withAlpha(82),
-                blurRadius: 34,
-                offset: Offset(0, 22),
+                color: Colors.black.withAlpha(72),
+                blurRadius: 42,
+                offset: const Offset(0, 26),
               ),
               BoxShadow(
-                color: palette.accent.withAlpha(18),
-                blurRadius: 32,
+                color: palette.accent.withAlpha(19),
+                blurRadius: 38,
                 offset: const Offset(0, 10),
               ),
             ],

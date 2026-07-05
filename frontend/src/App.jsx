@@ -36,6 +36,7 @@ const ADMIN_PATH = '/admin';
 
 const PRESETS = {
   'Liquid Glass': { bg: '#07111d', panel: '#172337', accent: '#76e4ff', text: '#f7fbff', mode: 'liquid' },
+  'Material 3 Expressive': { bg: '#141218', panel: '#211f26', accent: '#d0bcff', text: '#f7f2fa', mode: 'material' },
   Webcord: { bg: '#0b1020', panel: '#10182d', accent: '#5865f2', text: '#f8fbff', mode: 'solid' },
   Aurora: { bg: '#101114', panel: '#181d20', accent: '#42d3a7', text: '#f7f7f2', mode: 'solid' },
   Ember: { bg: '#190f0a', panel: '#2a1a14', accent: '#ff8c42', text: '#fff3eb', mode: 'solid' },
@@ -1258,12 +1259,102 @@ function StreamPreviewVideo({ stream, className = '' }) {
   return <video ref={videoRef} className={className} autoPlay playsInline muted />;
 }
 
+function createPreviewVideoElement(stream) {
+  return new Promise((resolve) => {
+    const video = document.createElement('video');
+    video.autoplay = true;
+    video.muted = true;
+    video.playsInline = true;
+    video.srcObject = stream;
+
+    const done = () => resolve(video);
+    video.onloadedmetadata = done;
+    video.play?.().then(done).catch(done);
+    window.setTimeout(done, 250);
+  });
+}
+
+function drawCoverVideo(ctx, video, size) {
+  if (!video || video.readyState < 2 || !video.videoWidth || !video.videoHeight) {
+    ctx.fillStyle = '#07101a';
+    ctx.fillRect(0, 0, size, size);
+    return;
+  }
+
+  const scale = Math.max(size / video.videoWidth, size / video.videoHeight);
+  const width = video.videoWidth * scale;
+  const height = video.videoHeight * scale;
+  const x = (size - width) / 2;
+  const y = (size - height) / 2;
+  ctx.drawImage(video, x, y, width, height);
+}
+
+async function createSwitchableCircleRecorder({ micDeviceId = '', cameraDeviceId = '', facingMode = 'user' } = {}) {
+  const canvas = document.createElement('canvas');
+  const capture = canvas.captureStream?.bind(canvas);
+  if (!capture) throw new Error('Realtime camera switching is not supported in this browser');
+
+  const size = 720;
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d', { alpha: false });
+  if (!ctx) throw new Error('Could not prepare video recorder');
+
+  const initialStream = await requestCircleRecordingStream({ micDeviceId, cameraDeviceId, facingMode });
+  const audioTracks = initialStream.getAudioTracks();
+  const recordStream = capture(30);
+  audioTracks.forEach((track) => recordStream.addTrack(track));
+
+  let activePreviewStream = initialStream;
+  let activeVideo = await createPreviewVideoElement(activePreviewStream);
+  let rafId = 0;
+  let stopped = false;
+
+  const draw = () => {
+    if (stopped) return;
+    ctx.save();
+    ctx.fillStyle = '#07101a';
+    ctx.fillRect(0, 0, size, size);
+    drawCoverVideo(ctx, activeVideo, size);
+    ctx.restore();
+    rafId = window.requestAnimationFrame(draw);
+  };
+  draw();
+
+  return {
+    recordStream,
+    get previewStream() {
+      return activePreviewStream;
+    },
+    async switchCamera(nextFacingMode) {
+      const nextVideoStream = await requestCameraStream(cameraDeviceId, nextFacingMode);
+      const nextPreviewStream = new MediaStream([
+        ...nextVideoStream.getVideoTracks(),
+        ...audioTracks.filter((track) => track.readyState !== 'ended')
+      ]);
+      const nextVideo = await createPreviewVideoElement(nextPreviewStream);
+
+      activePreviewStream.getVideoTracks().forEach((track) => track.stop());
+      activePreviewStream = nextPreviewStream;
+      activeVideo = nextVideo;
+      return activePreviewStream;
+    },
+    stop() {
+      stopped = true;
+      if (rafId) window.cancelAnimationFrame(rafId);
+      activePreviewStream.getTracks().forEach((track) => track.stop());
+      recordStream.getTracks().forEach((track) => track.stop());
+    }
+  };
+}
+
 function CircleRecordingOverlay({
   stream,
   elapsed,
   paused,
   torchEnabled,
   facingMode,
+  cameraSwitching,
   onCancel,
   onSend,
   onPauseToggle,
@@ -1297,7 +1388,7 @@ function CircleRecordingOverlay({
           </button>
         </div>
         <div className="circle-recording-tools">
-          <button type="button" aria-label="Switch camera for next circle" title={`Next circle: ${facingMode === 'user' ? 'rear camera' : 'front camera'}`} onClick={onSwitchCamera}>
+          <button type="button" aria-label="Switch camera" title={`Switch to ${facingMode === 'user' ? 'rear camera' : 'front camera'}`} onClick={onSwitchCamera} disabled={cameraSwitching}>
             <AppIcon name="switchCamera" size={22} />
           </button>
           <button type="button" aria-label="Toggle torch" title={torchEnabled ? 'Turn torch off' : 'Turn torch on'} onClick={onTorchToggle}>
@@ -2625,6 +2716,7 @@ export default function App() {
   const [recordingPaused, setRecordingPaused] = useState(false);
   const [circleTorchEnabled, setCircleTorchEnabled] = useState(false);
   const [circleFacingMode, setCircleFacingMode] = useState('user');
+  const [circleCameraSwitching, setCircleCameraSwitching] = useState(false);
   const [voiceJoined, setVoiceJoined] = useState(false);
   const [micMuted, setMicMuted] = useState(false);
   const [screenSharing, setScreenSharing] = useState(false);
@@ -2676,6 +2768,7 @@ export default function App() {
   const messageRecorderRef = useRef(null);
   const messageRecordingChunksRef = useRef([]);
   const messageRecordingStreamRef = useRef(null);
+  const messageRecordingCircleSessionRef = useRef(null);
   const messageRecordingKindRef = useRef('');
   const messageRecordingCancelledRef = useRef(false);
   const messageRecordingTimerRef = useRef(null);
@@ -3982,10 +4075,21 @@ export default function App() {
   }
 
   function stopMessageRecordingStream() {
+    if (messageRecordingCircleSessionRef.current) {
+      messageRecordingCircleSessionRef.current.stop();
+      messageRecordingCircleSessionRef.current = null;
+      messageRecordingStreamRef.current = null;
+      setRecordingPreviewStream(null);
+      setCircleTorchEnabled(false);
+      setCircleCameraSwitching(false);
+      return;
+    }
+
     messageRecordingStreamRef.current?.getTracks?.().forEach((track) => track.stop());
     messageRecordingStreamRef.current = null;
     setRecordingPreviewStream(null);
     setCircleTorchEnabled(false);
+    setCircleCameraSwitching(false);
   }
 
   function cleanupMessageRecording({ cancel = false } = {}) {
@@ -4046,12 +4150,29 @@ export default function App() {
     }
   }
 
-  function switchCircleCameraForNextTake() {
-    setCircleFacingMode((value) => {
-      const next = value === 'user' ? 'environment' : 'user';
+  async function switchCircleCameraRealtime() {
+    const next = circleFacingMode === 'user' ? 'environment' : 'user';
+    const session = messageRecordingCircleSessionRef.current;
+
+    if (!circleRecording || !session) {
+      setCircleFacingMode(next);
       pushToast(`Next video circle will use ${next === 'user' ? 'front' : 'rear'} camera`);
-      return next;
-    });
+      return;
+    }
+
+    try {
+      setCircleCameraSwitching(true);
+      const previewStream = await session.switchCamera(next);
+      messageRecordingStreamRef.current = previewStream;
+      setRecordingPreviewStream(previewStream);
+      setCircleFacingMode(next);
+      setCircleTorchEnabled(false);
+      pushToast(`Switched to ${next === 'user' ? 'front' : 'rear'} camera`);
+    } catch (err) {
+      reportError(err, 'Could not switch camera');
+    } finally {
+      setCircleCameraSwitching(false);
+    }
   }
 
   async function uploadRecordedAttachment(blob, kind) {
@@ -4100,21 +4221,28 @@ export default function App() {
 
     try {
       setError('');
-      const stream = kind === 'circle'
-        ? await requestCircleRecordingStream({
-            micDeviceId: clientSettings.micDeviceId,
-            cameraDeviceId: clientSettings.cameraDeviceId,
-            facingMode: circleFacingMode
-          })
-        : await requestVoiceAudioStream(clientSettings.micDeviceId);
+      let stream;
+      let previewStream = null;
+      if (kind === 'circle') {
+        const circleSession = await createSwitchableCircleRecorder({
+          micDeviceId: clientSettings.micDeviceId,
+          cameraDeviceId: clientSettings.cameraDeviceId,
+          facingMode: circleFacingMode
+        });
+        messageRecordingCircleSessionRef.current = circleSession;
+        stream = circleSession.recordStream;
+        previewStream = circleSession.previewStream;
+      } else {
+        stream = await requestVoiceAudioStream(clientSettings.micDeviceId);
+      }
       const mimeType = kind === 'circle'
         ? getSupportedRecorderMimeType(VIDEO_RECORDER_MIME_TYPES)
         : getSupportedRecorderMimeType(AUDIO_RECORDER_MIME_TYPES);
       const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
 
       messageRecordingChunksRef.current = [];
-      messageRecordingStreamRef.current = stream;
-      setRecordingPreviewStream(kind === 'circle' ? stream : null);
+      messageRecordingStreamRef.current = previewStream || stream;
+      setRecordingPreviewStream(kind === 'circle' ? previewStream : null);
       messageRecorderRef.current = recorder;
       messageRecordingKindRef.current = kind;
       messageRecordingCancelledRef.current = false;
@@ -5400,11 +5528,12 @@ export default function App() {
             paused={recordingPaused}
             torchEnabled={circleTorchEnabled}
             facingMode={circleFacingMode}
+            cameraSwitching={circleCameraSwitching}
             onCancel={() => cleanupMessageRecording({ cancel: true })}
             onSend={() => cleanupMessageRecording()}
             onPauseToggle={toggleMessageRecordingPause}
             onTorchToggle={toggleCircleTorch}
-            onSwitchCamera={switchCircleCameraForNextTake}
+            onSwitchCamera={switchCircleCameraRealtime}
           />
         ) : null}
 

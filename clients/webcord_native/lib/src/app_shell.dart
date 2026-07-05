@@ -5936,6 +5936,7 @@ class _CircleRecorderDialogState extends State<CircleRecorderDialog> {
   bool _loading = true;
   bool _recording = false;
   bool _sending = false;
+  bool _switchingCamera = false;
   String? _error;
 
   @override
@@ -6025,7 +6026,7 @@ class _CircleRecorderDialogState extends State<CircleRecorderDialog> {
   }
 
   Future<void> _switchCamera() async {
-    if (_recording || _sending || _cameras.length < 2) return;
+    if (_sending || _switchingCamera || _cameras.length < 2) return;
     final current = _cameras[_activeCameraIndex];
     final targetDirection = current.lensDirection == CameraLensDirection.front
         ? CameraLensDirection.back
@@ -6033,6 +6034,31 @@ class _CircleRecorderDialogState extends State<CircleRecorderDialog> {
     final next =
         _bestCameraIndex(_cameras, targetDirection) ??
         _bestAnyCameraIndex(_cameras, excludeIndex: _activeCameraIndex);
+
+    if (_recording) {
+      final controller = _cameraController;
+      if (controller == null || !controller.value.isInitialized) return;
+      setState(() => _switchingCamera = true);
+      try {
+        await controller.setDescription(_cameras[next]);
+        if (!mounted) return;
+        setState(() {
+          _activeCameraIndex = next;
+          _error = null;
+        });
+      } catch (exception) {
+        if (!mounted) return;
+        setState(() {
+          _error =
+              'This device cannot switch cameras during the current recording. '
+              'Stop the circle or try another camera.';
+        });
+      } finally {
+        if (mounted) setState(() => _switchingCamera = false);
+      }
+      return;
+    }
+
     await _initializeCamera(next);
   }
 
@@ -6295,10 +6321,16 @@ class _CircleRecorderDialogState extends State<CircleRecorderDialog> {
                     ),
                     IconButton(
                       tooltip: 'Switch camera',
-                      onPressed: _cameras.length > 1 && !_recording && !_sending
+                      onPressed:
+                          _cameras.length > 1 && !_sending && !_switchingCamera
                           ? _switchCamera
                           : null,
-                      icon: const Icon(Icons.cameraswitch_rounded),
+                      icon: _switchingCamera
+                          ? const SizedBox.square(
+                              dimension: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.cameraswitch_rounded),
                     ),
                   ],
                 ),
@@ -7452,6 +7484,7 @@ class _SettingsSlider extends StatelessWidget {
 IconData _themeIcon(AppThemeMode mode) {
   return switch (mode) {
     AppThemeMode.liquid => Icons.blur_circular_rounded,
+    AppThemeMode.material => Icons.dashboard_customize_rounded,
     AppThemeMode.nebula => Icons.auto_awesome_rounded,
     AppThemeMode.graphite => Icons.contrast_rounded,
     AppThemeMode.aurora => Icons.blur_on_rounded,

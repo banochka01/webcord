@@ -79,6 +79,7 @@ BRANCH=codex/webcord-ui-redesign ./scripts/deploy.sh
 The deploy script refuses dirty tracked files by default, writes a pre-deploy patch to `/opt/webcord_backups`, rebuilds containers, and waits for `/api/health`.
 
 See `docs/production-runbook.md` for the deployment checklist and rollback notes.
+See `docs/roadmap.md` for the client, voice, backend and release roadmap.
 
 ## Desktop Client
 

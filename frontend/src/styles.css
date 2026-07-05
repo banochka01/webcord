@@ -23,6 +23,10 @@
   --shadow: 0 22px 82px rgba(0, 0, 0, 0.52);
   --shadow-lift: 0 18px 48px rgba(0, 0, 0, 0.32), 0 0 0 1px rgba(255, 255, 255, 0.045);
   --shadow-glow: 0 18px 52px color-mix(in srgb, var(--accent-color) 18%, transparent);
+  --glass-panel: color-mix(in srgb, var(--panel-color) 34%, transparent);
+  --glass-panel-strong: color-mix(in srgb, var(--panel-color) 48%, transparent);
+  --glass-highlight: rgba(255, 255, 255, 0.155);
+  --glass-border: rgba(255, 255, 255, 0.18);
   --focus-ring: 0 0 0 3px color-mix(in srgb, var(--accent-color) 32%, transparent), 0 0 0 1px color-mix(in srgb, var(--accent-cool) 52%, transparent);
   --motion-fast: 180ms;
   --motion-base: 280ms;
@@ -1685,14 +1689,16 @@ p {
 :root[data-theme-mode="liquid"] .profile-card,
 :root[data-theme-mode="liquid"] .guild-cover,
 :root[data-theme-mode="liquid"] .modal-card {
-  border-color: rgba(255, 255, 255, 0.16);
+  border-color: var(--glass-border);
   background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.035)),
-    color-mix(in srgb, var(--panel-color) 58%, transparent);
+    linear-gradient(135deg, var(--glass-highlight), rgba(255, 255, 255, 0.035) 46%, rgba(118, 228, 255, 0.055)),
+    var(--glass-panel);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.16),
-    0 18px 58px rgba(0, 0, 0, 0.28);
-  backdrop-filter: blur(26px) saturate(1.55);
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.045),
+    0 18px 58px rgba(0, 0, 0, 0.24);
+  -webkit-backdrop-filter: blur(34px) saturate(1.7);
+  backdrop-filter: blur(34px) saturate(1.7);
 }
 
 :root[data-theme-mode="liquid"] .message-card,
@@ -1704,24 +1710,127 @@ p {
 :root[data-theme-mode="liquid"] .color-grid label {
   border-color: rgba(255, 255, 255, 0.13);
   background:
-    linear-gradient(145deg, rgba(255, 255, 255, 0.105), rgba(255, 255, 255, 0.028)),
-    rgba(18, 28, 42, 0.56);
-  backdrop-filter: blur(18px) saturate(1.42);
+    linear-gradient(145deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.028)),
+    rgba(18, 28, 42, 0.38);
+  -webkit-backdrop-filter: blur(22px) saturate(1.52);
+  backdrop-filter: blur(22px) saturate(1.52);
 }
 
 :root[data-theme-mode="liquid"] .chat-header,
 :root[data-theme-mode="liquid"] .sidebar-bottom {
   background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.115), rgba(255, 255, 255, 0.03)),
-    rgba(14, 22, 34, 0.66);
-  backdrop-filter: blur(24px) saturate(1.48);
+    linear-gradient(135deg, rgba(255, 255, 255, 0.13), rgba(255, 255, 255, 0.035)),
+    var(--glass-panel-strong);
+  -webkit-backdrop-filter: blur(28px) saturate(1.58);
+  backdrop-filter: blur(28px) saturate(1.58);
 }
 
 :root[data-theme-mode="liquid"] .live-pill,
 :root[data-theme-mode="liquid"] .voice-chip,
 :root[data-theme-mode="liquid"] .request-pill {
   border-color: rgba(255, 255, 255, 0.17);
-  background: rgba(255, 255, 255, 0.09);
+  background: rgba(255, 255, 255, 0.105);
+  -webkit-backdrop-filter: blur(18px) saturate(1.45);
+  backdrop-filter: blur(18px) saturate(1.45);
+}
+
+:root[data-theme-mode="material"] {
+  --surface-0: #141218;
+  --surface-1: #1d1b20;
+  --surface-2: #211f26;
+  --surface-3: #2b2930;
+  --surface-4: #36343b;
+  --soft-bg: rgba(208, 188, 255, 0.08);
+  --soft-bg-strong: rgba(208, 188, 255, 0.13);
+  --border-color: rgba(231, 224, 236, 0.12);
+  --border-strong: rgba(231, 224, 236, 0.24);
+  --muted-text: #cac4d0;
+  --accent-hot: #efb8c8;
+  --accent-cool: #9bd8ef;
+  --radius: 22px;
+  --shadow: 0 18px 42px rgba(0, 0, 0, 0.34);
+  --shadow-lift: 0 16px 34px rgba(0, 0, 0, 0.28), 0 0 0 1px rgba(231, 224, 236, 0.07);
+}
+
+:root[data-theme-mode="material"] body {
+  background:
+    radial-gradient(circle at 18% 8%, rgba(208, 188, 255, 0.18), transparent 31%),
+    radial-gradient(circle at 78% 18%, rgba(239, 184, 200, 0.13), transparent 28%),
+    linear-gradient(160deg, #141218, #1d1b20 54%, #111016);
+}
+
+:root[data-theme-mode="material"] .app-shell {
+  background:
+    radial-gradient(circle at 20% 4%, rgba(208, 188, 255, 0.12), transparent 32%),
+    radial-gradient(circle at 84% 12%, rgba(155, 216, 239, 0.1), transparent 28%),
+    var(--bg-color);
+}
+
+:root[data-theme-mode="material"] .sidebar,
+:root[data-theme-mode="material"] .chat-panel,
+:root[data-theme-mode="material"] .activity-panel,
+:root[data-theme-mode="material"] .rail,
+:root[data-theme-mode="material"] .desktop-titlebar,
+:root[data-theme-mode="material"] .settings-content,
+:root[data-theme-mode="material"] .settings-nav,
+:root[data-theme-mode="material"] .settings-card-list,
+:root[data-theme-mode="material"] .settings-row,
+:root[data-theme-mode="material"] .settings-slider,
+:root[data-theme-mode="material"] .theme-preview,
+:root[data-theme-mode="material"] .message-form,
+:root[data-theme-mode="material"] .composer,
+:root[data-theme-mode="material"] .voice-stage,
+:root[data-theme-mode="material"] .voice-person,
+:root[data-theme-mode="material"] .profile-card,
+:root[data-theme-mode="material"] .guild-cover,
+:root[data-theme-mode="material"] .modal-card {
+  border-color: rgba(231, 224, 236, 0.14);
+  background:
+    linear-gradient(135deg, rgba(208, 188, 255, 0.085), rgba(239, 184, 200, 0.045)),
+    var(--panel-color);
+  box-shadow: var(--shadow);
+}
+
+:root[data-theme-mode="material"] .message-card,
+:root[data-theme-mode="material"] .activity-card,
+:root[data-theme-mode="material"] .sidebar-card,
+:root[data-theme-mode="material"] .channel-btn,
+:root[data-theme-mode="material"] .conversation-btn,
+:root[data-theme-mode="material"] .preset-btn,
+:root[data-theme-mode="material"] .color-grid label {
+  border-color: rgba(231, 224, 236, 0.12);
+  background: color-mix(in srgb, var(--panel-color) 78%, var(--accent-color) 8%);
+  border-radius: 18px;
+}
+
+:root[data-theme-mode="material"] .rail-btn,
+:root[data-theme-mode="material"] .composer-btn,
+:root[data-theme-mode="material"] .icon-btn,
+:root[data-theme-mode="material"] .voice-chip,
+:root[data-theme-mode="material"] .request-pill,
+:root[data-theme-mode="material"] .live-pill {
+  border-radius: 999px;
+}
+
+:root[data-theme-mode="material"] .composer-send,
+:root[data-theme-mode="material"] .primary-btn,
+:root[data-theme-mode="material"] .sidebar-bottom button:first-child {
+  border-radius: 999px;
+  background: #d0bcff;
+  color: #381e72;
+  box-shadow: 0 14px 32px rgba(208, 188, 255, 0.25);
+}
+
+:root[data-theme-mode="material"] .rail-btn:hover,
+:root[data-theme-mode="material"] .rail-btn.active {
+  background: #d0bcff;
+  color: #381e72;
+  box-shadow: 0 14px 28px rgba(208, 188, 255, 0.2);
+}
+
+:root[data-theme-mode="material"] .chat-header,
+:root[data-theme-mode="material"] .sidebar-bottom {
+  background: color-mix(in srgb, var(--panel-color) 86%, var(--accent-color) 7%);
 }
 
 .app-shell.voice-expanded-mode {
@@ -3003,6 +3112,7 @@ p {
   background:
     radial-gradient(circle at 50% 38%, rgba(118, 228, 255, 0.16), transparent 28%),
     linear-gradient(180deg, rgba(8, 12, 18, 0.06), rgba(8, 12, 18, 0.62));
+  -webkit-backdrop-filter: blur(1px);
   backdrop-filter: blur(1px);
 }
 
@@ -3064,10 +3174,13 @@ p {
   padding: 0;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 50%;
-  background: rgba(31, 44, 61, 0.82);
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.035)),
+    rgba(31, 44, 61, 0.44);
   color: #fff;
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.28);
-  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(22px) saturate(1.55);
+  backdrop-filter: blur(22px) saturate(1.55);
 }
 
 .circle-recording-tools {
@@ -3079,8 +3192,11 @@ p {
   gap: 8px;
   padding: 7px;
   border-radius: 24px;
-  background: rgba(31, 44, 61, 0.76);
-  backdrop-filter: blur(18px);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.145), rgba(255, 255, 255, 0.035)),
+    rgba(31, 44, 61, 0.38);
+  -webkit-backdrop-filter: blur(24px) saturate(1.55);
+  backdrop-filter: blur(24px) saturate(1.55);
 }
 
 .circle-recording-tools button {
@@ -3101,9 +3217,12 @@ p {
   z-index: 5;
   padding: 10px 8px 10px 16px;
   border-radius: 26px;
-  background: rgba(15, 22, 34, 0.92);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.145), rgba(255, 255, 255, 0.035)),
+    rgba(15, 22, 34, 0.5);
   box-shadow: 0 20px 48px rgba(0, 0, 0, 0.36);
-  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(28px) saturate(1.6);
+  backdrop-filter: blur(28px) saturate(1.6);
 }
 
 .circle-recording-timer {
