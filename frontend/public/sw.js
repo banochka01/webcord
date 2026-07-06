@@ -24,7 +24,7 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(request.url);
 
   if (request.method !== 'GET') return;
-  if (url.pathname.startsWith('/api') || url.pathname.startsWith('/socket.io')) return;
+  if (url.pathname.startsWith('/api') || url.pathname.startsWith('/socket.io') || url.pathname.startsWith('/downloads')) return;
 
   if (request.mode === 'navigate') {
     event.respondWith(

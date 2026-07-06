@@ -81,6 +81,15 @@ The deploy script refuses dirty tracked files by default, writes a pre-deploy pa
 See `docs/production-runbook.md` for the deployment checklist and rollback notes.
 See `docs/roadmap.md` for the client, voice, backend and release roadmap.
 
+## Client Downloads
+
+Public download buttons point to server-hosted client files:
+
+- Windows: `/downloads/windows`
+- Android: `/downloads/android`
+
+Admins listed in `ADMIN_USERNAMES` can sign in at `/adminka` with their normal WebCord account and replace these files from the admin panel. Uploaded client files are stored in `CLIENT_DOWNLOAD_DIR`; Docker keeps them in the `client_downloads` volume.
+
 ## Desktop Client
 
 ```bash

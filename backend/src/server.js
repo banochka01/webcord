@@ -16,6 +16,7 @@ const server = http.createServer(app);
 
 const PORT = Number(process.env.PORT || 3001);
 const MAX_UPLOAD_SIZE_MB = Number(process.env.MAX_UPLOAD_SIZE_MB || 25);
+const MAX_CLIENT_DOWNLOAD_SIZE_MB = Number(process.env.CLIENT_DOWNLOAD_MAX_SIZE_MB || 500);
 const DEFAULT_MESSAGE_LIMIT = 100;
 const MAX_MESSAGE_LIMIT = 200;
 const CLIENT_ORIGINS = String(process.env.CLIENT_URL || '')
@@ -77,9 +78,13 @@ const NATIVE_CLIENT_ORIGINS = [
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const uploadDir = path.resolve(process.env.UPLOAD_DIR || path.resolve(__dirname, '../uploads'));
+const clientDownloadDir = path.resolve(process.env.CLIENT_DOWNLOAD_DIR || path.resolve(__dirname, '../client-downloads'));
+const clientDownloadManifestPath = path.join(clientDownloadDir, 'manifest.json');
 
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
+for (const dir of [uploadDir, clientDownloadDir]) {
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
 }
 
 const storage = multer.diskStorage({
@@ -101,6 +106,48 @@ const upload = multer({
       const error = new Error('This file type is not allowed.');
       error.status = 415;
       error.code = 'UNSUPPORTED_UPLOAD_TYPE';
+      cb(error);
+      return;
+    }
+
+    cb(null, true);
+  }
+});
+
+const CLIENT_DOWNLOAD_PLATFORMS = {
+  windows: {
+    label: 'Windows',
+    defaultFileName: 'WebCord-Windows.zip',
+    extensions: new Set(['.zip', '.exe', '.msi']),
+    contentType: 'application/octet-stream'
+  },
+  android: {
+    label: 'Android',
+    defaultFileName: 'WebCord-Android.apk',
+    extensions: new Set(['.apk', '.aab']),
+    contentType: 'application/vnd.android.package-archive'
+  }
+};
+
+const clientDownloadUpload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, clientDownloadDir),
+    filename: (req, file, cb) => {
+      const platform = normalizeDownloadPlatform(req.params.platform);
+      const ext = path.extname(file.originalname || '').toLowerCase();
+      cb(null, `${platform}-${Date.now()}${ext}`);
+    }
+  }),
+  limits: { fileSize: MAX_CLIENT_DOWNLOAD_SIZE_MB * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const platform = normalizeDownloadPlatform(req.params.platform);
+    const config = platform ? CLIENT_DOWNLOAD_PLATFORMS[platform] : null;
+    const ext = path.extname(file.originalname || '').toLowerCase();
+
+    if (!config || !config.extensions.has(ext)) {
+      const error = new Error('Unsupported client download file.');
+      error.status = 415;
+      error.code = 'UNSUPPORTED_CLIENT_DOWNLOAD';
       cb(error);
       return;
     }
@@ -186,6 +233,149 @@ function getVoiceIceServers() {
   }
 
   return servers;
+}
+
+function normalizeDownloadPlatform(value) {
+  const platform = String(value || '').trim().toLowerCase();
+  return Object.prototype.hasOwnProperty.call(CLIENT_DOWNLOAD_PLATFORMS, platform) ? platform : '';
+}
+
+function readClientDownloadManifest() {
+  try {
+    if (!fs.existsSync(clientDownloadManifestPath)) return {};
+    const manifest = JSON.parse(fs.readFileSync(clientDownloadManifestPath, 'utf8'));
+    return manifest && typeof manifest === 'object' ? manifest : {};
+  } catch (error) {
+    console.error('Failed to read client download manifest:', error);
+    return {};
+  }
+}
+
+function writeClientDownloadManifest(manifest) {
+  const safeManifest = manifest && typeof manifest === 'object' ? manifest : {};
+  fs.writeFileSync(clientDownloadManifestPath, `${JSON.stringify(safeManifest, null, 2)}\n`);
+}
+
+function getClientDownloadFilePath(record = {}) {
+  const storedFileName = path.basename(String(record.storedFileName || ''));
+  if (!storedFileName) return '';
+  return path.join(clientDownloadDir, storedFileName);
+}
+
+function serializeClientDownload(platform, record = null) {
+  const normalizedPlatform = normalizeDownloadPlatform(platform);
+  const config = CLIENT_DOWNLOAD_PLATFORMS[normalizedPlatform];
+  const filePath = record ? getClientDownloadFilePath(record) : '';
+  const available = Boolean(record?.storedFileName && filePath && fs.existsSync(filePath));
+
+  return {
+    platform: normalizedPlatform,
+    label: config?.label || normalizedPlatform,
+    available,
+    url: `/downloads/${normalizedPlatform}`,
+    fileName: record?.fileName || config?.defaultFileName || 'WebCord-client',
+    size: available ? Number(record?.size || 0) : 0,
+    sha256: available ? String(record?.sha256 || '') : '',
+    updatedAt: available ? record?.updatedAt || null : null,
+    updatedBy: available ? record?.updatedBy || null : null
+  };
+}
+
+function listClientDownloads() {
+  const manifest = readClientDownloadManifest();
+  return Object.keys(CLIENT_DOWNLOAD_PLATFORMS).map((platform) => serializeClientDownload(platform, manifest[platform]));
+}
+
+async function computeFileSha256(filePath) {
+  const hash = crypto.createHash('sha256');
+  await new Promise((resolve, reject) => {
+    const stream = fs.createReadStream(filePath);
+    stream.on('data', (chunk) => hash.update(chunk));
+    stream.on('error', reject);
+    stream.on('end', resolve);
+  });
+  return hash.digest('hex');
+}
+
+async function saveClientDownload(platform, uploadedFile, adminUser = {}) {
+  const normalizedPlatform = normalizeDownloadPlatform(platform);
+  if (!normalizedPlatform) {
+    throw createApiError(400, 'INVALID_DOWNLOAD_PLATFORM', 'Invalid download platform.');
+  }
+  if (!uploadedFile?.path || !fs.existsSync(uploadedFile.path)) {
+    throw createApiError(400, 'DOWNLOAD_FILE_REQUIRED', 'A client file is required.');
+  }
+
+  const config = CLIENT_DOWNLOAD_PLATFORMS[normalizedPlatform];
+  const manifest = readClientDownloadManifest();
+  const previous = manifest[normalizedPlatform];
+  const previousPath = previous ? getClientDownloadFilePath(previous) : '';
+  const fileName = path.basename(uploadedFile.originalname || config.defaultFileName).replace(/["\r\n]/g, '_');
+
+  manifest[normalizedPlatform] = {
+    platform: normalizedPlatform,
+    fileName,
+    storedFileName: path.basename(uploadedFile.filename),
+    mimeType: uploadedFile.mimetype || config.contentType,
+    size: uploadedFile.size,
+    sha256: await computeFileSha256(uploadedFile.path),
+    updatedAt: new Date().toISOString(),
+    updatedBy: adminUser.username || null
+  };
+  writeClientDownloadManifest(manifest);
+
+  if (previousPath && previousPath !== uploadedFile.path && fs.existsSync(previousPath)) {
+    fs.rmSync(previousPath, { force: true });
+  }
+
+  return serializeClientDownload(normalizedPlatform, manifest[normalizedPlatform]);
+}
+
+function deleteClientDownload(platform) {
+  const normalizedPlatform = normalizeDownloadPlatform(platform);
+  if (!normalizedPlatform) {
+    throw createApiError(400, 'INVALID_DOWNLOAD_PLATFORM', 'Invalid download platform.');
+  }
+
+  const manifest = readClientDownloadManifest();
+  const existing = manifest[normalizedPlatform];
+  const filePath = existing ? getClientDownloadFilePath(existing) : '';
+  if (filePath && fs.existsSync(filePath)) {
+    fs.rmSync(filePath, { force: true });
+  }
+  delete manifest[normalizedPlatform];
+  writeClientDownloadManifest(manifest);
+  return serializeClientDownload(normalizedPlatform, null);
+}
+
+function canReadWriteDirectory(dir) {
+  try {
+    fs.accessSync(dir, fs.constants.R_OK | fs.constants.W_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function getReadinessSnapshot() {
+  const checks = {
+    database: false,
+    uploads: canReadWriteDirectory(uploadDir),
+    clientDownloads: canReadWriteDirectory(clientDownloadDir)
+  };
+
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    checks.database = true;
+  } catch (error) {
+    console.error('Readiness database check failed:', error);
+  }
+
+  return {
+    ok: Object.values(checks).every(Boolean),
+    checks,
+    voiceRooms: voiceParticipants.size
+  };
 }
 
 function booleanFromPayload(value) {
@@ -1063,8 +1253,50 @@ app.get('/api/health', (_req, res) => {
   res.json({ ok: true, voiceRooms: voiceParticipants.size });
 });
 
+app.get('/api/ready', async (_req, res) => {
+  const readiness = await getReadinessSnapshot();
+  res.status(readiness.ok ? 200 : 503).json(readiness);
+});
+
 app.get('/api/voice/ice-servers', authMiddleware, (_req, res) => {
   res.json({ iceServers: getVoiceIceServers() });
+});
+
+app.get('/api/downloads', (_req, res) => {
+  res.json({ downloads: listClientDownloads() });
+});
+
+app.get('/api/downloads/:platform', (req, res) => {
+  const platform = normalizeDownloadPlatform(req.params.platform);
+  if (!platform) {
+    return sendApiError(res, 404, 'DOWNLOAD_NOT_FOUND', 'Download not found.');
+  }
+
+  const manifest = readClientDownloadManifest();
+  return res.json({ download: serializeClientDownload(platform, manifest[platform]) });
+});
+
+app.get('/downloads/:platform', (req, res) => {
+  const platform = normalizeDownloadPlatform(req.params.platform);
+  if (!platform) {
+    return sendApiError(res, 404, 'DOWNLOAD_NOT_FOUND', 'Download not found.');
+  }
+
+  const manifest = readClientDownloadManifest();
+  const record = manifest[platform];
+  const download = serializeClientDownload(platform, record);
+  const filePath = record ? getClientDownloadFilePath(record) : '';
+  if (!download.available || !filePath) {
+    return sendApiError(res, 404, 'DOWNLOAD_NOT_READY', 'This client download is not available yet.');
+  }
+
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Cache-Control', 'private, no-store');
+  return res.download(filePath, download.fileName, {
+    headers: {
+      'Content-Type': record.mimeType || CLIENT_DOWNLOAD_PLATFORMS[platform].contentType
+    }
+  });
 });
 
 app.post('/api/auth/register', authRateLimit, async (req, res) => {
@@ -1223,6 +1455,7 @@ app.get('/api/admin/overview', authMiddleware, adminMiddleware, async (req, res)
       recentUsers: recentUsers.map(serializePublicUser),
       roleUsers: roleUsers.map(serializePublicUser),
       manageableUsers: manageableUsers.map(serializePublicUser),
+      downloads: listClientDownloads(),
       recentReports: recentReports.map(serializeModerationReport),
       recentModerationActions: recentModerationActions.map(serializeModerationAction),
       runtime: {
@@ -1233,6 +1466,29 @@ app.get('/api/admin/overview', authMiddleware, adminMiddleware, async (req, res)
   } catch (error) {
     console.error(error);
     return sendApiError(res, 500, 'ADMIN_OVERVIEW_FAILED', 'Failed to load admin overview.');
+  }
+});
+
+app.put('/api/admin/downloads/:platform', authMiddleware, adminMiddleware, (req, res, next) => {
+  clientDownloadUpload.single('file')(req, res, next);
+}, async (req, res) => {
+  try {
+    const download = await saveClientDownload(req.params.platform, req.file, req.adminUser);
+    return res.json({ download, downloads: listClientDownloads() });
+  } catch (error) {
+    if (req.file?.path && fs.existsSync(req.file.path)) {
+      fs.rmSync(req.file.path, { force: true });
+    }
+    return sendCaughtApiError(res, error, 'DOWNLOAD_UPDATE_FAILED', 'Failed to update client download.');
+  }
+});
+
+app.delete('/api/admin/downloads/:platform', authMiddleware, adminMiddleware, (req, res) => {
+  try {
+    const download = deleteClientDownload(req.params.platform);
+    return res.json({ download, downloads: listClientDownloads() });
+  } catch (error) {
+    return sendCaughtApiError(res, error, 'DOWNLOAD_DELETE_FAILED', 'Failed to delete client download.');
   }
 });
 
@@ -2669,11 +2925,15 @@ app.post('/api/upload', authMiddleware, uploadRateLimit, async (req, res, next) 
 
 app.use((error, _req, res, next) => {
   if (error instanceof multer.MulterError && error.code === 'LIMIT_FILE_SIZE') {
-    return res.status(413).json({ error: 'File too large. Max 25MB.' });
+    return res.status(413).json({ error: 'File too large for this endpoint.' });
   }
 
   if (error?.code === 'UNSUPPORTED_UPLOAD_TYPE') {
     return sendApiError(res, error.status || 415, error.code, error.message || 'This file type is not allowed.');
+  }
+
+  if (error?.code === 'UNSUPPORTED_CLIENT_DOWNLOAD') {
+    return sendApiError(res, error.status || 415, error.code, error.message || 'Unsupported client download file.');
   }
 
   if (error) {

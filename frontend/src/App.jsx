@@ -2,7 +2,11 @@ import React, { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'rea
 import { io } from 'socket.io-client';
 
 const REMOTE_ORIGIN = import.meta.env.VITE_REMOTE_ORIGIN || 'https://webcordes.ru';
-const RELEASES_URL = 'https://github.com/banochka01/webcord/releases';
+const DOWNLOAD_PAGE_URL = `${REMOTE_ORIGIN}/#download`;
+const DOWNLOAD_URLS = {
+  windows: '/downloads/windows',
+  android: '/downloads/android'
+};
 const IS_TAURI_CLIENT = Boolean(window.__TAURI__?.window || window.__TAURI_INTERNALS__);
 const IS_NATIVE_CLIENT = Boolean(
   IS_TAURI_CLIENT ||
@@ -32,7 +36,8 @@ const KEYS = {
   settings: 'webcord_client_settings_v1',
   folders: 'webcord_custom_folders_v1'
 };
-const ADMIN_PATH = '/admin';
+const ADMIN_PATH = '/adminka';
+const ADMIN_PATHS = new Set([ADMIN_PATH, '/admin']);
 
 const PRESETS = {
   'Liquid Glass': { bg: '#07111d', panel: '#172337', accent: '#76e4ff', text: '#f7fbff', mode: 'liquid' },
@@ -104,7 +109,7 @@ function getNativeBridge() {
 
       return false;
     },
-    checkUpdates: () => (opener?.openUrl ? opener.openUrl(RELEASES_URL) : window.open(RELEASES_URL, '_blank', 'noopener,noreferrer')),
+    checkUpdates: () => (opener?.openUrl ? opener.openUrl(DOWNLOAD_PAGE_URL) : window.open(DOWNLOAD_PAGE_URL, '_blank', 'noopener,noreferrer')),
     setBadge: (count = 0) => Promise.resolve(Math.max(0, Number(count) || 0)),
     onDeepLink: (callback) => {
       let closed = false;
@@ -235,6 +240,26 @@ function canManageChannels(user) {
 function canManageUserRoles(user) {
   return normalizeUserRole(user?.role) === 'OWNER' || Boolean(user?.canManageRoles);
 }
+
+function formatFileSize(bytes) {
+  const size = Number(bytes || 0);
+  if (!Number.isFinite(size) || size <= 0) return '';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let value = size;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  return `${value >= 10 || unitIndex === 0 ? Math.round(value) : value.toFixed(1)} ${units[unitIndex]}`;
+}
+
+function mapDownloads(downloads = []) {
+  return Object.fromEntries(
+    (Array.isArray(downloads) ? downloads : []).map((download) => [download.platform, download])
+  );
+}
+
 const EmojiPicker = lazy(async () => {
   const [{ default: Picker }, { default: data }] = await Promise.all([
     import('@emoji-mart/react'),
@@ -849,7 +874,22 @@ function LandingPage({
   onSubmit
 }) {
   const [authOpen, setAuthOpen] = useState(false);
+  const [downloadState, setDownloadState] = useState({ status: 'loading', items: {} });
   const usernameInputRef = useRef(null);
+
+  useEffect(() => {
+    let closed = false;
+    apiFetch('/downloads')
+      .then((payload) => {
+        if (!closed) setDownloadState({ status: 'ready', items: mapDownloads(payload?.downloads) });
+      })
+      .catch(() => {
+        if (!closed) setDownloadState({ status: 'error', items: {} });
+      });
+    return () => {
+      closed = true;
+    };
+  }, []);
 
   function openAuth(nextMode = 'login') {
     setMode(nextMode);
@@ -857,8 +897,28 @@ function LandingPage({
     window.setTimeout(() => usernameInputRef.current?.focus(), 80);
   }
 
-  function handleDownload() {
-    window.open(RELEASES_URL, '_blank', 'noopener,noreferrer');
+  function renderDownloadLink(platform, label) {
+    const download = downloadState.items[platform] || {};
+    const knownMissing = downloadState.status === 'ready' && !download.available;
+    const meta = download.available ? formatFileSize(download.size) : '';
+
+    return (
+      <a
+        className={`landing-cta landing-cta-download${knownMissing ? ' disabled' : ''}`}
+        href={DOWNLOAD_URLS[platform]}
+        aria-disabled={knownMissing}
+        onClick={(event) => {
+          if (knownMissing) event.preventDefault();
+        }}
+      >
+        <DownloadIcon />
+        <span className="landing-cta-label">
+          <span>{label}</span>
+          {meta ? <small>{meta}</small> : null}
+          {knownMissing ? <small>Coming soon</small> : null}
+        </span>
+      </a>
+    );
   }
 
   return (
@@ -896,14 +956,8 @@ function LandingPage({
             с каналами, личными сообщениями, голосом и быстрым обменом файлами.
           </p>
           <div className="landing-actions" id="download">
-            <button className="landing-cta landing-cta-download" type="button" onClick={handleDownload}>
-              <DownloadIcon />
-              <span>Загрузить для Windows</span>
-            </button>
-            <button className="landing-cta landing-cta-download" type="button" onClick={handleDownload}>
-              <DownloadIcon />
-              <span>Загрузить для Android</span>
-            </button>
+            {renderDownloadLink('windows', 'Download for Windows')}
+            {renderDownloadLink('android', 'Download for Android')}
             <button className="landing-cta landing-cta-browser" type="button" onClick={() => openAuth('login')}>
               <BrowserIcon />
               <span>Открыть WebCord в браузере</span>
@@ -2494,11 +2548,33 @@ function StaticSettingsPage({ title, rows }) {
   );
 }
 
-function AdminPanel({ user, overview, status, error, roleUpdating, moderationUpdating, onRefresh, onOpenApp, onLogout, onChangeUserRole, onModerateUser, onUpdateReport }) {
+function AdminPanel({
+  user,
+  overview,
+  status,
+  error,
+  roleUpdating,
+  moderationUpdating,
+  downloadUploading,
+  onRefresh,
+  onOpenApp,
+  onLogout,
+  onChangeUserRole,
+  onModerateUser,
+  onUpdateReport,
+  onUploadDownload,
+  onDeleteDownload
+}) {
+  const [downloadFiles, setDownloadFiles] = useState({});
   const denied = status === 'denied';
   const loading = status === 'checking' || status === 'idle';
   const stats = overview?.stats || {};
   const canEditRoles = Boolean(overview?.canManageRoles || canManageUserRoles(overview?.admin || user));
+  const downloads = overview?.downloads || [];
+  const downloadAccept = {
+    windows: '.zip,.exe,.msi',
+    android: '.apk,.aab'
+  };
   const statCards = [
     ['Users', stats.users],
     ['Text channels', stats.textChannels],
@@ -2512,6 +2588,16 @@ function AdminPanel({ user, overview, status, error, roleUpdating, moderationUpd
     ['Muted users', stats.mutedUsers],
     ['Banned users', stats.bannedUsers]
   ];
+
+  async function handleDownloadSubmit(event, platform) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const ok = await onUploadDownload(platform, downloadFiles[platform]);
+    if (ok) {
+      setDownloadFiles((prev) => ({ ...prev, [platform]: null }));
+      form.reset();
+    }
+  }
 
   return (
     <main className="admin-shell">
@@ -2587,6 +2673,39 @@ function AdminPanel({ user, overview, status, error, roleUpdating, moderationUpd
                 <span>Uptime</span>
                 <strong>{Math.floor((overview.runtime?.uptimeSeconds || 0) / 60)} min</strong>
               </div>
+            </div>
+          </section>
+
+          <section className="admin-panel-card">
+            <p className="section-label">Client downloads</p>
+            <div className="admin-download-list">
+              {downloads.map((download) => {
+                const busy = downloadUploading === download.platform;
+                return (
+                  <form className="admin-download-row" key={download.platform} onSubmit={(event) => handleDownloadSubmit(event, download.platform)}>
+                    <div className="admin-download-info">
+                      <strong>{download.label}</strong>
+                      <span>{download.available ? `${download.fileName} - ${formatFileSize(download.size)}` : 'No file uploaded'}</span>
+                      {download.sha256 ? <code title={download.sha256}>SHA256 {download.sha256.slice(0, 16)}...</code> : null}
+                    </div>
+                    <div className="admin-download-actions">
+                      {download.available ? <a className="ghost-btn" href={download.url}>Download</a> : null}
+                      <input
+                        type="file"
+                        accept={downloadAccept[download.platform] || ''}
+                        disabled={busy}
+                        onChange={(event) => setDownloadFiles((prev) => ({ ...prev, [download.platform]: event.target.files?.[0] || null }))}
+                      />
+                      <button type="submit" disabled={busy || !downloadFiles[download.platform]}>{busy ? 'Uploading' : 'Upload'}</button>
+                      {download.available ? (
+                        <button className="danger" type="button" disabled={busy} onClick={() => onDeleteDownload(download.platform)}>
+                          Remove
+                        </button>
+                      ) : null}
+                    </div>
+                  </form>
+                );
+              })}
             </div>
           </section>
 
@@ -2750,6 +2869,7 @@ export default function App() {
   const [adminError, setAdminError] = useState('');
   const [adminRoleUpdating, setAdminRoleUpdating] = useState(null);
   const [adminModerationUpdating, setAdminModerationUpdating] = useState(null);
+  const [adminDownloadUploading, setAdminDownloadUploading] = useState(null);
 
   const socketRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -2792,7 +2912,7 @@ export default function App() {
   const lastVoiceStatsRef = useRef({ at: 0, bytesReceived: 0, bytesSent: 0 });
   const micMutedRef = useRef(false);
 
-  const isAdminRoute = currentPath === ADMIN_PATH;
+  const isAdminRoute = ADMIN_PATHS.has(currentPath);
   const isAuthed = Boolean(token && user);
   const textChannels = channels.filter((item) => item.type === 'TEXT');
   const voiceChannels = channels.filter((item) => item.type === 'VOICE');
@@ -3368,6 +3488,56 @@ export default function App() {
         return;
       }
       setAdminStatus(err.status === 403 ? 'denied' : 'error');
+    }
+  }
+
+  async function uploadAdminDownload(platform, file) {
+    if (!file) {
+      pushToast('Choose a client file first', 'error');
+      return false;
+    }
+
+    setAdminDownloadUploading(platform);
+    setAdminError('');
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const payload = await apiFetch(
+        `/admin/downloads/${platform}`,
+        {
+          method: 'PUT',
+          body: formData
+        },
+        token
+      );
+      setAdminOverview((prev) => (prev ? { ...prev, downloads: payload?.downloads || prev.downloads } : prev));
+      pushToast(`${payload?.download?.label || 'Client'} download updated`, 'success');
+      return true;
+    } catch (err) {
+      setAdminError(err.message);
+      pushToast(err.message, 'error');
+      return false;
+    } finally {
+      setAdminDownloadUploading(null);
+    }
+  }
+
+  async function deleteAdminDownload(platform) {
+    setAdminDownloadUploading(platform);
+    setAdminError('');
+    try {
+      const payload = await apiFetch(
+        `/admin/downloads/${platform}`,
+        { method: 'DELETE' },
+        token
+      );
+      setAdminOverview((prev) => (prev ? { ...prev, downloads: payload?.downloads || prev.downloads } : prev));
+      pushToast(`${payload?.download?.label || 'Client'} download removed`, 'success');
+    } catch (err) {
+      setAdminError(err.message);
+      pushToast(err.message, 'error');
+    } finally {
+      setAdminDownloadUploading(null);
     }
   }
 
@@ -5133,6 +5303,7 @@ export default function App() {
         error={adminError}
         roleUpdating={adminRoleUpdating}
         moderationUpdating={adminModerationUpdating}
+        downloadUploading={adminDownloadUploading}
         onRefresh={loadAdminOverview}
         onOpenApp={() => {
           setWorkspace('server');
@@ -5142,6 +5313,8 @@ export default function App() {
         onChangeUserRole={changeAdminUserRole}
         onModerateUser={applyAdminModeration}
         onUpdateReport={updateAdminReport}
+        onUploadDownload={uploadAdminDownload}
+        onDeleteDownload={deleteAdminDownload}
       />
     );
   }
@@ -5611,7 +5784,7 @@ export default function App() {
         onCheckUpdates={() => {
           const bridge = getNativeBridge();
           if (typeof bridge?.checkUpdates === 'function') bridge.checkUpdates();
-          else window.open(RELEASES_URL, '_blank', 'noopener,noreferrer');
+          else window.open(DOWNLOAD_PAGE_URL, '_blank', 'noopener,noreferrer');
         }}
         onToggleNoiseSuppression={() => setNoiseSuppressionEnabled((prev) => !prev)}
         onNewFolderNameChange={setNewFolderName}

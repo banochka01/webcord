@@ -52,6 +52,7 @@ After deploy, verify:
 
 ```bash
 curl -fsSL https://webcordes.ru/api/health
+curl -fsSL https://webcordes.ru/api/ready
 curl -fsSL https://webcordes.ru/manifest.webmanifest
 ```
 
@@ -66,6 +67,15 @@ WebCord is open for registration, so public releases must keep the moderation la
 - the admin panel shows open reports, muted users, banned users and recent moderation actions.
 
 Do not remove these flows before iOS/TestFlight review. Apps with user-generated content need reporting, blocking and moderation.
+
+## Client Downloads
+
+The public site downloads clients directly from the server:
+
+- `https://webcordes.ru/downloads/windows`
+- `https://webcordes.ru/downloads/android`
+
+Admins whose username is listed in `ADMIN_USERNAMES` can open `https://webcordes.ru/adminka` after normal WebCord login and replace the Windows or Android client files. The backend stores these files and their SHA256 metadata in `CLIENT_DOWNLOAD_DIR`; Docker Compose persists them in the `client_downloads` volume.
 
 ## Voice Quality
 

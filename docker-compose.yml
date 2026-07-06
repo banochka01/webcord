@@ -35,8 +35,11 @@ services:
       TURN_USERNAME: ${TURN_USERNAME:-}
       TURN_CREDENTIAL: ${TURN_CREDENTIAL:-}
       UPLOAD_DIR: /app/uploads
+      CLIENT_DOWNLOAD_DIR: /app/client-downloads
+      CLIENT_DOWNLOAD_MAX_SIZE_MB: ${CLIENT_DOWNLOAD_MAX_SIZE_MB:-500}
     volumes:
       - backend_uploads:/app/uploads
+      - client_downloads:/app/client-downloads
     expose:
       - "3001"
     command: sh -c "npx prisma migrate deploy && node src/server.js"
@@ -69,3 +72,4 @@ services:
 volumes:
   postgres_data:
   backend_uploads:
+  client_downloads:

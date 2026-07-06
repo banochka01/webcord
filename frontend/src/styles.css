@@ -758,6 +758,7 @@ p {
   border-radius: 8px;
   font-size: 20px;
   font-weight: 850;
+  text-decoration: none;
   position: relative;
   overflow: hidden;
   isolation: isolate;
@@ -777,6 +778,24 @@ p {
 
 .landing-cta span {
   min-width: 0;
+}
+
+.landing-cta-label {
+  display: grid;
+  gap: 2px;
+  line-height: 1.05;
+}
+
+.landing-cta-label small {
+  color: currentColor;
+  font-size: 12px;
+  font-weight: 750;
+  opacity: 0.68;
+}
+
+.landing-cta.disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
 }
 
 .landing-cta::after {
@@ -1502,6 +1521,63 @@ p {
 
 .admin-role-row select {
   min-height: 36px;
+}
+
+.admin-download-list {
+  display: grid;
+  gap: 10px;
+}
+
+.admin-download-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(360px, auto);
+  gap: 14px;
+  align-items: center;
+  padding: 12px 0;
+  border-top: 1px solid var(--border-color);
+}
+
+.admin-download-row:first-child {
+  border-top: 0;
+}
+
+.admin-download-info {
+  min-width: 0;
+}
+
+.admin-download-info strong,
+.admin-download-info span,
+.admin-download-info code {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-download-info code {
+  margin-top: 4px;
+  color: var(--muted-color);
+  font-size: 12px;
+}
+
+.admin-download-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.admin-download-actions input[type="file"] {
+  max-width: 210px;
+  font-size: 12px;
+}
+
+.admin-download-actions .ghost-btn,
+.admin-download-actions button {
+  width: auto;
+  min-height: 34px;
+  padding: 7px 10px;
+  font-size: 12px;
 }
 
 .admin-inline-actions {
@@ -5705,6 +5781,24 @@ p {
 
   .admin-role-row {
     grid-template-columns: 42px minmax(0, 1fr);
+  }
+
+  .admin-download-row {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-download-actions {
+    justify-content: stretch;
+  }
+
+  .admin-download-actions input[type="file"] {
+    max-width: none;
+    flex: 1 1 100%;
+  }
+
+  .admin-download-actions .ghost-btn,
+  .admin-download-actions button {
+    flex: 1 1 96px;
   }
 
   .admin-role-row select {

@@ -10,6 +10,7 @@ export default defineConfig({
     proxy: {
       '/api': 'http://127.0.0.1:3001',
       '/uploads': 'http://127.0.0.1:3001',
+      '/downloads': 'http://127.0.0.1:3001',
       '/socket.io': {
         target: 'ws://127.0.0.1:3001',
         ws: true
