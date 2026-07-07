@@ -802,6 +802,34 @@ function DownloadIcon() {
   );
 }
 
+function WindowsIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+      <path d="M4 5.7 10.9 4.8v6.6H4V5.7Z" />
+      <path d="M12.6 4.6 20 3.6v7.8h-7.4V4.6Z" />
+      <path d="M4 12.9h6.9v6.7L4 18.6v-5.7Z" />
+      <path d="M12.6 12.9H20v7.5l-7.4-1v-6.5Z" />
+    </svg>
+  );
+}
+
+function AndroidIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+      <path d="m8 6-1.6-2.4" />
+      <path d="M16 6l1.6-2.4" />
+      <path d="M6.5 10.2h11" />
+      <path d="M7 10.2A5 5 0 0 1 12 5a5 5 0 0 1 5 5.2v6.3a1.6 1.6 0 0 1-1.6 1.6H8.6A1.6 1.6 0 0 1 7 16.5v-6.3Z" />
+      <path d="M5 11.5v4.2" />
+      <path d="M19 11.5v4.2" />
+      <path d="M10 18.1v2.3" />
+      <path d="M14 18.1v2.3" />
+      <path d="M10 8.2h.01" />
+      <path d="M14 8.2h.01" />
+    </svg>
+  );
+}
+
 function BrowserIcon() {
   return (
     <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
@@ -863,6 +891,73 @@ function AppIcon({ name, size = 20, className = '' }) {
   );
 }
 
+const LANDING_FEATURES = [
+  {
+    icon: 'send',
+    title: 'Каналы без хаоса',
+    text: 'Разделяйте темы, команды и проекты так, чтобы новые сообщения не превращались в поток всего подряд.'
+  },
+  {
+    icon: 'story',
+    title: 'Личные чаты рядом',
+    text: 'Переключайтесь между сообществом и DM без лишних окон, вкладок и потери контекста.'
+  },
+  {
+    icon: 'wave',
+    title: 'Голос без подготовки',
+    text: 'Зашли в комнату, обсудили, вернулись к чату. Подходит для игр, созвонов и быстрых решений.'
+  },
+  {
+    icon: 'settings',
+    title: 'Тёмный режим как основа',
+    text: 'Интерфейс не спорит с контентом: мягкий контраст, чистые карточки и приятные ночные акценты.'
+  }
+];
+
+const LANDING_QUALITY = [
+  { title: 'быстро', text: 'мгновенные переходы между чатами' },
+  { title: 'тихо', text: 'интерфейс не перетягивает внимание' },
+  { title: 'везде', text: 'браузер, Windows и Android' },
+  { title: 'своё', text: 'контроль над пространством общения' }
+];
+
+const LANDING_DETAIL_CARDS = [
+  {
+    icon: 'zap',
+    title: 'Быстрые состояния и живые статусы',
+    text: 'Видно, кто онлайн, где идёт голос, и в какой комнате сейчас живёт разговор.'
+  },
+  {
+    icon: 'story',
+    title: 'Пространство, которое принадлежит вам',
+    text: 'Серверы, роли и каналы помогают держать общение внутри понятных границ.'
+  },
+  {
+    icon: 'paperclip',
+    title: 'Файлы и ссылки не теряются',
+    text: 'Передавайте материалы в личных и групповых обсуждениях без ощущения тяжёлого рабочего комбайна.'
+  }
+];
+
+const LANDING_USE_CASES = [
+  {
+    title: 'Друзья',
+    text: 'Общий чат, игровые комнаты, мемы и быстрые созвоны без лишней организации.'
+  },
+  {
+    title: 'Команды',
+    text: 'Проекты, обсуждения, быстрые решения голосом и отдельные каналы под каждую тему.'
+  },
+  {
+    title: 'Сообщества',
+    text: 'Постоянные участники, тематические каналы и понятная структура для новых людей.'
+  },
+  {
+    title: 'Разработчики',
+    text: 'Свой стек, понятная инфраструктура и пространство, которое можно развивать дальше.'
+  }
+];
+
 function LandingPage({
   mode,
   setMode,
@@ -897,37 +992,29 @@ function LandingPage({
     window.setTimeout(() => usernameInputRef.current?.focus(), 80);
   }
 
-  function renderDownloadLink(platform, label) {
+  function renderDownloadLink(platform, label, className = '') {
     const download = downloadState.items[platform] || {};
-    const knownMissing = downloadState.status === 'ready' && !download.available;
-    const meta = download.available ? formatFileSize(download.size) : '';
+    const hasDownloadRecord = Object.prototype.hasOwnProperty.call(downloadState.items, platform);
+    const knownMissing = downloadState.status === 'ready' && hasDownloadRecord && !download.available;
 
     return (
       <a
-        className={`landing-cta landing-cta-download${knownMissing ? ' disabled' : ''}`}
+        className={'landing-cta ' + className + (knownMissing ? ' disabled' : '')}
         href={DOWNLOAD_URLS[platform]}
         aria-disabled={knownMissing}
         onClick={(event) => {
           if (knownMissing) event.preventDefault();
         }}
       >
-        <DownloadIcon />
-        <span className="landing-cta-label">
-          <span>{label}</span>
-          {meta ? <small>{meta}</small> : null}
-          {knownMissing ? <small>Coming soon</small> : null}
-        </span>
+        {platform === 'windows' ? <WindowsIcon /> : <AndroidIcon />}
+        <span>{knownMissing ? label + ' скоро' : label}</span>
       </a>
     );
   }
 
   return (
     <main className="landing-page">
-      <div className="landing-stars" aria-hidden="true">
-        {Array.from({ length: 28 }, (_, index) => (
-          <span key={index} className={`landing-star star-${index + 1}`} />
-        ))}
-      </div>
+      <div className="landing-aurora" aria-hidden="true" />
 
       <header className="landing-header">
         <a className="landing-brand" href="/" aria-label="WebCord home">
@@ -937,132 +1024,156 @@ function LandingPage({
         <nav className="landing-nav" aria-label="Главная навигация">
           <a href="#download">Загрузить</a>
           <a href="#features">Возможности</a>
-          <a href="#safety">Безопасность</a>
-          <a href="#support">Поддержка</a>
-          <a href="#developers">Разработчикам</a>
+          <a href="#quality">Качество</a>
+          <a href="#use-cases">Сценарии</a>
         </nav>
         <button className="landing-login-btn" type="button" onClick={() => openAuth('login')}>Вход</button>
       </header>
 
-      <section className="landing-hero" aria-label="WebCord">
+      <section className="landing-hero" id="download" aria-label="WebCord">
         <div className="landing-copy">
-          <h1>
-            <span>Чат группы,</span>
-            <span>где всегда</span>
-            <span>весело</span>
-          </h1>
+          <p className="landing-kicker"><AppIcon name="wave" size={14} /> комфортный мессенджер для своих</p>
+          <h1>WebCord — мессенджер без шума</h1>
           <p>
-            WebCord объединяет друзей, команды и сообщества в темном пространстве
-            с каналами, личными сообщениями, голосом и быстрым обменом файлами.
+            Общайтесь в каналах, личных чатах и голосовых комнатах без хаоса. WebCord берёт лучшее от Telegram и Discord — и делает общение спокойнее, быстрее и приятнее.
           </p>
-          <div className="landing-actions" id="download">
-            {renderDownloadLink('windows', 'Download for Windows')}
-            {renderDownloadLink('android', 'Download for Android')}
-            <button className="landing-cta landing-cta-browser" type="button" onClick={() => openAuth('login')}>
+          <div className="landing-actions">
+            <button className="landing-cta landing-cta-primary" type="button" onClick={() => openAuth('login')}>
               <BrowserIcon />
-              <span>Открыть WebCord в браузере</span>
+              <span>Открыть в браузере</span>
             </button>
+            {renderDownloadLink('windows', 'Windows', 'landing-cta-light')}
+            {renderDownloadLink('android', 'Android', 'landing-cta-glass')}
+          </div>
+          <div className="landing-hero-meta" aria-label="Коротко о WebCord">
+            <span><i /> браузерный доступ</span>
+            <span>каналы · DM · голос · файлы</span>
           </div>
         </div>
 
         <div className="landing-showcase" aria-hidden="true">
-          <div className="landing-space-card card-a">voice</div>
-          <div className="landing-space-card card-b">DM</div>
-          <div className="landing-device desktop-device">
-            <div className="device-bar">
+          <div className="landing-voice-pill"><AppIcon name="wave" size={18} /> voice online</div>
+          <div className="landing-mock-window">
+            <div className="landing-window-bar">
               <span />
               <span />
               <span />
               <strong>WebCord</strong>
             </div>
-            <div className="mock-app">
-              <div className="mock-rail">
-                <i />
-                <i />
-                <i />
-                <i />
-              </div>
-              <div className="mock-sidebar">
-                <strong>Night server</strong>
-                <span className="active"># lobby</span>
-                <span># games</span>
-                <span># music</span>
-                <span>Voice lounge</span>
-              </div>
-              <div className="mock-chat">
-                <div className="mock-message wide">
-                  <b />
-                  <span />
-                  <span />
-                </div>
-                <div className="mock-message own">
-                  <b />
-                  <span />
-                </div>
-                <div className="mock-message image">
-                  <b />
-                  <span />
-                </div>
-                <div className="mock-composer">
-                  <span>Написать сообщение...</span>
+            <div className="landing-mock-body">
+              <aside>
+                <strong>Calm server</strong>
+                <span className="active"># общий</span>
+                <span># команда</span>
+                <span>◦ voice room</span>
+              </aside>
+              <section>
+                <div className="landing-message-row">
                   <i />
+                  <div><span /><span /></div>
                 </div>
-              </div>
-              <div className="mock-members">
-                <i />
-                <i />
-                <i />
-                <i />
-                <i />
-              </div>
+                <div className="landing-message-row accent">
+                  <i />
+                  <div><span /><span /></div>
+                </div>
+                <div className="landing-composer">Написать сообщение...</div>
+              </section>
             </div>
           </div>
-
-          <div className="landing-device phone-device">
-            <div className="phone-speaker" />
-            <div className="phone-grid">
-              <span />
-              <span />
-              <span />
-              <span />
-            </div>
-            <div className="phone-controls">
-              <i />
+          <div className="landing-phone-card">
+            <div>
               <i />
               <i />
             </div>
-          </div>
-
-          <div className="landing-controller">
-            <span />
-            <span />
-            <i />
-            <i />
-          </div>
-          <div className="landing-companion">
-            <BrandLogo />
+            <div>
+              <i />
+              <i />
+            </div>
           </div>
         </div>
       </section>
 
-      <section className="landing-feature-strip" id="features" aria-label="Возможности WebCord">
-        <article>
-          <strong>Каналы и DMs</strong>
-          <span>Общение в сообществах и личных беседах без лишнего шума.</span>
-        </article>
-        <article id="safety">
-          <strong>Темный клиент</strong>
-          <span>Единый темный стиль, desktop-клиент, Android-сборка и браузерный доступ.</span>
-        </article>
-        <article id="support">
-          <strong>Голосовые комнаты</strong>
-          <span>Микрофон, камера, демонстрация экрана и живые статусы.</span>
-        </article>
-        <article id="developers">
-          <strong>Своя инфраструктура</strong>
-          <span>Express, Socket.IO, PostgreSQL и готовый Docker-стек.</span>
-        </article>
+      <section className="landing-section landing-features" id="features" aria-labelledby="features-title">
+        <div className="landing-section-head centered">
+          <p className="landing-section-label">Почему WebCord ощущается спокойнее</p>
+          <h2 id="features-title">Всё для общения — без лишнего шума</h2>
+          <p>WebCord собирает привычные сценарии мессенджеров в чистый интерфейс: меньше отвлекающих слоёв, понятнее структура, быстрее переход от текста к голосу.</p>
+        </div>
+        <div className="landing-card-grid">
+          {LANDING_FEATURES.map((feature) => (
+            <article className="landing-feature-card" key={feature.title}>
+              <span className="landing-icon"><AppIcon name={feature.icon} size={21} /></span>
+              <h3>{feature.title}</h3>
+              <p>{feature.text}</p>
+            </article>
+          ))}
+        </div>
       </section>
+
+      <section className="landing-section landing-quality" id="quality" aria-labelledby="quality-title">
+        <article className="landing-quality-main">
+          <p className="landing-section-label">Качество в деталях</p>
+          <h2 id="quality-title">Меньше трения между “написать” и “договориться”</h2>
+          <p>WebCord проектируется как ежедневный инструмент: быстрый запуск, аккуратные состояния, понятные комнаты и мягкий визуальный ритм, который не утомляет после часа общения.</p>
+          <div className="landing-quality-grid">
+            {LANDING_QUALITY.map((item) => (
+              <div key={item.title}>
+                <strong>{item.title}</strong>
+                <span>{item.text}</span>
+              </div>
+            ))}
+          </div>
+        </article>
+        <div className="landing-detail-list">
+          {LANDING_DETAIL_CARDS.map((item) => (
+            <article className="landing-detail-card" key={item.title}>
+              <span className="landing-icon"><AppIcon name={item.icon} size={22} /></span>
+              <div>
+                <h3>{item.title}</h3>
+                <p>{item.text}</p>
+              </div>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="landing-section landing-use-cases" id="use-cases" aria-labelledby="use-cases-title">
+        <div className="landing-section-head">
+          <p className="landing-section-label">Для разных ритмов общения</p>
+          <h2 id="use-cases-title">Один дом для чатов, голосов и рабочих комнат</h2>
+        </div>
+        <div className="landing-card-grid">
+          {LANDING_USE_CASES.map((item) => (
+            <article className="landing-feature-card" key={item.title}>
+              <h3>{item.title}</h3>
+              <p>{item.text}</p>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="landing-section landing-final" aria-labelledby="final-title">
+        <div className="landing-final-card">
+          <BrandLogo className="landing-final-logo" />
+          <h2 id="final-title">Попробуйте WebCord там, где вам удобно</h2>
+          <p>Откройте мессенджер в браузере или установите приложение. Каналы, личные сообщения и голосовые комнаты уже собраны в одном спокойном пространстве.</p>
+          <div className="landing-actions final-actions">
+            <button className="landing-cta landing-cta-primary" type="button" onClick={() => openAuth('login')}>
+              <BrowserIcon />
+              <span>Открыть WebCord</span>
+            </button>
+            <a className="landing-cta landing-cta-light" href="#download">
+              <DownloadIcon />
+              <span>Скачать приложение</span>
+            </a>
+          </div>
+        </div>
+      </section>
+
+      <footer className="landing-footer">
+        <a href="/">WebCord © 2026</a>
+        <a href="#features">Мессенджер для комфортного общения</a>
+      </footer>
 
       {authOpen ? (
         <div className="landing-auth-overlay" role="dialog" aria-modal="true" aria-label="Вход в WebCord" onClick={() => setAuthOpen(false)}>

@@ -1216,13 +1216,21 @@ class WebCordState extends ChangeNotifier {
       notifyListeners();
 
       await _prepareNativeVoiceAudio();
-      _localVoiceStream = await _openVoiceAudioStream();
-      await _applyLocalAudioSettings();
+      Object? microphoneError;
+      try {
+        _localVoiceStream = await _openVoiceAudioStream();
+        await _applyLocalAudioSettings();
+      } catch (exception) {
+        microphoneError = exception;
+        _localVoiceStream = null;
+      }
       await refreshMediaDevices();
 
       voiceJoined = true;
-      micMuted = false;
-      voiceStatus = 'Call connected';
+      micMuted = _localVoiceStream == null;
+      voiceStatus = micMuted
+          ? _listenOnlyStatus(microphoneError)
+          : 'Call connected';
       _socket?.emit('join-call', {'callId': call.id});
       _startVoiceStats();
       _emitVoiceState();
@@ -1260,13 +1268,21 @@ class WebCordState extends ChangeNotifier {
       notifyListeners();
 
       await _prepareNativeVoiceAudio();
-      _localVoiceStream = await _openVoiceAudioStream();
-      await _applyLocalAudioSettings();
+      Object? microphoneError;
+      try {
+        _localVoiceStream = await _openVoiceAudioStream();
+        await _applyLocalAudioSettings();
+      } catch (exception) {
+        microphoneError = exception;
+        _localVoiceStream = null;
+      }
       await refreshMediaDevices();
 
       voiceJoined = true;
-      micMuted = false;
-      voiceStatus = _voiceProfileStatus();
+      micMuted = _localVoiceStream == null;
+      voiceStatus = micMuted
+          ? _listenOnlyStatus(microphoneError)
+          : _voiceProfileStatus();
       _socket?.emit('join-voice', {'channelId': selectedVoiceChannelId});
       _startVoiceStats();
       _emitVoiceState();
@@ -1281,6 +1297,34 @@ class WebCordState extends ChangeNotifier {
 
   Future<void> toggleMicrophone() async {
     if (!_ensureVoiceControlAvailable()) return;
+    final currentTracks = _localVoiceStream?.getAudioTracks() ?? const [];
+    if (micMuted && currentTracks.isEmpty) {
+      try {
+        mediaBusy = true;
+        error = null;
+        voiceStatus = 'Requesting microphone...';
+        notifyListeners();
+
+        _localVoiceStream = await _openVoiceAudioStream();
+        await _applyLocalAudioSettings();
+        for (final peer in _peers.values) {
+          await _addStreamTracksToPeer(peer, _localVoiceStream);
+        }
+        micMuted = false;
+        voiceStatus = _voiceProfileStatus();
+        _emitVoiceState();
+        await refreshMediaDevices();
+        await _renegotiatePeers();
+      } catch (exception) {
+        error = _mediaError(exception, 'Could not access the microphone');
+        voiceStatus = 'Listening only';
+      } finally {
+        mediaBusy = false;
+        notifyListeners();
+      }
+      return;
+    }
+
     micMuted = !micMuted;
     await _applyLocalAudioSettings();
     voiceStatus = micMuted ? 'Microphone muted' : 'Microphone live';
@@ -1695,12 +1739,23 @@ class WebCordState extends ChangeNotifier {
       if (previous != null) {
         await _replaceAudioTracks(previous, _localVoiceStream!);
         _disposeStream(previous);
+      } else {
+        for (final peer in _peers.values) {
+          await _addStreamTracksToPeer(peer, _localVoiceStream);
+        }
       }
       await _renegotiatePeers();
+      micMuted = false;
       voiceStatus = _voiceProfileStatus();
     } catch (exception) {
       _localVoiceStream = previous;
-      error = _mediaError(exception, 'Could not switch microphone');
+      if (previous == null) {
+        micMuted = true;
+        voiceStatus = 'Listening only';
+        error = _mediaError(exception, 'Could not access the microphone');
+      } else {
+        error = _mediaError(exception, 'Could not switch microphone');
+      }
     }
   }
 
@@ -1842,6 +1897,12 @@ class WebCordState extends ChangeNotifier {
     await _addStreamTracksToPeer(peer, _localVoiceStream);
     await _addStreamTracksToPeer(peer, _cameraStream);
     await _addStreamTracksToPeer(peer, _screenStream);
+    if ((_localVoiceStream?.getAudioTracks() ?? const []).isEmpty) {
+      await peer.addTransceiver(
+        kind: RTCRtpMediaType.RTCRtpMediaTypeAudio,
+        init: RTCRtpTransceiverInit(direction: TransceiverDirection.RecvOnly),
+      );
+    }
 
     peer.onIceCandidate = (candidate) {
       final call = activeCall;
@@ -1894,9 +1955,7 @@ class WebCordState extends ChangeNotifier {
     bool iceRestart = false,
   }) async {
     final call = activeCall;
-    if (!voiceJoined ||
-        _localVoiceStream == null ||
-        (call == null && selectedVoiceChannelId == null)) {
+    if (!voiceJoined || (call == null && selectedVoiceChannelId == null)) {
       return;
     }
     final peer = await _getOrCreatePeer(socketId);
@@ -2305,6 +2364,13 @@ class WebCordState extends ChangeNotifier {
     return '${voiceAudioProfile.label} audio active';
   }
 
+  String _listenOnlyStatus(Object? exception) {
+    final message = exception == null
+        ? 'Microphone is unavailable'
+        : _mediaError(exception, 'Microphone is unavailable');
+    return 'Listening only. $message';
+  }
+
   Future<void> _attachRemoteStream(String socketId, MediaStream stream) async {
     _remoteStreams[socketId] = stream;
     final renderer = await _remoteRenderer(socketId);
@@ -2604,7 +2670,7 @@ class WebCordState extends ChangeNotifier {
             voiceStatus = voiceParticipants.isEmpty
                 ? 'Call connected. Waiting for others.'
                 : 'Call connected with ${voiceParticipants.length} peer(s)';
-            if (voiceJoined && _localVoiceStream != null) {
+            if (voiceJoined) {
               for (final participant in voiceParticipants) {
                 unawaited(_createPeerAndOffer(participant.socketId));
               }
@@ -2623,7 +2689,7 @@ class WebCordState extends ChangeNotifier {
             ..add(participant);
           voiceParticipants = next;
           voiceStatus = '${participant.displayLabel} joined call';
-          if (voiceJoined && _localVoiceStream != null) {
+          if (voiceJoined) {
             unawaited(_createPeerAndOffer(participant.socketId));
           }
           notifyListeners();
@@ -2673,7 +2739,7 @@ class WebCordState extends ChangeNotifier {
           voiceStatus = voiceParticipants.isEmpty
               ? 'Voice connected. Waiting for others.'
               : 'Voice connected with ${voiceParticipants.length} peer(s)';
-          if (voiceJoined && _localVoiceStream != null) {
+          if (voiceJoined) {
             for (final participant in voiceParticipants) {
               unawaited(_createPeerAndOffer(participant.socketId));
             }
@@ -2691,7 +2757,7 @@ class WebCordState extends ChangeNotifier {
             ..add(participant);
           voiceParticipants = next;
           voiceStatus = '${participant.username} joined voice';
-          if (voiceJoined && _localVoiceStream != null) {
+          if (voiceJoined) {
             unawaited(_createPeerAndOffer(participant.socketId));
           }
           notifyListeners();
