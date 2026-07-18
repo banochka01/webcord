@@ -1,5 +1,9 @@
 import React, { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
+import { useGSAP } from '@gsap/react';
+import gsap from 'gsap';
 import { io } from 'socket.io-client';
+
+gsap.registerPlugin(useGSAP);
 
 const REMOTE_ORIGIN = import.meta.env.VITE_REMOTE_ORIGIN || 'https://webcordes.ru';
 const DOWNLOAD_PAGE_URL = `${REMOTE_ORIGIN}/#download`;
@@ -766,7 +770,21 @@ function ThemeModal({ open, theme, onClose, onThemeChange, onReset }) {
 
         <div className="preset-grid">
           {Object.entries(PRESETS).map(([name, preset]) => (
-            <button key={name} className="preset-btn" type="button" onClick={() => onThemeChange(preset)}>{name}</button>
+            <button
+              key={name}
+              className={theme.bg === preset.bg && theme.accent === preset.accent ? 'preset-btn active' : 'preset-btn'}
+              type="button"
+              style={{
+                '--preset-bg': preset.bg,
+                '--preset-panel': preset.panel,
+                '--preset-accent': preset.accent,
+                '--preset-text': preset.text
+              }}
+              onClick={() => onThemeChange(preset)}
+            >
+              <span className="preset-preview" aria-hidden="true"><i /><i /><i /></span>
+              <span className="preset-copy"><strong>{name}</strong><small>{preset.mode === 'material' ? 'Expressive' : preset.mode === 'liquid' ? 'Glass' : 'Classic'}</small></span>
+            </button>
           ))}
         </div>
 
@@ -970,7 +988,54 @@ function LandingPage({
 }) {
   const [authOpen, setAuthOpen] = useState(false);
   const [downloadState, setDownloadState] = useState({ status: 'loading', items: {} });
+  const landingRef = useRef(null);
   const usernameInputRef = useRef(null);
+
+  useGSAP(() => {
+    const root = landingRef.current;
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (!root || reduceMotion) return undefined;
+
+    const intro = gsap.timeline({
+      defaults: { duration: 0.78, ease: 'power3.out' }
+    });
+    intro
+      .from('.landing-header', { autoAlpha: 0, y: -24 })
+      .from('.landing-copy > *', { autoAlpha: 0, y: 28, stagger: 0.075 }, '-=0.46')
+      .from('.landing-showcase', { autoAlpha: 0, x: 36, scale: 0.975 }, '-=0.7');
+
+    const sections = gsap.utils.toArray('.landing-section');
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        if (!entry.isIntersecting) return;
+        gsap.fromTo(
+          entry.target.children,
+          { autoAlpha: 0, y: 38 },
+          { autoAlpha: 1, y: 0, duration: 0.82, stagger: 0.1, ease: 'power3.out', clearProps: 'transform' }
+        );
+        observer.unobserve(entry.target);
+      });
+    }, { threshold: 0.14 });
+    sections.forEach((section) => observer.observe(section));
+
+    const showcase = root.querySelector('.landing-showcase');
+    const finePointer = window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+    let onPointerMove;
+    if (showcase && finePointer) {
+      const moveX = gsap.quickTo(showcase, 'x', { duration: 0.8, ease: 'power3.out' });
+      const moveY = gsap.quickTo(showcase, 'y', { duration: 0.8, ease: 'power3.out' });
+      onPointerMove = (event) => {
+        moveX((event.clientX / window.innerWidth - 0.5) * 14);
+        moveY((event.clientY / window.innerHeight - 0.5) * 10);
+      };
+      root.addEventListener('pointermove', onPointerMove, { passive: true });
+    }
+
+    return () => {
+      observer.disconnect();
+      if (onPointerMove) root.removeEventListener('pointermove', onPointerMove);
+    };
+  }, { scope: landingRef });
 
   useEffect(() => {
     let closed = false;
@@ -1013,7 +1078,7 @@ function LandingPage({
   }
 
   return (
-    <main className="landing-page">
+    <main ref={landingRef} className="landing-page">
       <div className="landing-aurora" aria-hidden="true" />
 
       <header className="landing-header">
@@ -3022,6 +3087,7 @@ export default function App() {
   const voiceStatsTimerRef = useRef(null);
   const lastVoiceStatsRef = useRef({ at: 0, bytesReceived: 0, bytesSent: 0 });
   const micMutedRef = useRef(false);
+  const appShellRef = useRef(null);
 
   const isAdminRoute = ADMIN_PATHS.has(currentPath);
   const isAuthed = Boolean(token && user);
@@ -3069,6 +3135,24 @@ export default function App() {
     }),
     [voiceIceServers]
   );
+
+  useGSAP(() => {
+    const root = appShellRef.current;
+    if (!root || !isAuthed || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+    const timeline = gsap.timeline({ defaults: { ease: 'power3.out' } });
+    timeline
+      .fromTo('.rail', { autoAlpha: 0, x: -18 }, { autoAlpha: 1, x: 0, duration: 0.42 })
+      .fromTo('.sidebar', { autoAlpha: 0, x: -24 }, { autoAlpha: 1, x: 0, duration: 0.52 }, '-=0.26')
+      .fromTo('.chat-panel', { autoAlpha: 0, y: 18, scale: 0.992 }, { autoAlpha: 1, y: 0, scale: 1, duration: 0.58 }, '-=0.34')
+      .fromTo('.channel-btn, .conversation-btn', { autoAlpha: 0, x: -9 }, {
+        autoAlpha: 1,
+        x: 0,
+        duration: 0.3,
+        stagger: 0.018,
+        clearProps: 'transform'
+      }, '-=0.42');
+  }, { scope: appShellRef, dependencies: [isAuthed, workspace], revertOnUpdate: true });
 
   useEffect(() => {
     const syncPath = () => setCurrentPath(normalizeAppPath());
@@ -5441,8 +5525,11 @@ export default function App() {
       {isDesktopShell ? <DesktopTitleBar user={user} onOpenSettings={() => setShowSettingsModal(true)} onWindowAction={handleWindowAction} /> : null}
       <div className={mobileSidebarOpen ? 'mobile-overlay active' : 'mobile-overlay'} onClick={() => setMobileSidebarOpen(false)} />
 
-      <main className={`${isMobile && mobileChatOpen ? 'app-shell mobile-chat-open' : 'app-shell'}${isDesktopShell ? ' desktop-shell' : ''}${voiceExpanded && voiceJoined ? ' voice-expanded-mode' : ''}`}>
+      <main ref={appShellRef} className={`${isMobile && mobileChatOpen ? 'app-shell mobile-chat-open' : 'app-shell'}${isDesktopShell ? ' desktop-shell' : ''}${voiceExpanded && voiceJoined ? ' voice-expanded-mode' : ''}`}>
         <aside className="rail">
+          <div className="rail-brand" aria-label="WebCord">
+            <BrandLogo className="rail-logo" />
+          </div>
           {[
             ['server', 'menu', 'Чаты'],
             ['friends', 'smile', 'Контакты'],
@@ -5465,6 +5552,28 @@ export default function App() {
               <em>{label}</em>
             </button>
           ))}
+          <div className="rail-spacer" />
+          <button
+            className="rail-profile"
+            type="button"
+            title="Profile"
+            aria-label="Profile"
+            onClick={() => {
+              setSettingsSection('profile');
+              setShowSettingsModal(true);
+            }}
+          >
+            <UserAvatar user={user} />
+          </button>
+          <button
+            className="rail-btn rail-settings"
+            type="button"
+            title="Settings"
+            aria-label="Settings"
+            onClick={() => setShowSettingsModal(true)}
+          >
+            <AppIcon name="settings" size={21} />
+          </button>
         </aside>
 
         <aside className={mobileSidebarOpen ? 'sidebar mobile-open' : 'sidebar'}>
@@ -5485,6 +5594,21 @@ export default function App() {
             }}
             onOpenSettings={() => { setSettingsSection('folders'); setShowSettingsModal(true); }}
           />
+
+          {!isMobile ? (
+            <label className="desktop-sidebar-search">
+              <AppIcon name="search" size={17} />
+              <input
+                value={workspace === 'dm' ? dmSearch : mobileChatSearch}
+                onChange={(event) => {
+                  if (workspace === 'dm') setDmSearch(event.target.value);
+                  else setMobileChatSearch(event.target.value);
+                }}
+                placeholder="Search"
+                aria-label="Search chats and channels"
+              />
+            </label>
+          ) : null}
 
           <div className="profile-card" style={getProfileBannerStyle(user)}>
             <div className="profile-card-overlay">

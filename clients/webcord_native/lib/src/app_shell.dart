@@ -233,17 +233,74 @@ class DesktopShell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(10),
       child: Row(
         children: [
-          ServerRail(state: state),
-          const SizedBox(width: 12),
-          SizedBox(width: 286, child: Sidebar(state: state)),
-          const SizedBox(width: 12),
-          Expanded(child: MainSurface(state: state)),
-          const SizedBox(width: 12),
-          SizedBox(width: 300, child: RightPanel(state: state)),
+          _DesktopPaneEntrance(
+            delay: Duration.zero,
+            offset: const Offset(-.18, 0),
+            child: ServerRail(state: state),
+          ),
+          const SizedBox(width: 10),
+          _DesktopPaneEntrance(
+            delay: const Duration(milliseconds: 70),
+            offset: const Offset(-.1, 0),
+            child: SizedBox(width: 324, child: Sidebar(state: state)),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: _DesktopPaneEntrance(
+              delay: const Duration(milliseconds: 130),
+              offset: const Offset(.02, .035),
+              child: MainSurface(state: state),
+            ),
+          ),
         ],
+      ),
+    );
+  }
+}
+
+class _DesktopPaneEntrance extends StatefulWidget {
+  const _DesktopPaneEntrance({
+    required this.child,
+    required this.delay,
+    required this.offset,
+  });
+
+  final Widget child;
+  final Duration delay;
+  final Offset offset;
+
+  @override
+  State<_DesktopPaneEntrance> createState() => _DesktopPaneEntranceState();
+}
+
+class _DesktopPaneEntranceState extends State<_DesktopPaneEntrance> {
+  bool _visible = false;
+
+  @override
+  void initState() {
+    super.initState();
+    Future<void>.delayed(widget.delay, () {
+      if (mounted) setState(() => _visible = true);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final disableAnimations =
+        MediaQuery.maybeOf(context)?.disableAnimations ?? false;
+    final visible = _visible || disableAnimations;
+    return AnimatedSlide(
+      offset: visible ? Offset.zero : widget.offset,
+      duration: wcBaseMotion,
+      curve: wcEase,
+      child: AnimatedOpacity(
+        opacity: visible ? 1 : 0,
+        duration: wcBaseMotion,
+        curve: wcEase,
+        child: widget.child,
       ),
     );
   }
@@ -269,18 +326,19 @@ class MobileShell extends StatelessWidget {
     return Scaffold(
       backgroundColor: Colors.transparent,
       appBar: AppBar(
+        toolbarHeight: 68,
         elevation: 0,
         scrolledUnderElevation: 0,
-        backgroundColor: palette.bg.withAlpha(214),
+        backgroundColor: palette.bg.withAlpha(242),
         leading: IconButton(
           tooltip: 'Channels and calls',
           onPressed: () => showMobileNavigationSheet(context, state),
           icon: const Icon(Icons.menu_rounded),
         ),
-        titleSpacing: 12,
+        titleSpacing: 8,
         title: Row(
           children: [
-            const BrandMark(size: 28),
+            const BrandMark(size: 30),
             const SizedBox(width: 10),
             Expanded(
               child: Text(
@@ -316,7 +374,7 @@ class MobileShell extends StatelessWidget {
         ],
       ),
       body: Padding(
-        padding: const EdgeInsets.fromLTRB(10, 10, 10, 4),
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
         child: AnimatedSwitcher(
           duration: wcBaseMotion,
           switchInCurve: wcEase,
@@ -355,7 +413,7 @@ class MobileShell extends StatelessWidget {
       ),
       bottomNavigationBar: NavigationBar(
         backgroundColor: palette.bg.withAlpha(246),
-        indicatorColor: palette.accent.withAlpha(58),
+        indicatorColor: palette.accent.withAlpha(72),
         selectedIndex: switch (state.workspace) {
           WorkspaceKind.direct || WorkspaceKind.friends => 0,
           WorkspaceKind.server => 1,
@@ -433,14 +491,14 @@ class ServerRail extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Panel(
-      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 7),
       color: WebCordColors.rail,
       child: SizedBox(
-        width: 56,
+        width: 50,
         child: Column(
           children: [
-            const BrandMark(size: 40),
-            const SizedBox(height: 18),
+            const BrandMark(size: 34),
+            const SizedBox(height: 16),
             RailButton(
               selected: state.workspace == WorkspaceKind.server,
               icon: Icons.tag_rounded,
@@ -516,6 +574,7 @@ class RailButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final palette = WebCordPalette.of(context);
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Tooltip(
@@ -523,20 +582,31 @@ class RailButton extends StatelessWidget {
         child: InkWell(
           borderRadius: BorderRadius.circular(8),
           onTap: onTap,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 160),
-            width: 42,
-            height: 42,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(8),
-              color: selected
-                  ? WebCordColors.accent
-                  : WebCordColors.panelSoft.withAlpha(180),
-              border: Border.all(
-                color: selected ? WebCordColors.cyan : WebCordColors.border,
+          child: AnimatedScale(
+            scale: selected ? 1.06 : 1,
+            duration: wcFastMotion,
+            curve: wcEase,
+            child: AnimatedContainer(
+              duration: wcFastMotion,
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(selected ? 12 : 15),
+                color: selected
+                    ? palette.accent.withAlpha(48)
+                    : Colors.transparent,
+                border: Border.all(
+                  color: selected
+                      ? palette.accent.withAlpha(92)
+                      : Colors.transparent,
+                ),
+              ),
+              child: Icon(
+                icon,
+                size: 20,
+                color: selected ? palette.text : palette.muted,
               ),
             ),
-            child: Icon(icon, size: 20, color: Colors.white),
           ),
         ),
       ),
@@ -556,6 +626,7 @@ class Sidebar extends StatefulWidget {
 
 class _SidebarState extends State<Sidebar> {
   final _friend = TextEditingController();
+  String _query = '';
 
   @override
   void dispose() {
@@ -572,7 +643,19 @@ class _SidebarState extends State<Sidebar> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           BrandHeader(state: state),
-          const SizedBox(height: 8),
+          const SizedBox(height: 10),
+          TextField(
+            onChanged: (value) => setState(() => _query = value.trim()),
+            decoration: const InputDecoration(
+              hintText: 'Search',
+              prefixIcon: Icon(Icons.search_rounded, size: 20),
+              contentPadding: EdgeInsets.symmetric(
+                horizontal: 14,
+                vertical: 11,
+              ),
+            ),
+          ),
+          const SizedBox(height: 4),
           Expanded(
             child: switch (state.workspace) {
               WorkspaceKind.server => _serverList(context, state),
@@ -589,6 +672,19 @@ class _SidebarState extends State<Sidebar> {
   }
 
   Widget _serverList(BuildContext context, WebCordState state) {
+    final query = _query.toLowerCase();
+    final textChannels = state.textChannels
+        .where(
+          (channel) =>
+              query.isEmpty || channel.name.toLowerCase().contains(query),
+        )
+        .toList();
+    final voiceChannels = state.voiceChannels
+        .where(
+          (channel) =>
+              query.isEmpty || channel.name.toLowerCase().contains(query),
+        )
+        .toList();
     return ListView(
       children: [
         Row(
@@ -603,7 +699,7 @@ class _SidebarState extends State<Sidebar> {
               ),
           ],
         ),
-        for (final channel in state.textChannels)
+        for (final channel in textChannels)
           NavRow(
             selected: channel.id == state.selectedTextChannelId,
             icon: Icons.tag_rounded,
@@ -625,7 +721,7 @@ class _SidebarState extends State<Sidebar> {
               ),
           ],
         ),
-        for (final channel in state.voiceChannels)
+        for (final channel in voiceChannels)
           NavRow(
             selected: channel.id == state.selectedVoiceChannelId,
             icon: Icons.graphic_eq_rounded,
@@ -693,6 +789,18 @@ class _SidebarState extends State<Sidebar> {
   }
 
   Widget _directList(WebCordState state) {
+    final query = _query.toLowerCase();
+    final conversations = state.social.conversations
+        .where(
+          (conversation) =>
+              query.isEmpty ||
+              conversation.displayTitle.toLowerCase().contains(query) ||
+              (conversation.lastMessage?.content.toLowerCase().contains(
+                    query,
+                  ) ??
+                  false),
+        )
+        .toList();
     return ListView(
       children: [
         Row(
@@ -705,10 +813,10 @@ class _SidebarState extends State<Sidebar> {
             ),
           ],
         ),
-        if (state.social.conversations.isEmpty)
+        if (conversations.isEmpty)
           const EmptyLine('Accept a friend request or create a group')
         else
-          for (final conversation in state.social.conversations)
+          for (final conversation in conversations)
             NavRow(
               selected: conversation.id == state.selectedConversationId,
               icon: conversation.isGroup
@@ -1741,16 +1849,16 @@ class MessageTile extends StatelessWidget {
     final screenWidth = MediaQuery.sizeOf(context).width;
     final maxBubbleWidth = screenWidth < 640 ? screenWidth * .78 : 620.0;
     final bubbleColor = own
-        ? palette.accent.withAlpha(118)
-        : palette.panelSoft.withAlpha(232);
+        ? Color.alphaBlend(palette.accent.withAlpha(138), palette.panelStrong)
+        : palette.panelSoft.withAlpha(242);
     final bubbleBorder = own
         ? palette.accent.withAlpha(105)
         : palette.border.withAlpha(170);
     final radius = BorderRadius.only(
-      topLeft: Radius.circular(own ? 22 : 8),
-      topRight: Radius.circular(own ? 8 : 22),
-      bottomLeft: const Radius.circular(22),
-      bottomRight: const Radius.circular(22),
+      topLeft: Radius.circular(own ? 18 : 6),
+      topRight: Radius.circular(own ? 6 : 18),
+      bottomLeft: const Radius.circular(18),
+      bottomRight: const Radius.circular(18),
     );
 
     return TweenAnimationBuilder<double>(
@@ -1786,9 +1894,9 @@ class MessageTile extends StatelessWidget {
                     border: Border.all(color: bubbleBorder),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withAlpha(42),
-                        blurRadius: 18,
-                        offset: const Offset(0, 10),
+                        color: Colors.black.withAlpha(32),
+                        blurRadius: 14,
+                        offset: const Offset(0, 7),
                       ),
                     ],
                   ),
@@ -2095,14 +2203,14 @@ class _ComposerState extends State<Composer> {
           ),
           DecoratedBox(
             decoration: BoxDecoration(
-              color: palette.bgAlt.withAlpha(218),
-              borderRadius: BorderRadius.circular(30),
+              color: palette.bgAlt.withAlpha(236),
+              borderRadius: BorderRadius.circular(20),
               border: Border.all(color: palette.border),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withAlpha(54),
-                  blurRadius: 20,
-                  offset: const Offset(0, 10),
+                  color: Colors.black.withAlpha(44),
+                  blurRadius: 16,
+                  offset: const Offset(0, 8),
                 ),
               ],
             ),
@@ -6597,202 +6705,210 @@ class SettingsDialog extends StatelessWidget {
                 constraints: BoxConstraints(
                   maxHeight: MediaQuery.sizeOf(context).height * .72,
                 ),
-                child: ListView(
-                  shrinkWrap: true,
-                  padding: const EdgeInsets.all(18),
-                  children: [
-                    Row(
-                      children: [
-                        UserAvatar(user: state.user, size: 48),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                state.user?.displayLabel ?? 'WebCord user',
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w900,
-                                  fontSize: 16,
-                                ),
-                              ),
-                              Text(
-                                state.socketStatus == 'connected'
-                                    ? 'Online'
-                                    : state.socketStatus,
-                                style: TextStyle(
-                                  color: palette.muted,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        OutlinedButton.icon(
-                          onPressed: state.logout,
-                          icon: const Icon(Icons.logout_rounded),
-                          label: const Text('Logout'),
-                        ),
-                      ],
-                    ),
-                    const SectionLabel('Profile'),
-                    _ProfileSettingsPanel(state: state),
-                    const SectionLabel('Appearance'),
-                    SegmentedButton<AppThemeMode>(
-                      segments: [
-                        for (final mode in AppThemeMode.values)
-                          ButtonSegment<AppThemeMode>(
-                            value: mode,
-                            label: Text(mode.label),
-                            icon: Icon(_themeIcon(mode)),
-                          ),
-                      ],
-                      selected: {state.themeMode},
-                      onSelectionChanged: (value) =>
-                          state.setThemeMode(value.first),
-                    ),
-                    const SizedBox(height: 12),
-                    SwitchListTile(
-                      value: state.compactMessages,
-                      onChanged: state.setCompactMessages,
-                      secondary: const Icon(Icons.density_small_rounded),
-                      title: const Text('Compact messages'),
-                    ),
-                    const SizedBox(height: 8),
-                    _WallpaperSettingsPanel(state: state),
-                    const SectionLabel('Media'),
-                    SwitchListTile(
-                      value: state.inlineMediaPreviews,
-                      onChanged: state.setInlineMediaPreviews,
-                      secondary: const Icon(Icons.photo_library_rounded),
-                      title: const Text('Inline media previews'),
-                      subtitle: const Text(
-                        'Turn off to keep image and video attachments as light chips.',
-                      ),
-                    ),
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: TextButton.icon(
-                        onPressed: state.clearLocalMediaCache,
-                        icon: const Icon(Icons.cleaning_services_rounded),
-                        label: const Text('Clear local media cache'),
-                      ),
-                    ),
-                    const SectionLabel('Voice & Video'),
-                    _VoiceAudioProfileSelector(state: state),
-                    const SizedBox(height: 10),
-                    LayoutBuilder(
-                      builder: (context, constraints) {
-                        final stacked = constraints.maxWidth < 560;
-                        final mic = _SettingsDeviceDropdown(
-                          icon: Icons.mic_external_on_rounded,
-                          label: 'Microphone',
-                          value: state.selectedMicDeviceId,
-                          devices: state.microphones,
-                          defaultLabel: 'Default microphone',
-                          onChanged: state.setMicDevice,
-                        );
-                        final output = _SettingsDeviceDropdown(
-                          icon: Icons.headphones_rounded,
-                          label: 'Output',
-                          value: state.selectedOutputDeviceId,
-                          devices: state.audioOutputs,
-                          defaultLabel: 'Default headphones',
-                          onChanged: state.setOutputDevice,
-                        );
-                        if (stacked) {
-                          return Column(
-                            children: [mic, const SizedBox(height: 10), output],
-                          );
-                        }
-                        return Row(
-                          children: [
-                            Expanded(child: mic),
-                            const SizedBox(width: 10),
-                            Expanded(child: output),
-                          ],
-                        );
-                      },
-                    ),
-                    const SizedBox(height: 10),
-                    _SettingsDeviceDropdown(
-                      icon: Icons.videocam_rounded,
-                      label: 'Camera',
-                      value: state.selectedCameraDeviceId,
-                      devices: state.cameras,
-                      defaultLabel: 'Default camera',
-                      onChanged: state.setCameraDevice,
-                    ),
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: TextButton.icon(
-                        onPressed: state.refreshMediaDevices,
-                        icon: const Icon(Icons.refresh_rounded),
-                        label: const Text('Refresh devices'),
-                      ),
-                    ),
-                    _SettingsSlider(
-                      icon: Icons.keyboard_voice_rounded,
-                      label: 'Mic sensitivity',
-                      value: state.inputVolume,
-                      onChanged: state.setInputVolume,
-                    ),
-                    _SettingsSlider(
-                      icon: Icons.volume_up_rounded,
-                      label: 'Master volume',
-                      value: state.outputVolume,
-                      onChanged: state.setOutputVolume,
-                    ),
-                    const SizedBox(height: 8),
-                    VoiceDiagnosticsPanel(state: state),
-                    SwitchListTile(
-                      value: state.noiseSuppressionEnabled,
-                      onChanged: state.setNoiseSuppression,
-                      secondary: const Icon(Icons.hearing_rounded),
-                      title: const Text('Noise suppression'),
-                      subtitle: Text(
-                        state.voiceAudioProfile ==
-                                VoiceAudioProfile.highFidelity
-                            ? 'High Fidelity keeps the mic signal cleaner by bypassing suppression.'
-                            : 'Reduces room noise before the voice stream is encoded.',
-                      ),
-                    ),
-                    if (state.voiceJoined) ...[
-                      const SizedBox(height: 8),
-                      DecoratedBox(
-                        decoration: BoxDecoration(
-                          color: palette.panelSoft,
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: palette.border),
-                        ),
-                        child: Padding(
-                          padding: const EdgeInsets.all(12),
-                          child: Row(
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  state.activeVoiceTitle,
+                child: Material(
+                  type: MaterialType.transparency,
+                  child: ListView(
+                    shrinkWrap: true,
+                    padding: const EdgeInsets.all(18),
+                    children: [
+                      Row(
+                        children: [
+                          UserAvatar(user: state.user, size: 48),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  state.user?.displayLabel ?? 'WebCord user',
                                   overflow: TextOverflow.ellipsis,
                                   style: const TextStyle(
                                     fontWeight: FontWeight.w900,
+                                    fontSize: 16,
                                   ),
                                 ),
-                              ),
-                              VoiceControlStrip(state: state),
-                            ],
+                                Text(
+                                  state.socketStatus == 'connected'
+                                      ? 'Online'
+                                      : state.socketStatus,
+                                  style: TextStyle(
+                                    color: palette.muted,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
+                          OutlinedButton.icon(
+                            onPressed: state.logout,
+                            icon: const Icon(Icons.logout_rounded),
+                            label: const Text('Logout'),
+                          ),
+                        ],
+                      ),
+                      const SectionLabel('Profile'),
+                      _ProfileSettingsPanel(state: state),
+                      const SectionLabel('Appearance'),
+                      Wrap(
+                        spacing: 10,
+                        runSpacing: 10,
+                        children: [
+                          for (final mode in AppThemeMode.values)
+                            _ThemeChoiceCard(
+                              mode: mode,
+                              selected: state.themeMode == mode,
+                              onTap: () => state.setThemeMode(mode),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      SwitchListTile(
+                        value: state.compactMessages,
+                        onChanged: state.setCompactMessages,
+                        secondary: const Icon(Icons.density_small_rounded),
+                        title: const Text('Compact messages'),
+                      ),
+                      const SizedBox(height: 8),
+                      _WallpaperSettingsPanel(state: state),
+                      const SectionLabel('Media'),
+                      SwitchListTile(
+                        value: state.inlineMediaPreviews,
+                        onChanged: state.setInlineMediaPreviews,
+                        secondary: const Icon(Icons.photo_library_rounded),
+                        title: const Text('Inline media previews'),
+                        subtitle: const Text(
+                          'Turn off to keep image and video attachments as light chips.',
                         ),
                       ),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: TextButton.icon(
+                          onPressed: state.clearLocalMediaCache,
+                          icon: const Icon(Icons.cleaning_services_rounded),
+                          label: const Text('Clear local media cache'),
+                        ),
+                      ),
+                      const SectionLabel('Voice & Video'),
+                      _VoiceAudioProfileSelector(state: state),
+                      const SizedBox(height: 10),
+                      LayoutBuilder(
+                        builder: (context, constraints) {
+                          final stacked = constraints.maxWidth < 560;
+                          final mic = _SettingsDeviceDropdown(
+                            icon: Icons.mic_external_on_rounded,
+                            label: 'Microphone',
+                            value: state.selectedMicDeviceId,
+                            devices: state.microphones,
+                            defaultLabel: 'Default microphone',
+                            onChanged: state.setMicDevice,
+                          );
+                          final output = _SettingsDeviceDropdown(
+                            icon: Icons.headphones_rounded,
+                            label: 'Output',
+                            value: state.selectedOutputDeviceId,
+                            devices: state.audioOutputs,
+                            defaultLabel: 'Default headphones',
+                            onChanged: state.setOutputDevice,
+                          );
+                          if (stacked) {
+                            return Column(
+                              children: [
+                                mic,
+                                const SizedBox(height: 10),
+                                output,
+                              ],
+                            );
+                          }
+                          return Row(
+                            children: [
+                              Expanded(child: mic),
+                              const SizedBox(width: 10),
+                              Expanded(child: output),
+                            ],
+                          );
+                        },
+                      ),
+                      const SizedBox(height: 10),
+                      _SettingsDeviceDropdown(
+                        icon: Icons.videocam_rounded,
+                        label: 'Camera',
+                        value: state.selectedCameraDeviceId,
+                        devices: state.cameras,
+                        defaultLabel: 'Default camera',
+                        onChanged: state.setCameraDevice,
+                      ),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: TextButton.icon(
+                          onPressed: state.refreshMediaDevices,
+                          icon: const Icon(Icons.refresh_rounded),
+                          label: const Text('Refresh devices'),
+                        ),
+                      ),
+                      _SettingsSlider(
+                        icon: Icons.keyboard_voice_rounded,
+                        label: 'Mic sensitivity',
+                        value: state.inputVolume,
+                        onChanged: state.setInputVolume,
+                      ),
+                      _SettingsSlider(
+                        icon: Icons.volume_up_rounded,
+                        label: 'Master volume',
+                        value: state.outputVolume,
+                        onChanged: state.setOutputVolume,
+                      ),
+                      const SizedBox(height: 8),
+                      VoiceDiagnosticsPanel(state: state),
+                      SwitchListTile(
+                        value: state.noiseSuppressionEnabled,
+                        onChanged: state.setNoiseSuppression,
+                        secondary: const Icon(Icons.hearing_rounded),
+                        title: const Text('Noise suppression'),
+                        subtitle: Text(
+                          state.voiceAudioProfile ==
+                                  VoiceAudioProfile.highFidelity
+                              ? 'High Fidelity keeps the mic signal cleaner by bypassing suppression.'
+                              : 'Reduces room noise before the voice stream is encoded.',
+                        ),
+                      ),
+                      if (state.voiceJoined) ...[
+                        const SizedBox(height: 8),
+                        DecoratedBox(
+                          decoration: BoxDecoration(
+                            color: palette.panelSoft,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: palette.border),
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    state.activeVoiceTitle,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w900,
+                                    ),
+                                  ),
+                                ),
+                                VoiceControlStrip(state: state),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                      const SectionLabel('Notifications'),
+                      SwitchListTile(
+                        value: state.notificationsEnabled,
+                        onChanged: state.setNotificationsEnabled,
+                        secondary: const Icon(
+                          Icons.notifications_active_rounded,
+                        ),
+                        title: const Text('Client notifications'),
+                      ),
                     ],
-                    const SectionLabel('Notifications'),
-                    SwitchListTile(
-                      value: state.notificationsEnabled,
-                      onChanged: state.setNotificationsEnabled,
-                      secondary: const Icon(Icons.notifications_active_rounded),
-                      title: const Text('Client notifications'),
-                    ),
-                  ],
+                  ),
                 ),
               ),
             ],
@@ -7489,6 +7605,121 @@ IconData _themeIcon(AppThemeMode mode) {
     AppThemeMode.graphite => Icons.contrast_rounded,
     AppThemeMode.aurora => Icons.blur_on_rounded,
   };
+}
+
+class _ThemeChoiceCard extends StatelessWidget {
+  const _ThemeChoiceCard({
+    required this.mode,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final AppThemeMode mode;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final preview = palettes[mode]!;
+    return Semantics(
+      selected: selected,
+      button: true,
+      label: '${mode.label} theme',
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: onTap,
+        child: AnimatedScale(
+          scale: selected ? 1.025 : 1,
+          duration: wcFastMotion,
+          curve: wcEase,
+          child: AnimatedContainer(
+            width: 154,
+            height: 92,
+            duration: wcBaseMotion,
+            curve: wcEase,
+            padding: const EdgeInsets.all(11),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [preview.panelStrong, preview.bgAlt],
+              ),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: selected ? preview.accent : preview.border,
+                width: selected ? 1.6 : 1,
+              ),
+              boxShadow: selected
+                  ? [
+                      BoxShadow(
+                        color: preview.accent.withAlpha(48),
+                        blurRadius: 22,
+                        offset: const Offset(0, 10),
+                      ),
+                    ]
+                  : const [],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(_themeIcon(mode), size: 18, color: preview.accent),
+                    const Spacer(),
+                    AnimatedSwitcher(
+                      duration: wcFastMotion,
+                      child: selected
+                          ? Icon(
+                              Icons.check_circle_rounded,
+                              key: const ValueKey('selected'),
+                              size: 18,
+                              color: preview.accentHot,
+                            )
+                          : const SizedBox(
+                              key: ValueKey('unselected'),
+                              width: 18,
+                              height: 18,
+                            ),
+                    ),
+                  ],
+                ),
+                const Spacer(),
+                Text(
+                  mode.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: preview.text,
+                    fontWeight: FontWeight.w900,
+                    fontSize: 13,
+                  ),
+                ),
+                const SizedBox(height: 5),
+                Row(
+                  children: [
+                    for (final color in [
+                      preview.accent,
+                      preview.accentHot,
+                      preview.cyan,
+                    ])
+                      Container(
+                        width: 18,
+                        height: 5,
+                        margin: const EdgeInsets.only(right: 4),
+                        decoration: BoxDecoration(
+                          color: color,
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                      ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 IconData _voiceProfileIcon(VoiceAudioProfile profile) {

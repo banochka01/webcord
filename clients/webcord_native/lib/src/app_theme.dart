@@ -28,18 +28,18 @@ enum AppThemeMode {
 }
 
 class WebCordColors {
-  static const bg = Color(0xFF070A12);
-  static const bgAlt = Color(0xFF0B1020);
-  static const rail = Color(0xFF0A0D18);
-  static const panel = Color(0xFF11172A);
-  static const panelSoft = Color(0xFF151D33);
-  static const panelStrong = Color(0xFF1B2640);
-  static const border = Color(0x263F5186);
-  static const text = Color(0xFFF7FAFF);
-  static const muted = Color(0xFF94A2C0);
-  static const accent = Color(0xFF7567FF);
-  static const accentHot = Color(0xFF9A5CFF);
-  static const cyan = Color(0xFF31E4D1);
+  static const bg = Color(0xFF050817);
+  static const bgAlt = Color(0xFF080D1D);
+  static const rail = Color(0xFF040710);
+  static const panel = Color(0xFF0B1020);
+  static const panelSoft = Color(0xFF10172A);
+  static const panelStrong = Color(0xFF18213A);
+  static const border = Color(0x2EAEC2EE);
+  static const text = Color(0xFFF7F8FF);
+  static const muted = Color(0xFF929DB7);
+  static const accent = Color(0xFF7667FF);
+  static const accentHot = Color(0xFF9B7CFF);
+  static const cyan = Color(0xFF5DD8EF);
   static const danger = Color(0xFFFF5B6E);
   static const success = Color(0xFF42D392);
 }
@@ -154,25 +154,25 @@ class WebCordPalette extends ThemeExtension<WebCordPalette> {
 
 const palettes = <AppThemeMode, WebCordPalette>{
   AppThemeMode.liquid: WebCordPalette(
-    bg: Color(0xFF060910),
-    bgAlt: Color(0xFF0B111D),
-    rail: Color(0xCC0B111D),
-    panel: Color(0xB8141B2A),
-    panelSoft: Color(0xA61B2638),
-    panelStrong: Color(0xE0222D41),
-    border: Color(0x42FFFFFF),
-    text: Color(0xFFF7FAFF),
-    muted: Color(0xFFB1BCD0),
-    accent: Color(0xFF70A7FF),
-    accentHot: Color(0xFF95C8FF),
-    cyan: Color(0xFF76E4FF),
+    bg: Color(0xFF050817),
+    bgAlt: Color(0xFF080D1D),
+    rail: Color(0xF0040710),
+    panel: Color(0xE80B1020),
+    panelSoft: Color(0xE610172A),
+    panelStrong: Color(0xF018213A),
+    border: Color(0x2EAEC2EE),
+    text: Color(0xFFF7F8FF),
+    muted: Color(0xFF9AA5BD),
+    accent: Color(0xFF7667FF),
+    accentHot: Color(0xFF9B7CFF),
+    cyan: Color(0xFF5DD8EF),
     danger: WebCordColors.danger,
     success: WebCordColors.success,
     backdrop: [
-      Color(0xFF05070C),
-      Color(0xFF0B1422),
-      Color(0xFF111C2C),
-      Color(0xFF182942),
+      Color(0xFF030610),
+      Color(0xFF050817),
+      Color(0xFF091225),
+      Color(0xFF101B36),
     ],
   ),
   AppThemeMode.material: WebCordPalette(
@@ -268,8 +268,8 @@ const palettes = <AppThemeMode, WebCordPalette>{
 ThemeData webCordTheme([AppThemeMode mode = AppThemeMode.liquid]) {
   final palette = palettes[mode]!;
   final materialExpressive = mode == AppThemeMode.material;
-  final controlRadius = materialExpressive ? 28.0 : 22.0;
-  final fieldRadius = materialExpressive ? 28.0 : 24.0;
+  final controlRadius = materialExpressive ? 24.0 : 16.0;
+  final fieldRadius = materialExpressive ? 22.0 : 16.0;
   final scheme = ColorScheme.fromSeed(
     seedColor: palette.accent,
     brightness: Brightness.dark,
@@ -291,14 +291,16 @@ ThemeData webCordTheme([AppThemeMode mode = AppThemeMode.liquid]) {
     textTheme: TextTheme(
       headlineLarge: TextStyle(
         color: palette.text,
-        fontSize: 30,
+        fontSize: 32,
         fontWeight: FontWeight.w900,
-        height: 1.06,
+        height: 1.04,
+        letterSpacing: -0.8,
       ),
       headlineMedium: TextStyle(
         color: palette.text,
-        fontSize: 22,
+        fontSize: 23,
         fontWeight: FontWeight.w800,
+        letterSpacing: -0.3,
       ),
       titleMedium: TextStyle(
         color: palette.text,
@@ -361,9 +363,16 @@ ThemeData webCordTheme([AppThemeMode mode = AppThemeMode.liquid]) {
     ),
     navigationBarTheme: NavigationBarThemeData(
       indicatorShape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(22),
+        borderRadius: BorderRadius.circular(18),
       ),
-      height: 72,
+      height: 76,
+      labelTextStyle: WidgetStatePropertyAll(
+        TextStyle(
+          color: palette.muted,
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
     ),
     pageTransitionsTheme: const PageTransitionsTheme(
       builders: {
@@ -458,7 +467,7 @@ class Panel extends StatelessWidget {
     final panelAlpha = (panelColor.a * 255).round().clamp(0, 255);
     final glassAlpha = panelAlpha < 255 ? panelAlpha : 174;
     return ClipRRect(
-      borderRadius: BorderRadius.circular(24),
+      borderRadius: BorderRadius.circular(18),
       child: BackdropFilter(
         filter: ImageFilter.blur(sigmaX: 30, sigmaY: 30),
         child: AnimatedContainer(
@@ -470,24 +479,19 @@ class Panel extends StatelessWidget {
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
               colors: [
-                Colors.white.withAlpha(27),
-                Colors.white.withAlpha(9),
-                palette.accent.withAlpha(14),
+                Colors.white.withAlpha(15),
+                Colors.white.withAlpha(4),
+                palette.accent.withAlpha(8),
               ],
               stops: const [0, 0.46, 1],
             ),
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(color: palette.border.withAlpha(112)),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: palette.border),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withAlpha(72),
-                blurRadius: 42,
-                offset: const Offset(0, 26),
-              ),
-              BoxShadow(
-                color: palette.accent.withAlpha(19),
-                blurRadius: 38,
-                offset: const Offset(0, 10),
+                color: Colors.black.withAlpha(58),
+                blurRadius: 34,
+                offset: const Offset(0, 18),
               ),
             ],
           ),

@@ -53,6 +53,8 @@ class _WebCordNativeAppState extends State<WebCordNativeApp> {
           title: 'WebCord',
           debugShowCheckedModeBanner: false,
           theme: webCordTheme(state.themeMode),
+          themeAnimationDuration: wcSlowMotion,
+          themeAnimationCurve: wcEase,
           home: WebCordShell(state: state),
         );
       },

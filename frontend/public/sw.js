@@ -1,4 +1,4 @@
-const CACHE_NAME = 'webcord-app-v5-media-stories';
+const CACHE_NAME = 'webcord-app-v8-telegram-motion';
 const SHELL_ASSETS = ['/manifest.webmanifest', '/icons/webcord.png'];
 
 self.addEventListener('install', (event) => {
@@ -17,6 +17,10 @@ self.addEventListener('activate', (event) => {
       .then(() => self.clients.claim())
       .catch(() => undefined)
   );
+});
+
+self.addEventListener('message', (event) => {
+  if (event.data?.type === 'SKIP_WAITING') self.skipWaiting();
 });
 
 self.addEventListener('fetch', (event) => {
