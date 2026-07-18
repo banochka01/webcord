@@ -453,12 +453,18 @@ class Panel extends StatelessWidget {
     required this.child,
     this.padding = const EdgeInsets.all(16),
     this.color = WebCordColors.panel,
+    this.radius = 18,
+    this.showBorder = true,
+    this.blur = true,
     super.key,
   });
 
   final Widget child;
   final EdgeInsetsGeometry padding;
   final Color color;
+  final double radius;
+  final bool showBorder;
+  final bool blur;
 
   @override
   Widget build(BuildContext context) {
@@ -467,9 +473,9 @@ class Panel extends StatelessWidget {
     final panelAlpha = (panelColor.a * 255).round().clamp(0, 255);
     final glassAlpha = panelAlpha < 255 ? panelAlpha : 174;
     return ClipRRect(
-      borderRadius: BorderRadius.circular(18),
+      borderRadius: BorderRadius.circular(radius),
       child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 30, sigmaY: 30),
+        filter: ImageFilter.blur(sigmaX: blur ? 30 : 0, sigmaY: blur ? 30 : 0),
         child: AnimatedContainer(
           duration: wcBaseMotion,
           curve: wcEase,
@@ -485,15 +491,17 @@ class Panel extends StatelessWidget {
               ],
               stops: const [0, 0.46, 1],
             ),
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: palette.border),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withAlpha(58),
-                blurRadius: 34,
-                offset: const Offset(0, 18),
-              ),
-            ],
+            borderRadius: BorderRadius.circular(radius),
+            border: showBorder ? Border.all(color: palette.border) : null,
+            boxShadow: radius > 0
+                ? [
+                    BoxShadow(
+                      color: Colors.black.withAlpha(58),
+                      blurRadius: 34,
+                      offset: const Offset(0, 18),
+                    ),
+                  ]
+                : null,
           ),
           child: Padding(padding: padding, child: child),
         ),

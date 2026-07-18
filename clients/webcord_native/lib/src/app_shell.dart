@@ -232,31 +232,26 @@ class DesktopShell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(10),
-      child: Row(
-        children: [
-          _DesktopPaneEntrance(
-            delay: Duration.zero,
-            offset: const Offset(-.18, 0),
-            child: ServerRail(state: state),
+    return Row(
+      children: [
+        _DesktopPaneEntrance(
+          delay: Duration.zero,
+          offset: const Offset(-.18, 0),
+          child: ServerRail(state: state),
+        ),
+        _DesktopPaneEntrance(
+          delay: const Duration(milliseconds: 70),
+          offset: const Offset(-.1, 0),
+          child: SizedBox(width: 410, child: Sidebar(state: state)),
+        ),
+        Expanded(
+          child: _DesktopPaneEntrance(
+            delay: const Duration(milliseconds: 130),
+            offset: const Offset(.02, .035),
+            child: MainSurface(state: state),
           ),
-          const SizedBox(width: 10),
-          _DesktopPaneEntrance(
-            delay: const Duration(milliseconds: 70),
-            offset: const Offset(-.1, 0),
-            child: SizedBox(width: 324, child: Sidebar(state: state)),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: _DesktopPaneEntrance(
-              delay: const Duration(milliseconds: 130),
-              offset: const Offset(.02, .035),
-              child: MainSurface(state: state),
-            ),
-          ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
@@ -326,7 +321,7 @@ class MobileShell extends StatelessWidget {
     return Scaffold(
       backgroundColor: Colors.transparent,
       appBar: AppBar(
-        toolbarHeight: 68,
+        toolbarHeight: 74,
         elevation: 0,
         scrolledUnderElevation: 0,
         backgroundColor: palette.bg.withAlpha(242),
@@ -335,16 +330,35 @@ class MobileShell extends StatelessWidget {
           onPressed: () => showMobileNavigationSheet(context, state),
           icon: const Icon(Icons.menu_rounded),
         ),
-        titleSpacing: 8,
+        titleSpacing: 4,
         title: Row(
           children: [
-            const BrandMark(size: 30),
-            const SizedBox(width: 10),
+            const BrandMark(size: 34),
+            const SizedBox(width: 8),
+            Text(
+              'WebCord',
+              style: TextStyle(
+                color: palette.text,
+                fontWeight: FontWeight.w900,
+                fontSize: 17,
+              ),
+            ),
+            Container(
+              width: 1,
+              height: 28,
+              margin: const EdgeInsets.symmetric(horizontal: 10),
+              color: palette.border,
+            ),
             Expanded(
               child: Text(
-                state.title,
+                state.workspace == WorkspaceKind.server
+                    ? '# ${state.activeTextChannel?.name ?? state.title}'
+                    : state.title,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontWeight: FontWeight.w900),
+                style: const TextStyle(
+                  fontWeight: FontWeight.w800,
+                  fontSize: 17,
+                ),
               ),
             ),
           ],
@@ -373,42 +387,37 @@ class MobileShell extends StatelessWidget {
           ),
         ],
       ),
-      body: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
-        child: AnimatedSwitcher(
-          duration: wcBaseMotion,
-          switchInCurve: wcEase,
-          switchOutCurve: Curves.easeInCubic,
-          transitionBuilder: (child, animation) {
-            return FadeTransition(
-              opacity: animation,
-              child: SlideTransition(
-                position: Tween<Offset>(
-                  begin: const Offset(.025, .015),
-                  end: Offset.zero,
-                ).animate(animation),
-                child: child,
-              ),
-            );
-          },
-          child: KeyedSubtree(
-            key: ValueKey('${state.workspace}-$showLists'),
-            child: showLists
-                ? Sidebar(state: state, compact: true)
-                : Column(
-                    children: [
-                      if (showQuickSwitch) ...[
-                        MobileQuickSwitch(state: state),
-                        const SizedBox(height: 10),
-                      ],
-                      if (state.workspace == WorkspaceKind.server) ...[
-                        MobileVoiceDock(state: state),
-                        const SizedBox(height: 10),
-                      ],
-                      Expanded(child: MainSurface(state: state)),
+      body: AnimatedSwitcher(
+        duration: wcBaseMotion,
+        switchInCurve: wcEase,
+        switchOutCurve: Curves.easeInCubic,
+        transitionBuilder: (child, animation) {
+          return FadeTransition(
+            opacity: animation,
+            child: SlideTransition(
+              position: Tween<Offset>(
+                begin: const Offset(.025, .015),
+                end: Offset.zero,
+              ).animate(animation),
+              child: child,
+            ),
+          );
+        },
+        child: KeyedSubtree(
+          key: ValueKey('${state.workspace}-$showLists'),
+          child: showLists
+              ? Sidebar(state: state, compact: true)
+              : Column(
+                  children: [
+                    if (showQuickSwitch) ...[
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+                        child: MobileQuickSwitch(state: state),
+                      ),
                     ],
-                  ),
-          ),
+                    Expanded(child: MainSurface(state: state)),
+                  ],
+                ),
         ),
       ),
       bottomNavigationBar: NavigationBar(
@@ -491,10 +500,12 @@ class ServerRail extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Panel(
-      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 7),
+      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
       color: WebCordColors.rail,
+      radius: 0,
+      blur: false,
       child: SizedBox(
-        width: 50,
+        width: 66,
         child: Column(
           children: [
             const BrandMark(size: 34),
@@ -638,33 +649,49 @@ class _SidebarState extends State<Sidebar> {
   Widget build(BuildContext context) {
     final state = widget.state;
     return Panel(
-      padding: const EdgeInsets.all(14),
+      padding: EdgeInsets.zero,
+      radius: 0,
+      blur: false,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          BrandHeader(state: state),
-          const SizedBox(height: 10),
-          TextField(
-            onChanged: (value) => setState(() => _query = value.trim()),
-            decoration: const InputDecoration(
-              hintText: 'Search',
-              prefixIcon: Icon(Icons.search_rounded, size: 20),
-              contentPadding: EdgeInsets.symmetric(
-                horizontal: 14,
-                vertical: 11,
+          if (!widget.compact)
+            _TelegramSidebarHeader(state: state)
+          else
+            BrandHeader(state: state),
+          Padding(
+            padding: EdgeInsets.fromLTRB(
+              widget.compact ? 0 : 14,
+              12,
+              widget.compact ? 0 : 14,
+              6,
+            ),
+            child: TextField(
+              onChanged: (value) => setState(() => _query = value.trim()),
+              decoration: const InputDecoration(
+                hintText: 'Search',
+                prefixIcon: Icon(Icons.search_rounded, size: 20),
+                contentPadding: EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 11,
+                ),
               ),
             ),
           ),
-          const SizedBox(height: 4),
           Expanded(
-            child: switch (state.workspace) {
-              WorkspaceKind.server => _serverList(context, state),
-              WorkspaceKind.friends => _friendsList(context, state),
-              WorkspaceKind.direct ||
-              WorkspaceKind.calls ||
-              WorkspaceKind.stories ||
-              WorkspaceKind.profile => _directList(state),
-            },
+            child: Padding(
+              padding: EdgeInsets.symmetric(
+                horizontal: widget.compact ? 0 : 12,
+              ),
+              child: switch (state.workspace) {
+                WorkspaceKind.server => _serverList(context, state),
+                WorkspaceKind.friends => _friendsList(context, state),
+                WorkspaceKind.direct ||
+                WorkspaceKind.calls ||
+                WorkspaceKind.stories ||
+                WorkspaceKind.profile => _directList(state),
+              },
+            ),
           ),
         ],
       ),
@@ -736,6 +763,18 @@ class _SidebarState extends State<Sidebar> {
                 : null,
             onTap: () => state.selectVoiceChannel(channel.id),
           ),
+        if (state.social.conversations.isNotEmpty) ...[
+          const SectionLabel('Personal messages'),
+          for (final conversation in state.social.conversations)
+            _ConversationSidebarRow(
+              conversation: conversation,
+              selected:
+                  state.workspace == WorkspaceKind.direct &&
+                  conversation.id == state.selectedConversationId,
+              unread: state.unreadConversationIds.contains(conversation.id),
+              onTap: () => state.selectConversation(conversation.id),
+            ),
+        ],
       ],
     );
   }
@@ -841,6 +880,101 @@ class _SidebarState extends State<Sidebar> {
     if (username.isEmpty) return;
     state.sendFriendRequest(username);
     _friend.clear();
+  }
+}
+
+class _TelegramSidebarHeader extends StatelessWidget {
+  const _TelegramSidebarHeader({required this.state});
+
+  final WebCordState state;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = WebCordPalette.of(context);
+    return Container(
+      height: 70,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      decoration: BoxDecoration(
+        color: palette.bg.withAlpha(188),
+        border: Border(bottom: BorderSide(color: palette.border)),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              state.guild?.name ?? 'WebCord',
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
+            ),
+          ),
+          IconButton(
+            tooltip: 'New group',
+            onPressed: () => showCreateGroupDialog(context, state),
+            icon: const Icon(Icons.edit_square, size: 21),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ConversationSidebarRow extends StatelessWidget {
+  const _ConversationSidebarRow({
+    required this.conversation,
+    required this.selected,
+    required this.unread,
+    required this.onTap,
+  });
+
+  final DirectConversation conversation;
+  final bool selected;
+  final bool unread;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = WebCordPalette.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 3),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: wcFastMotion,
+          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 8),
+          decoration: BoxDecoration(
+            color: selected ? palette.accent.withAlpha(52) : Colors.transparent,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Row(
+            children: [
+              ConversationAvatar(conversation: conversation, size: 42),
+              const SizedBox(width: 11),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      conversation.displayTitle,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                    Text(
+                      conversation.lastMessage?.content ??
+                          conversation.subtitleLabel,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(color: palette.muted, fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+              if (unread) const UnreadDot(),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
 
@@ -953,6 +1087,8 @@ class MainSurface extends StatelessWidget {
       content = Panel(
         padding: EdgeInsets.zero,
         color: WebCordColors.panel.withAlpha(238),
+        radius: 0,
+        blur: false,
         child: Column(
           children: [
             ChatHeader(state: state),
@@ -1000,6 +1136,7 @@ class ChatHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final mobile = MediaQuery.sizeOf(context).width < 980;
+    if (mobile) return const SizedBox.shrink();
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
       child: Row(
@@ -1790,11 +1927,7 @@ class ChatWallpaper extends StatelessWidget {
       duration: const Duration(milliseconds: 260),
       curve: Curves.easeOutCubic,
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [palette.bgAlt.withAlpha(210), palette.panel.withAlpha(185)],
-        ),
+        color: palette.bgAlt.withAlpha(230),
         image: hasWallpaper
             ? DecorationImage(
                 image: FileImage(wallpaper),
@@ -1847,12 +1980,17 @@ class MessageTile extends StatelessWidget {
     final compact = state.compactMessages;
     final palette = WebCordPalette.of(context);
     final screenWidth = MediaQuery.sizeOf(context).width;
-    final maxBubbleWidth = screenWidth < 640 ? screenWidth * .78 : 620.0;
+    final mobile = screenWidth < 640;
+    final maxBubbleWidth = mobile ? screenWidth * .86 : 620.0;
     final bubbleColor = own
         ? Color.alphaBlend(palette.accent.withAlpha(138), palette.panelStrong)
+        : mobile
+        ? Colors.transparent
         : palette.panelSoft.withAlpha(242);
     final bubbleBorder = own
         ? palette.accent.withAlpha(105)
+        : mobile
+        ? Colors.transparent
         : palette.border.withAlpha(170);
     final radius = BorderRadius.only(
       topLeft: Radius.circular(own ? 18 : 6),
@@ -1882,8 +2020,8 @@ class MessageTile extends StatelessWidget {
               ? MainAxisAlignment.end
               : MainAxisAlignment.start,
           children: [
-            if (!own) UserAvatar(user: message.author, size: 34),
-            if (!own) const SizedBox(width: 8),
+            if (!own) UserAvatar(user: message.author, size: mobile ? 42 : 34),
+            if (!own) SizedBox(width: mobile ? 12 : 8),
             Flexible(
               child: ConstrainedBox(
                 constraints: BoxConstraints(maxWidth: maxBubbleWidth),
@@ -1892,19 +2030,21 @@ class MessageTile extends StatelessWidget {
                     color: bubbleColor,
                     borderRadius: radius,
                     border: Border.all(color: bubbleBorder),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withAlpha(32),
-                        blurRadius: 14,
-                        offset: const Offset(0, 7),
-                      ),
-                    ],
+                    boxShadow: !own && mobile
+                        ? const []
+                        : [
+                            BoxShadow(
+                              color: Colors.black.withAlpha(32),
+                              blurRadius: 14,
+                              offset: const Offset(0, 7),
+                            ),
+                          ],
                   ),
                   child: Padding(
                     padding: EdgeInsets.fromLTRB(
-                      compact ? 10 : 13,
+                      !own && mobile ? 0 : (compact ? 10 : 13),
                       compact ? 8 : 11,
-                      compact ? 8 : 10,
+                      !own && mobile ? 0 : (compact ? 8 : 10),
                       compact ? 9 : 12,
                     ),
                     child: Column(
@@ -5247,23 +5387,16 @@ class BrandMark extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    return SizedBox(
       width: size,
       height: size,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(6),
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFFFFFFFF), Color(0xFF6F75FF), Color(0xFF38E0CF)],
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(size * .22),
+        child: Image.asset(
+          'assets/images/webcord.png',
+          fit: BoxFit.cover,
+          filterQuality: FilterQuality.high,
         ),
-        boxShadow: [
-          BoxShadow(color: WebCordColors.accent.withAlpha(105), blurRadius: 18),
-        ],
-      ),
-      child: Padding(
-        padding: EdgeInsets.all(size * .18),
-        child: Image.asset('assets/images/webcord.png', fit: BoxFit.contain),
       ),
     );
   }

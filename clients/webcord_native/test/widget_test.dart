@@ -50,9 +50,8 @@ void main() {
     );
 
     expect(find.byIcon(Icons.menu_rounded), findsOneWidget);
-    expect(find.byIcon(Icons.graphic_eq_rounded), findsWidgets);
-    expect(find.text('General Voice'), findsOneWidget);
-    expect(find.text('Join'), findsOneWidget);
+    expect(find.byIcon(Icons.graphic_eq_rounded), findsOneWidget);
+    expect(find.text('General Voice'), findsNothing);
 
     await tester.tap(find.byIcon(Icons.menu_rounded));
     await tester.pump(const Duration(milliseconds: 500));
