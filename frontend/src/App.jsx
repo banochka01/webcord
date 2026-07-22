@@ -2,6 +2,28 @@ import React, { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'rea
 import { useGSAP } from '@gsap/react';
 import gsap from 'gsap';
 import { io } from 'socket.io-client';
+import {
+  TbArrowLeft, TbArrowsMaximize, TbArrowsMinimize, TbBolt, TbBrowser, TbCameraRotate,
+  TbCircleCheck, TbCircleDashed, TbDotsVertical, TbHash, TbMenu2, TbMessageCircleBolt, TbMicrophone, TbMicrophoneOff,
+  TbMinus, TbMoodSmile, TbMusic, TbPaperclip, TbPhone, TbPhoneOff, TbPlayerPause,
+  TbPlayerPlay, TbPlayerStop, TbPlus, TbScreenShare, TbSearch, TbSend2, TbSettings,
+  TbVideo, TbVideoOff, TbVolume, TbVolumeOff, TbWaveSine, TbX
+} from 'react-icons/tb';
+import {
+  MdAdd, MdArrowBack, MdAttachFile, MdAutoStories, MdBolt, MdCall, MdCallEnd,
+  MdCameraswitch, MdCheckCircle, MdClose, MdFullscreen, MdFullscreenExit, MdGraphicEq, MdLanguage,
+  MdMenu, MdMic, MdMicOff, MdMoreVert, MdMusicNote, MdPause, MdPlayArrow, MdRemove,
+  MdSearch, MdScreenShare, MdSend, MdSentimentSatisfiedAlt, MdSettings, MdStop,
+  MdTag, MdVideocam, MdVideocamOff, MdVolumeOff, MdVolumeUp
+} from 'react-icons/md';
+import {
+  PiArrowLeft, PiBrowser, PiCameraRotate, PiCheckCircle, PiCirclesThreePlus, PiCornersIn, PiCornersOut,
+  PiDotsThreeVertical, PiGearSix, PiHash, PiLightning, PiList, PiMagnifyingGlass,
+  PiMicrophone, PiMicrophoneSlash, PiMinus, PiMonitorArrowUp, PiMusicNotes,
+  PiPaperPlaneTilt, PiPaperclip, PiPause, PiPhone, PiPhoneSlash, PiPlay, PiPlus,
+  PiSmiley, PiSpeakerHigh, PiSpeakerSlash, PiStop, PiVideoCamera, PiVideoCameraSlash,
+  PiWaveform, PiX
+} from 'react-icons/pi';
 
 gsap.registerPlugin(useGSAP);
 
@@ -44,15 +66,49 @@ const ADMIN_PATH = '/adminka';
 const ADMIN_PATHS = new Set([ADMIN_PATH, '/admin']);
 
 const PRESETS = {
-  'Liquid Glass': { bg: '#07111d', panel: '#172337', accent: '#76e4ff', text: '#f7fbff', mode: 'liquid' },
-  'Material 3 Expressive': { bg: '#141218', panel: '#211f26', accent: '#d0bcff', text: '#f7f2fa', mode: 'material' },
-  Webcord: { bg: '#0b1020', panel: '#10182d', accent: '#5865f2', text: '#f8fbff', mode: 'solid' },
-  Aurora: { bg: '#101114', panel: '#181d20', accent: '#42d3a7', text: '#f7f7f2', mode: 'solid' },
-  Ember: { bg: '#190f0a', panel: '#2a1a14', accent: '#ff8c42', text: '#fff3eb', mode: 'solid' },
-  Moss: { bg: '#0d1510', panel: '#15211a', accent: '#7bd389', text: '#f3fff7', mode: 'solid' }
+  'Telegram Focus': {
+    id: 'telegram-focus',
+    bg: '#101820', panel: '#18232f', accent: '#3390ec', text: '#f5f7fa', mode: 'telegram',
+    iconFamily: 'telegram', motion: 'quick', density: 'compact', surface: 'flat',
+    description: 'Fast, compact and conversation-first',
+    behavior: 'Quick fades, sliding selection and restrained bubbles'
+  },
+  'Material Motion': {
+    id: 'material-motion',
+    bg: '#141218', panel: '#211f26', accent: '#d0bcff', text: '#f7f2fa', mode: 'material',
+    iconFamily: 'material', motion: 'expressive', density: 'comfortable', surface: 'tonal',
+    description: 'Expressive shapes and Google motion',
+    behavior: 'Container transforms, state layers and emphasized easing'
+  },
+  'Adaptive Atmosphere': {
+    id: 'adaptive-atmosphere',
+    bg: '#07111d', panel: '#172337', accent: '#76e4ff', text: '#f7fbff', mode: 'liquid',
+    iconFamily: 'atmosphere', motion: 'spring', density: 'comfortable', surface: 'glass',
+    description: 'Reactive depth and calm ambient light',
+    behavior: 'Spring depth, pointer-reactive light and breathing voice states'
+  }
 };
 
-const DEFAULT_THEME = PRESETS.Webcord;
+const DEFAULT_THEME = PRESETS['Telegram Focus'];
+
+function hydrateTheme(value) {
+  const stored = value && typeof value === 'object' ? value : null;
+  const match = Object.values(PRESETS).find((preset) => preset.id === stored?.id || preset.mode === stored?.mode) || DEFAULT_THEME;
+  if (!stored) return match;
+  return {
+    ...match,
+    ...stored,
+    id: match.id,
+    mode: match.mode,
+    iconFamily: match.iconFamily,
+    motion: match.motion,
+    density: match.density,
+    surface: match.surface,
+    description: match.description,
+    behavior: match.behavior
+  };
+}
+
 const DEFAULT_PROFILE_ACCENT = '#7c5cff';
 const PROFILE_ACCENTS = ['#7c5cff', '#4f8cff', '#31e4d1', '#ff6b8a', '#f2b84b', '#63d471'];
 const EMPTY_SOCIAL = { friends: [], requests: [], conversations: [], blockedUserIds: [] };
@@ -754,6 +810,38 @@ async function createEnhancedVoiceStream(rawStream) {
   }
 }
 
+function ThemeSystemCard({ name, preset, active, onSelect }) {
+  return (
+    <button
+      className={active ? 'theme-system-card active' : 'theme-system-card'}
+      type="button"
+      style={{
+        '--preset-bg': preset.bg,
+        '--preset-panel': preset.panel,
+        '--preset-accent': preset.accent,
+        '--preset-text': preset.text
+      }}
+      onClick={() => onSelect(preset)}
+      aria-pressed={active}
+      data-preview-mode={preset.mode}
+    >
+      <span className="theme-system-visual" aria-hidden="true">
+        <span className="theme-system-rail"><AppIcon name="menu" size={17} family={preset.iconFamily} /></span>
+        <span className="theme-system-list"><i /><i /><i /></span>
+        <span className="theme-system-chat"><i /><i /></span>
+      </span>
+      <span className="theme-system-copy">
+        <span className="theme-system-title"><AppIcon name="zap" size={17} family={preset.iconFamily} /><strong>{name}</strong></span>
+        <small>{preset.description}</small>
+        <span className="theme-system-traits">
+          <em>{preset.iconFamily} icons</em><em>{preset.motion} motion</em><em>{preset.surface}</em>
+        </span>
+      </span>
+      <span className="theme-system-check" aria-hidden="true"><AppIcon name={active ? 'check' : 'plus'} size={16} family={preset.iconFamily} /></span>
+    </button>
+  );
+}
+
 function ThemeModal({ open, theme, onClose, onThemeChange, onReset }) {
   if (!open) return null;
 
@@ -763,28 +851,20 @@ function ThemeModal({ open, theme, onClose, onThemeChange, onReset }) {
         <div className="modal-header">
           <div>
             <h3>Theme Studio</h3>
-            <p className="muted">Colors apply instantly.</p>
+            <p className="muted">Icons, motion, geometry and behavior apply together.</p>
           </div>
           <button className="icon-btn" type="button" aria-label="Close" title="Close" onClick={onClose}><AppIcon name="close" /></button>
         </div>
 
-        <div className="preset-grid">
+        <div className="theme-system-grid compact">
           {Object.entries(PRESETS).map(([name, preset]) => (
-            <button
+            <ThemeSystemCard
               key={name}
-              className={theme.bg === preset.bg && theme.accent === preset.accent ? 'preset-btn active' : 'preset-btn'}
-              type="button"
-              style={{
-                '--preset-bg': preset.bg,
-                '--preset-panel': preset.panel,
-                '--preset-accent': preset.accent,
-                '--preset-text': preset.text
-              }}
-              onClick={() => onThemeChange(preset)}
-            >
-              <span className="preset-preview" aria-hidden="true"><i /><i /><i /></span>
-              <span className="preset-copy"><strong>{name}</strong><small>{preset.mode === 'material' ? 'Expressive' : preset.mode === 'liquid' ? 'Glass' : 'Classic'}</small></span>
-            </button>
+              name={name}
+              preset={preset}
+              active={theme.id === preset.id || theme.mode === preset.mode}
+              onSelect={onThemeChange}
+            />
           ))}
         </div>
 
@@ -807,7 +887,7 @@ function ThemeModal({ open, theme, onClose, onThemeChange, onReset }) {
 }
 
 function BrandLogo({ className = '' }) {
-  return <img className={className ? `brand-logo ${className}` : 'brand-logo'} src={getPublicAssetUrl('/icons/webcord.png')} alt="" aria-hidden="true" />;
+  return <span className={className ? `brand-logo ${className}` : 'brand-logo'} aria-hidden="true"><TbMessageCircleBolt /></span>;
 }
 
 function DownloadIcon() {
@@ -894,18 +974,54 @@ const APP_ICONS = {
   zap: <path d="M13 2 4 14h7l-1 8 10-13h-7l1-7Z" />
 };
 
-function AppIcon({ name, size = 20, className = '' }) {
+const ICON_FAMILIES = {
+  telegram: {
+    arrowLeft: TbArrowLeft, browser: TbBrowser, camera: TbVideo, cameraOff: TbVideoOff,
+    check: TbCircleCheck,
+    close: TbX, expand: TbArrowsMaximize, hash: TbHash, menu: TbMenu2, more: TbDotsVertical,
+    mic: TbMicrophone, micOff: TbMicrophoneOff, minus: TbMinus, music: TbMusic,
+    paperclip: TbPaperclip, pause: TbPlayerPause, phone: TbPhone, phoneOff: TbPhoneOff,
+    play: TbPlayerPlay, plus: TbPlus, screen: TbScreenShare, send: TbSend2,
+    settings: TbSettings, search: TbSearch, shrink: TbArrowsMinimize, smile: TbMoodSmile,
+    stop: TbPlayerStop, story: TbCircleDashed, switchCamera: TbCameraRotate,
+    volume: TbVolume, volumeOff: TbVolumeOff, wave: TbWaveSine, zap: TbBolt
+  },
+  material: {
+    arrowLeft: MdArrowBack, browser: MdLanguage, camera: MdVideocam, cameraOff: MdVideocamOff,
+    check: MdCheckCircle,
+    close: MdClose, expand: MdFullscreen, hash: MdTag, menu: MdMenu, more: MdMoreVert,
+    mic: MdMic, micOff: MdMicOff, minus: MdRemove, music: MdMusicNote,
+    paperclip: MdAttachFile, pause: MdPause, phone: MdCall, phoneOff: MdCallEnd,
+    play: MdPlayArrow, plus: MdAdd, screen: MdScreenShare, send: MdSend,
+    settings: MdSettings, search: MdSearch, shrink: MdFullscreenExit,
+    smile: MdSentimentSatisfiedAlt, stop: MdStop, story: MdAutoStories,
+    switchCamera: MdCameraswitch, volume: MdVolumeUp, volumeOff: MdVolumeOff,
+    wave: MdGraphicEq, zap: MdBolt
+  },
+  atmosphere: {
+    arrowLeft: PiArrowLeft, browser: PiBrowser, camera: PiVideoCamera,
+    check: PiCheckCircle,
+    cameraOff: PiVideoCameraSlash, close: PiX, expand: PiCornersOut, hash: PiHash,
+    menu: PiList, more: PiDotsThreeVertical, mic: PiMicrophone, micOff: PiMicrophoneSlash,
+    minus: PiMinus, music: PiMusicNotes, paperclip: PiPaperclip, pause: PiPause,
+    phone: PiPhone, phoneOff: PiPhoneSlash, play: PiPlay, plus: PiPlus,
+    screen: PiMonitorArrowUp, send: PiPaperPlaneTilt, settings: PiGearSix,
+    search: PiMagnifyingGlass, shrink: PiCornersIn, smile: PiSmiley, stop: PiStop,
+    story: PiCirclesThreePlus, switchCamera: PiCameraRotate, volume: PiSpeakerHigh,
+    volumeOff: PiSpeakerSlash, wave: PiWaveform, zap: PiLightning
+  }
+};
+
+function AppIcon({ name, size = 20, className = '', family }) {
+  const iconFamily = family || document.documentElement.dataset.iconFamily || 'telegram';
+  const IconComponent = ICON_FAMILIES[iconFamily]?.[name] || ICON_FAMILIES.telegram[name] || TbWaveSine;
   return (
-    <svg
+    <IconComponent
       aria-hidden="true"
       className={className ? `app-icon ${className}` : 'app-icon'}
-      viewBox="0 0 24 24"
-      width={size}
-      height={size}
+      size={size}
       focusable="false"
-    >
-      {APP_ICONS[name] || APP_ICONS.wave}
-    </svg>
+    />
   );
 }
 
@@ -987,7 +1103,23 @@ function LandingPage({
   onSubmit
 }) {
   const [authOpen, setAuthOpen] = useState(false);
+  const [designDraft, setDesignDraft] = useState(() => {
+    try {
+      return window.localStorage.getItem('wc-design-draft') || 'a';
+    } catch {
+      return 'a';
+    }
+  });
   const [downloadState, setDownloadState] = useState({ status: 'loading', items: {} });
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('wc-design-draft', designDraft);
+    } catch {
+      /* ignore persistence errors */
+    }
+  }, [designDraft]);
+
   const landingRef = useRef(null);
   const usernameInputRef = useRef(null);
 
@@ -1078,10 +1210,18 @@ function LandingPage({
   }
 
   return (
-    <main ref={landingRef} className="landing-page">
+    <main ref={landingRef} className={`landing-page design-draft-${designDraft}`}>
       <div className="landing-aurora" aria-hidden="true" />
 
+      <div className="design-draft-switch" role="group" aria-label="Визуальное направление">
+        <span>Дизайн</span>
+        <button type="button" className={designDraft === 'a' ? 'active' : ''} onClick={() => setDesignDraft('a')}>A · Aurora Nightfall</button>
+        <button type="button" className={designDraft === 'b' ? 'active' : ''} onClick={() => setDesignDraft('b')}>B · Clean Aurora</button>
+        <button type="button" className={designDraft === 'c' ? 'active' : ''} onClick={() => setDesignDraft('c')}>C · Playful Gradient</button>
+      </div>
+
       <header className="landing-header">
+
         <a className="landing-brand" href="/" aria-label="WebCord home">
           <BrandLogo className="landing-brand-logo" />
           <span>WebCord</span>
@@ -1976,7 +2116,7 @@ function MediaViewer({ message, onClose }) {
   );
 }
 
-function MessageItem({ message, currentUserId, workspace, canModerateMessages = false, onAvatarClick, onReply, onEdit, onDelete, onReport, onOpenMedia }) {
+function MessageItem({ message, currentUserId, workspace, grouped = false, showDateDivider = false, canModerateMessages = false, onAvatarClick, onReply, onEdit, onDelete, onReport, onOpenMedia }) {
   const isOwn = String(message.author?.id) === String(currentUserId);
   const isDeleted = Boolean(message.deletedAt);
   const canDelete = (isOwn || canModerateMessages) && !isDeleted;
@@ -1987,13 +2127,19 @@ function MessageItem({ message, currentUserId, workspace, canModerateMessages = 
     : '';
 
   return (
-    <div className={isOwn ? 'message-card own' : 'message-card'}>
+    <>
+      {showDateDivider ? (
+        <div className="message-date-divider">
+          {new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'long' }).format(new Date(message.createdAt))}
+        </div>
+      ) : null}
+      <div className={`${isOwn ? 'message-card own' : 'message-card incoming'}${grouped ? ' grouped' : ''}`}>
       <div className="message-meta">
         <button className="avatar-chip avatar-button" type="button" style={getProfileStyle(message.author)} onClick={() => onAvatarClick?.(message.author)}>
           {message.author?.avatarUrl ? <img src={getAttachmentUrl(message.author.avatarUrl)} alt={getDisplayName(message.author)} /> : getDisplayName(message.author).slice(0, 1).toUpperCase()}
         </button>
         <strong>{getDisplayName(message.author)}</strong>
-        <span>{new Date(message.createdAt).toLocaleString()}{message.editedAt ? ' · edited' : ''}{statusText ? ` · ${statusText}` : ''}</span>
+        <span>{new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' }).format(new Date(message.createdAt))}{message.editedAt ? ' · edited' : ''}{statusText ? ` · ${statusText}` : ''}</span>
         <div className="message-actions">
           {!isDeleted ? <button type="button" onClick={() => onReply?.(message)}>Reply</button> : null}
           {!isOwn && !isDeleted ? <button type="button" onClick={() => onReport?.(message)}>Report</button> : null}
@@ -2009,7 +2155,8 @@ function MessageItem({ message, currentUserId, workspace, canModerateMessages = 
       ) : null}
       {isDeleted ? <p className="muted deleted-message">Message deleted</p> : message.content ? <p>{message.content}</p> : null}
       {!isDeleted ? <MessageAttachment message={message} onOpenMedia={onOpenMedia} /> : null}
-    </div>
+      </div>
+    </>
   );
 }
 
@@ -2650,13 +2797,19 @@ function SettingsModal({
         {activeSection === 'appearance' ? (
           <div className="settings-page">
             <h2>Appearance</h2>
-            <div className="theme-preview" style={{ background: theme.panel }}>
-              <span style={{ background: theme.accent }} />
-              <div><strong>Current theme</strong><p>Fine tune the dark client palette.</p></div>
+            <div className="theme-preview theme-system-summary" style={{ background: theme.panel }}>
+              <span style={{ background: theme.accent }}><AppIcon name="zap" size={18} family={theme.iconFamily} /></span>
+              <div><strong>{Object.entries(PRESETS).find(([, preset]) => preset.id === theme.id)?.[0] || 'Custom system'}</strong><p>{theme.behavior || 'A coordinated WebCord interface system.'}</p></div>
             </div>
-            <div className="preset-grid">
+            <div className="theme-system-grid">
               {Object.entries(PRESETS).map(([name, preset]) => (
-                <button key={name} className="preset-btn" type="button" onClick={() => onThemeChange(preset)}>{name}</button>
+                <ThemeSystemCard
+                  key={name}
+                  name={name}
+                  preset={preset}
+                  active={theme.id === preset.id || theme.mode === preset.mode}
+                  onSelect={onThemeChange}
+                />
               ))}
             </div>
             <div className="color-grid">
@@ -2978,6 +3131,7 @@ export default function App() {
   const [editingMessage, setEditingMessage] = useState(null);
   const [dmSearch, setDmSearch] = useState('');
   const [mobileChatSearch, setMobileChatSearch] = useState('');
+  const [sidebarFilter, setSidebarFilter] = useState('all');
   const [activeMobileFolderId, setActiveMobileFolderId] = useState('');
   const [customFolders, setCustomFolders] = useState(() => readCustomFolders(JSON.parse(localStorage.getItem('webcord_user') || 'null') || {}));
   const [customFoldersOwnerKey, setCustomFoldersOwnerKey] = useState(() => getFolderOwnerKey(user));
@@ -3036,7 +3190,13 @@ export default function App() {
   const [networkOnline, setNetworkOnline] = useState(() => navigator.onLine !== false);
   const [socketStatus, setSocketStatus] = useState(() => (navigator.onLine === false ? 'offline' : 'disconnected'));
   const [lastRealtimeSync, setLastRealtimeSync] = useState(null);
-  const [theme, setTheme] = useState(() => JSON.parse(localStorage.getItem(KEYS.theme) || 'null') || DEFAULT_THEME);
+  const [theme, setTheme] = useState(() => {
+    try {
+      return hydrateTheme(JSON.parse(localStorage.getItem(KEYS.theme) || 'null'));
+    } catch {
+      return DEFAULT_THEME;
+    }
+  });
   const [profileDraft, setProfileDraft] = useState(() => createProfileDraft());
   const [isDesktopShell] = useState(() => IS_TAURI_CLIENT || /\b(Electron|WebCordTauri)\b/i.test(navigator.userAgent) || Boolean(window.webcordDesktop || window.webcordWindow || window.electronAPI));
   const [currentPath, setCurrentPath] = useState(() => normalizeAppPath());
@@ -3154,6 +3314,48 @@ export default function App() {
       }, '-=0.42');
   }, { scope: appShellRef, dependencies: [isAuthed, workspace], revertOnUpdate: true });
 
+  useGSAP(() => {
+    const root = appShellRef.current;
+    if (!root || !isAuthed) return undefined;
+
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const profile = {
+      telegram: { duration: 0.2, ease: 'power2.out', y: 5, scale: 0.998, stagger: 0.012 },
+      material: { duration: 0.52, ease: 'back.out(1.16)', y: 12, scale: 0.988, stagger: 0.035 },
+      liquid: { duration: 0.72, ease: 'expo.out', y: 9, scale: 0.994, stagger: 0.026 }
+    }[theme.mode] || { duration: 0.3, ease: 'power3.out', y: 8, scale: 0.995, stagger: 0.02 };
+
+    if (!reducedMotion) {
+      gsap.fromTo(
+        '.rail, .sidebar, .chat-header, .message-form, .mobile-bottom-nav',
+        { autoAlpha: 0.72, y: profile.y, scale: profile.scale },
+        {
+          autoAlpha: 1,
+          y: 0,
+          scale: 1,
+          duration: profile.duration,
+          ease: profile.ease,
+          stagger: profile.stagger,
+          clearProps: 'transform,visibility,opacity'
+        }
+      );
+    }
+
+    const ambient = root.querySelector('.theme-ambient');
+    const finePointer = window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+    if (!ambient || theme.mode !== 'liquid' || !finePointer || reducedMotion) return undefined;
+
+    const moveX = gsap.quickTo(ambient, 'x', { duration: 1.1, ease: 'power3.out' });
+    const moveY = gsap.quickTo(ambient, 'y', { duration: 1.1, ease: 'power3.out' });
+    const onPointerMove = (event) => {
+      const bounds = root.getBoundingClientRect();
+      moveX(((event.clientX - bounds.left) / Math.max(bounds.width, 1) - 0.5) * 64);
+      moveY(((event.clientY - bounds.top) / Math.max(bounds.height, 1) - 0.5) * 48);
+    };
+    root.addEventListener('pointermove', onPointerMove, { passive: true });
+    return () => root.removeEventListener('pointermove', onPointerMove);
+  }, { scope: appShellRef, dependencies: [isAuthed, theme.id], revertOnUpdate: true });
+
   useEffect(() => {
     const syncPath = () => setCurrentPath(normalizeAppPath());
     window.addEventListener('popstate', syncPath);
@@ -3198,6 +3400,10 @@ export default function App() {
       '--text-color': theme.text
     }).forEach(([key, value]) => document.documentElement.style.setProperty(key, value));
     document.documentElement.dataset.themeMode = theme.mode || 'solid';
+    document.documentElement.dataset.iconFamily = theme.iconFamily || 'telegram';
+    document.documentElement.dataset.motionProfile = theme.motion || 'quick';
+    document.documentElement.dataset.density = theme.density || 'comfortable';
+    document.documentElement.dataset.surface = theme.surface || 'flat';
     localStorage.setItem(KEYS.theme, JSON.stringify(theme));
   }, [theme]);
 
@@ -5526,6 +5732,7 @@ export default function App() {
       <div className={mobileSidebarOpen ? 'mobile-overlay active' : 'mobile-overlay'} onClick={() => setMobileSidebarOpen(false)} />
 
       <main ref={appShellRef} className={`${isMobile && mobileChatOpen ? 'app-shell mobile-chat-open' : 'app-shell'}${isDesktopShell ? ' desktop-shell' : ''}${voiceExpanded && voiceJoined ? ' voice-expanded-mode' : ''}`}>
+        <div className="theme-ambient" aria-hidden="true" />
         <aside className="rail">
           <div className="rail-brand" aria-label="WebCord">
             <BrandLogo className="rail-logo" />
@@ -5576,7 +5783,10 @@ export default function App() {
           </button>
         </aside>
 
-        <aside className={mobileSidebarOpen ? 'sidebar mobile-open' : 'sidebar'}>
+        <aside
+          className={mobileSidebarOpen ? 'sidebar mobile-open' : 'sidebar'}
+          data-sidebar-filter={sidebarFilter}
+        >
           <MobileHomePanel
             title={guild?.name || 'Обновление'}
             user={user}
@@ -5596,18 +5806,41 @@ export default function App() {
           />
 
           {!isMobile ? (
-            <label className="desktop-sidebar-search">
-              <AppIcon name="search" size={17} />
-              <input
-                value={workspace === 'dm' ? dmSearch : mobileChatSearch}
-                onChange={(event) => {
-                  if (workspace === 'dm') setDmSearch(event.target.value);
-                  else setMobileChatSearch(event.target.value);
-                }}
-                placeholder="Search"
-                aria-label="Search chats and channels"
-              />
-            </label>
+            <>
+              <label className="desktop-sidebar-search">
+                <AppIcon name="search" size={17} />
+                <input
+                  value={workspace === 'dm' ? dmSearch : mobileChatSearch}
+                  onChange={(event) => {
+                    if (workspace === 'dm') setDmSearch(event.target.value);
+                    else setMobileChatSearch(event.target.value);
+                  }}
+                  placeholder="Search"
+                  aria-label="Search chats and channels"
+                />
+              </label>
+              {workspace === 'server' ? (
+                <div className="sidebar-filter-tabs" role="tablist" aria-label="Conversation filter">
+                  {[
+                    ['all', 'All'],
+                    ['channels', 'Channels'],
+                    ['directs', 'Directs'],
+                    ['unread', 'Unread']
+                  ].map(([id, label]) => (
+                    <button
+                      key={id}
+                      className={sidebarFilter === id ? 'active' : ''}
+                      type="button"
+                      role="tab"
+                      aria-selected={sidebarFilter === id}
+                      onClick={() => setSidebarFilter(id)}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </>
           ) : null}
 
           <div className="profile-card" style={getProfileBannerStyle(user)}>
@@ -5634,7 +5867,7 @@ export default function App() {
 
           {workspace === 'server' ? (
             <div className="stack">
-              <section className="sidebar-card">
+              <section className="sidebar-card channel-sections">
                 <p className="section-label">Text channels</p>
                 {filteredTextChannels.length === 0 ? <p className="muted empty-copy">No text channels yet.</p> : filteredTextChannels.map((channel) => <button key={channel.id} className={String(channel.id) === String(channelId) ? 'channel-btn active' : 'channel-btn'} type="button" onClick={() => selectTextChannel(channel.id)}><span className="channel-icon"><AppIcon name="hash" size={16} /></span><span>{channel.name}</span></button>)}
                 <p className="section-label">Voice channels</p>
@@ -5646,7 +5879,26 @@ export default function App() {
                   </>
                 ) : null}
               </section>
-              <section className="sidebar-card create-channel-card">
+              <section className="sidebar-card direct-sections">
+                <p className="section-label">Personal messages</p>
+                {social.conversations.length === 0 ? (
+                  <p className="muted empty-copy">Your direct conversations will appear here.</p>
+                ) : social.conversations.slice(0, 6).map((conversation) => (
+                  <button
+                    key={conversation.id}
+                    className="channel-btn conversation-btn concept-conversation-row"
+                    type="button"
+                    onClick={() => selectConversation(conversation.id)}
+                  >
+                    <UserAvatar user={conversation.user} />
+                    <span>
+                      <strong>{getConversationTitle(conversation)}</strong>
+                      <small>{conversation.lastMessage?.content || getConversationSubtitle(conversation)}</small>
+                    </span>
+                  </button>
+                ))}
+              </section>
+              <section className="sidebar-card create-channel-card channel-management">
                 <p className="section-label">Create channel</p>
                 {userCanManageChannels ? (
                   <form className="channel-form" onSubmit={handleCreateChannel}>
@@ -5754,6 +6006,38 @@ export default function App() {
               </div>
             </div>
             <div className="header-badges">
+              {!isMobile ? (
+                <div className="concept-header-actions">
+                  <button
+                    className="icon-btn"
+                    type="button"
+                    title="Search"
+                    aria-label="Search"
+                    onClick={() => document.querySelector('.desktop-sidebar-search input')?.focus()}
+                  >
+                    <AppIcon name="search" />
+                  </button>
+                  <button
+                    className="icon-btn"
+                    type="button"
+                    title={voiceJoined ? 'Leave voice' : 'Join voice'}
+                    aria-label={voiceJoined ? 'Leave voice' : 'Join voice'}
+                    disabled={!voiceJoined && !visibleVoiceChannelForJoin}
+                    onClick={() => handleJoinVoice(visibleVoiceChannelForJoin?.id)}
+                  >
+                    <AppIcon name={voiceJoined ? 'phoneOff' : 'phone'} />
+                  </button>
+                  <button
+                    className="icon-btn"
+                    type="button"
+                    title="Appearance"
+                    aria-label="Appearance"
+                    onClick={() => { setSettingsSection('appearance'); setShowSettingsModal(true); }}
+                  >
+                    <AppIcon name="more" />
+                  </button>
+                </div>
+              ) : null}
               <span className={`live-pill realtime-pill ${realtimeStatus}`}>
                 {realtimeLabel}{syncTime && realtimeStatus === 'connected' ? ` ${syncTime}` : ''}
               </span>
@@ -5832,7 +6116,15 @@ export default function App() {
           ) : (
             <>
               <div className="messages" ref={messagesRef} style={chatWallpaperStyle} onScroll={handleMessagesScroll}>
-                {messages.length === 0 ? <div className="empty-state"><h3>{workspace === 'dm' ? 'No direct messages yet' : 'No messages yet'}</h3><p className="muted">{workspace === 'dm' ? 'This thread is ready.' : 'Start the conversation in this channel.'}</p></div> : messages.map((message) => <MessageItem key={message.id} message={message} workspace={workspace} currentUserId={user?.id} canModerateMessages={userCanModerateMessages} onAvatarClick={setViewedProfile} onReply={beginReply} onEdit={beginEdit} onDelete={deleteMessage} onReport={openReportForMessage} onOpenMedia={setViewedMedia} />)}
+                {messages.length === 0 ? <div className="empty-state"><h3>{workspace === 'dm' ? 'No direct messages yet' : 'No messages yet'}</h3><p className="muted">{workspace === 'dm' ? 'This thread is ready.' : 'Start the conversation in this channel.'}</p></div> : messages.map((message, index) => {
+                  const previous = index > 0 ? messages[index - 1] : null;
+                  const grouped = Boolean(
+                    previous &&
+                    String(previous.author?.id) === String(message.author?.id) &&
+                    Math.abs(new Date(message.createdAt) - new Date(previous.createdAt)) < 5 * 60 * 1000
+                  );
+                  return <MessageItem key={message.id} message={message} workspace={workspace} currentUserId={user?.id} grouped={grouped} showDateDivider={index === 0} canModerateMessages={userCanModerateMessages} onAvatarClick={setViewedProfile} onReply={beginReply} onEdit={beginEdit} onDelete={deleteMessage} onReport={openReportForMessage} onOpenMedia={setViewedMedia} />;
+                })}
                 <div ref={endRef} />
               </div>
               <form className="message-form composer" onSubmit={sendMessage}>
@@ -5875,7 +6167,7 @@ export default function App() {
                     </div>
                   ) : null}
                 </div>
-                <input value={newMessage} onChange={(e) => setNewMessage(e.target.value)} placeholder={editingMessage ? 'Edit your message' : workspace === 'dm' ? 'Message your friend' : 'Send a message'} />
+                <input value={newMessage} onChange={(e) => setNewMessage(e.target.value)} placeholder={editingMessage ? 'Edit your message' : isMobile ? 'Message' : workspace === 'dm' ? 'Message your friend' : 'Send a message'} />
                 <button className="composer-send" type="submit" disabled={uploading || (!newMessage.trim() && !pendingAttachment)}><AppIcon name="send" size={16} />{editingMessage ? 'Save' : 'Send'}</button>
               </form>
             </>
@@ -5945,29 +6237,28 @@ export default function App() {
           />
         ) : null}
 
-        <aside className="activity-panel">
-          <section>
-            <p className="section-label">Active now</p>
-            <div className="activity-card">
-              <UserAvatar user={user} />
-              <div>
-                <strong>{getDisplayName(user)}</strong>
-                <span>{voiceJoined ? `In ${activeVoiceChannel?.name || 'voice'}` : (user?.statusText || 'Browsing WebCord')}</span>
-              </div>
+        <aside className="activity-panel concept-theme-studio">
+          <header>
+            <div>
+              <h2>Theme Studio</h2>
+              <p>Icons, motion, geometry and behavior change together.</p>
             </div>
-          </section>
-          <section>
-            <p className="section-label">Friends</p>
-            {social.friends.length === 0 ? <p className="muted">No friends online yet.</p> : social.friends.slice(0, 6).map((friend) => (
-              <button key={friend.id} className="activity-card interactive" type="button" onClick={() => openConversation(friend.user.id)}>
-                <UserAvatar user={friend.user} />
-                <div>
-                  <strong>{getDisplayName(friend.user)}</strong>
-                  <span>{friend.user?.statusText || getUsernameTag(friend.user)}</span>
-                </div>
-              </button>
+          </header>
+          <div className="concept-theme-list">
+            {Object.entries(PRESETS).map(([name, preset]) => (
+              <ThemeSystemCard
+                key={name}
+                name={name}
+                preset={preset}
+                active={theme.id === preset.id}
+                onSelect={setTheme}
+              />
             ))}
-          </section>
+          </div>
+          <div className="concept-theme-behavior">
+            <AppIcon name="zap" size={18} />
+            <span>{theme.behavior}</span>
+          </div>
         </aside>
       </main>
 

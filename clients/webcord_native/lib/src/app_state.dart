@@ -177,7 +177,7 @@ class WebCordState extends ChangeNotifier {
   AttachmentUpload? pendingAttachment;
   CallSession? activeCall;
   CallSession? incomingCall;
-  AppThemeMode themeMode = AppThemeMode.liquid;
+  AppThemeMode themeMode = AppThemeMode.telegram;
   String selectedMicDeviceId = '';
   String selectedOutputDeviceId = '';
   String selectedCameraDeviceId = '';

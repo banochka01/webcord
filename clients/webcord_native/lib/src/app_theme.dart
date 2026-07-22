@@ -1,6 +1,6 @@
 import 'dart:ui';
 
-import 'package:flutter/cupertino.dart';
+import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
 import 'package:flutter/material.dart';
 
 const wcFastMotion = Duration(milliseconds: 190);
@@ -9,8 +9,9 @@ const wcSlowMotion = Duration(milliseconds: 620);
 const wcEase = Curves.easeOutCubic;
 
 enum AppThemeMode {
-  liquid('Liquid Glass'),
-  material('Material 3 Expressive'),
+  telegram('Telegram Focus'),
+  material('Material Motion'),
+  liquid('Adaptive Atmosphere'),
   nebula('Nebula'),
   graphite('Graphite'),
   aurora('Aurora');
@@ -19,12 +20,185 @@ enum AppThemeMode {
 
   final String label;
 
+  static const flagship = <AppThemeMode>[
+    AppThemeMode.telegram,
+    AppThemeMode.material,
+    AppThemeMode.liquid,
+  ];
+
+  String get description => switch (this) {
+    AppThemeMode.telegram => 'Fast, compact and conversation-first',
+    AppThemeMode.material => 'Expressive shapes and Google motion',
+    AppThemeMode.liquid => 'Reactive depth and calm ambient light',
+    _ => 'Legacy WebCord palette',
+  };
+
+  String get behavior => switch (this) {
+    AppThemeMode.telegram => 'Outline icons | quick motion | flat surfaces',
+    AppThemeMode.material =>
+      'Material Symbols | emphasized motion | tonal surfaces',
+    AppThemeMode.liquid => 'Luminous icons | spring motion | adaptive glass',
+    _ => 'Classic motion and components',
+  };
+
   static AppThemeMode fromName(String? value) {
     for (final mode in values) {
       if (mode.name == value) return mode;
     }
-    return AppThemeMode.liquid;
+    return AppThemeMode.telegram;
   }
+}
+
+enum WebCordIconRole {
+  menu,
+  channels,
+  friends,
+  direct,
+  calls,
+  stories,
+  profile,
+  settings,
+  logout,
+  search,
+  voice,
+  send,
+  attach,
+  microphone,
+  video,
+  wallpaper,
+  theme,
+  selected,
+}
+
+@immutable
+class WebCordThemeSystem extends ThemeExtension<WebCordThemeSystem> {
+  const WebCordThemeSystem(this.mode);
+
+  final AppThemeMode mode;
+
+  static WebCordThemeSystem of(BuildContext context) =>
+      Theme.of(context).extension<WebCordThemeSystem>() ??
+      const WebCordThemeSystem(AppThemeMode.telegram);
+
+  Duration get fastMotion => switch (mode) {
+    AppThemeMode.telegram => const Duration(milliseconds: 150),
+    AppThemeMode.material => const Duration(milliseconds: 260),
+    AppThemeMode.liquid => const Duration(milliseconds: 230),
+    _ => wcFastMotion,
+  };
+
+  Duration get baseMotion => switch (mode) {
+    AppThemeMode.telegram => const Duration(milliseconds: 220),
+    AppThemeMode.material => const Duration(milliseconds: 500),
+    AppThemeMode.liquid => const Duration(milliseconds: 620),
+    _ => wcBaseMotion,
+  };
+
+  Curve get curve => switch (mode) {
+    AppThemeMode.telegram => Curves.easeOutCubic,
+    AppThemeMode.material => Curves.easeOutBack,
+    AppThemeMode.liquid => Curves.easeOutQuart,
+    _ => wcEase,
+  };
+
+  double get controlRadius => switch (mode) {
+    AppThemeMode.telegram => 10,
+    AppThemeMode.material => 24,
+    AppThemeMode.liquid => 18,
+    _ => 16,
+  };
+
+  double get bubbleRadius => switch (mode) {
+    AppThemeMode.telegram => 14,
+    AppThemeMode.material => 26,
+    AppThemeMode.liquid => 22,
+    _ => 18,
+  };
+
+  bool get usesGlass => mode == AppThemeMode.liquid;
+
+  IconData icon(WebCordIconRole role, {bool selected = false}) {
+    if (mode == AppThemeMode.telegram) {
+      return switch (role) {
+        WebCordIconRole.menu => Icons.menu_rounded,
+        WebCordIconRole.channels => Icons.tag_outlined,
+        WebCordIconRole.friends => Icons.people_outline_rounded,
+        WebCordIconRole.direct => Icons.chat_bubble_outline_rounded,
+        WebCordIconRole.calls => Icons.phone_outlined,
+        WebCordIconRole.stories => Icons.auto_stories_outlined,
+        WebCordIconRole.profile => Icons.person_outline_rounded,
+        WebCordIconRole.settings => Icons.settings_outlined,
+        WebCordIconRole.logout => Icons.logout_rounded,
+        WebCordIconRole.search => Icons.search_rounded,
+        WebCordIconRole.voice => Icons.graphic_eq_rounded,
+        WebCordIconRole.send => Icons.send_outlined,
+        WebCordIconRole.attach => Icons.attach_file_rounded,
+        WebCordIconRole.microphone => Icons.mic_none_rounded,
+        WebCordIconRole.video => Icons.videocam_outlined,
+        WebCordIconRole.wallpaper => Icons.wallpaper_outlined,
+        WebCordIconRole.theme => Icons.palette_outlined,
+        WebCordIconRole.selected => Icons.check_circle_outline_rounded,
+      };
+    }
+    if (mode == AppThemeMode.material) {
+      return switch (role) {
+        WebCordIconRole.menu => Icons.menu_rounded,
+        WebCordIconRole.channels =>
+          selected ? Icons.tag_rounded : Icons.tag_outlined,
+        WebCordIconRole.friends =>
+          selected ? Icons.group_rounded : Icons.group_outlined,
+        WebCordIconRole.direct =>
+          selected ? Icons.chat_rounded : Icons.chat_outlined,
+        WebCordIconRole.calls =>
+          selected ? Icons.call_rounded : Icons.call_outlined,
+        WebCordIconRole.stories =>
+          selected ? Icons.auto_stories_rounded : Icons.auto_stories_outlined,
+        WebCordIconRole.profile =>
+          selected ? Icons.person_rounded : Icons.person_outline_rounded,
+        WebCordIconRole.settings => Icons.settings_rounded,
+        WebCordIconRole.logout => Icons.logout_rounded,
+        WebCordIconRole.search => Icons.search_rounded,
+        WebCordIconRole.voice => Icons.graphic_eq_rounded,
+        WebCordIconRole.send => Icons.send_rounded,
+        WebCordIconRole.attach => Icons.attach_file_rounded,
+        WebCordIconRole.microphone => Icons.mic_rounded,
+        WebCordIconRole.video => Icons.video_camera_front_rounded,
+        WebCordIconRole.wallpaper => Icons.wallpaper_rounded,
+        WebCordIconRole.theme => Icons.dashboard_customize_rounded,
+        WebCordIconRole.selected => Icons.check_circle_rounded,
+      };
+    }
+    return switch (role) {
+      WebCordIconRole.menu => Icons.blur_on_rounded,
+      WebCordIconRole.channels => Icons.grid_view_rounded,
+      WebCordIconRole.friends => Icons.diversity_3_outlined,
+      WebCordIconRole.direct => Icons.bubble_chart_outlined,
+      WebCordIconRole.calls => Icons.phone_in_talk_outlined,
+      WebCordIconRole.stories => Icons.motion_photos_on_outlined,
+      WebCordIconRole.profile => Icons.face_outlined,
+      WebCordIconRole.settings => Icons.tune_rounded,
+      WebCordIconRole.logout => Icons.power_settings_new_rounded,
+      WebCordIconRole.search => Icons.travel_explore_rounded,
+      WebCordIconRole.voice => Icons.multiline_chart_rounded,
+      WebCordIconRole.send => Icons.rocket_launch_rounded,
+      WebCordIconRole.attach => Icons.add_link_rounded,
+      WebCordIconRole.microphone => Icons.spatial_audio_off_rounded,
+      WebCordIconRole.video => Icons.video_camera_front_outlined,
+      WebCordIconRole.wallpaper => Icons.gradient_rounded,
+      WebCordIconRole.theme => Icons.auto_awesome_rounded,
+      WebCordIconRole.selected => Icons.task_alt_rounded,
+    };
+  }
+
+  @override
+  WebCordThemeSystem copyWith({AppThemeMode? mode}) =>
+      WebCordThemeSystem(mode ?? this.mode);
+
+  @override
+  WebCordThemeSystem lerp(
+    covariant ThemeExtension<WebCordThemeSystem>? other,
+    double t,
+  ) => t < .5 || other is! WebCordThemeSystem ? this : other;
 }
 
 class WebCordColors {
@@ -82,7 +256,7 @@ class WebCordPalette extends ThemeExtension<WebCordPalette> {
 
   static WebCordPalette of(BuildContext context) {
     return Theme.of(context).extension<WebCordPalette>() ??
-        palettes[AppThemeMode.liquid]!;
+        palettes[AppThemeMode.telegram]!;
   }
 
   @override
@@ -153,6 +327,28 @@ class WebCordPalette extends ThemeExtension<WebCordPalette> {
 }
 
 const palettes = <AppThemeMode, WebCordPalette>{
+  AppThemeMode.telegram: WebCordPalette(
+    bg: Color(0xFF101820),
+    bgAlt: Color(0xFF17212B),
+    rail: Color(0xFF0E1621),
+    panel: Color(0xFF18232F),
+    panelSoft: Color(0xFF202D3A),
+    panelStrong: Color(0xFF283745),
+    border: Color(0x334F6070),
+    text: Color(0xFFF5F7FA),
+    muted: Color(0xFF9BAAB8),
+    accent: Color(0xFF3390EC),
+    accentHot: Color(0xFF64B5F6),
+    cyan: Color(0xFF55B8E8),
+    danger: Color(0xFFFF6B6B),
+    success: Color(0xFF42D392),
+    backdrop: [
+      Color(0xFF101820),
+      Color(0xFF111B25),
+      Color(0xFF14202B),
+      Color(0xFF17212B),
+    ],
+  ),
   AppThemeMode.liquid: WebCordPalette(
     bg: Color(0xFF050817),
     bgAlt: Color(0xFF080D1D),
@@ -265,11 +461,13 @@ const palettes = <AppThemeMode, WebCordPalette>{
   ),
 };
 
-ThemeData webCordTheme([AppThemeMode mode = AppThemeMode.liquid]) {
+ThemeData webCordTheme([AppThemeMode mode = AppThemeMode.telegram]) {
   final palette = palettes[mode]!;
+  final system = WebCordThemeSystem(mode);
   final materialExpressive = mode == AppThemeMode.material;
-  final controlRadius = materialExpressive ? 24.0 : 16.0;
-  final fieldRadius = materialExpressive ? 22.0 : 16.0;
+  final telegramFocus = mode == AppThemeMode.telegram;
+  final controlRadius = system.controlRadius;
+  final fieldRadius = materialExpressive ? 24.0 : system.controlRadius;
   final scheme = ColorScheme.fromSeed(
     seedColor: palette.accent,
     brightness: Brightness.dark,
@@ -280,13 +478,21 @@ ThemeData webCordTheme([AppThemeMode mode = AppThemeMode.liquid]) {
     useMaterial3: true,
     brightness: Brightness.dark,
     scaffoldBackgroundColor: palette.bg,
+    visualDensity: telegramFocus
+        ? VisualDensity.compact
+        : VisualDensity.standard,
+    splashFactory: materialExpressive
+        ? InkSparkle.splashFactory
+        : telegramFocus
+        ? NoSplash.splashFactory
+        : InkRipple.splashFactory,
     colorScheme: scheme.copyWith(
       primary: palette.accent,
       secondary: palette.cyan,
       surface: palette.panel,
       error: palette.danger,
     ),
-    extensions: [palette],
+    extensions: [palette, system],
     fontFamily: 'Segoe UI',
     textTheme: TextTheme(
       headlineLarge: TextStyle(
@@ -358,14 +564,29 @@ ThemeData webCordTheme([AppThemeMode mode = AppThemeMode.liquid]) {
     ),
     iconButtonTheme: IconButtonThemeData(
       style: IconButton.styleFrom(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
+        minimumSize: const Size(44, 44),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(
+            materialExpressive
+                ? 18
+                : telegramFocus
+                ? 10
+                : 999,
+          ),
+        ),
       ),
     ),
     navigationBarTheme: NavigationBarThemeData(
       indicatorShape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(
+          materialExpressive
+              ? 22
+              : telegramFocus
+              ? 10
+              : 18,
+        ),
       ),
-      height: 76,
+      height: telegramFocus ? 68 : 76,
       labelTextStyle: WidgetStatePropertyAll(
         TextStyle(
           color: palette.muted,
@@ -374,13 +595,27 @@ ThemeData webCordTheme([AppThemeMode mode = AppThemeMode.liquid]) {
         ),
       ),
     ),
-    pageTransitionsTheme: const PageTransitionsTheme(
-      builders: {
-        TargetPlatform.android: ZoomPageTransitionsBuilder(),
-        TargetPlatform.windows: FadeUpwardsPageTransitionsBuilder(),
-        TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
-        TargetPlatform.macOS: CupertinoPageTransitionsBuilder(),
-      },
+    pageTransitionsTheme: PageTransitionsTheme(
+      builders: materialExpressive
+          ? const {
+              TargetPlatform.android: ZoomPageTransitionsBuilder(),
+              TargetPlatform.windows: FadeUpwardsPageTransitionsBuilder(),
+              TargetPlatform.iOS: ZoomPageTransitionsBuilder(),
+              TargetPlatform.macOS: ZoomPageTransitionsBuilder(),
+            }
+          : telegramFocus
+          ? const {
+              TargetPlatform.android: CupertinoPageTransitionsBuilder(),
+              TargetPlatform.windows: FadeUpwardsPageTransitionsBuilder(),
+              TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+              TargetPlatform.macOS: CupertinoPageTransitionsBuilder(),
+            }
+          : const {
+              TargetPlatform.android: ZoomPageTransitionsBuilder(),
+              TargetPlatform.windows: ZoomPageTransitionsBuilder(),
+              TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+              TargetPlatform.macOS: CupertinoPageTransitionsBuilder(),
+            },
     ),
   );
 }
@@ -416,7 +651,11 @@ class _AppBackdropState extends State<AppBackdrop>
   @override
   Widget build(BuildContext context) {
     final palette = WebCordPalette.of(context);
+    final system = WebCordThemeSystem.of(context);
     final disabled = MediaQuery.maybeOf(context)?.disableAnimations ?? false;
+    if (system.mode == AppThemeMode.telegram) {
+      return ColoredBox(color: palette.bg, child: widget.child);
+    }
     return DecoratedBox(
       decoration: BoxDecoration(
         gradient: LinearGradient(
@@ -436,6 +675,7 @@ class _AppBackdropState extends State<AppBackdrop>
                   painter: _GlassVeilPainter(
                     palette,
                     disabled ? 0 : _ambient.value,
+                    system.mode,
                   ),
                 );
               },
@@ -469,36 +709,49 @@ class Panel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final palette = WebCordPalette.of(context);
+    final system = WebCordThemeSystem.of(context);
     final panelColor = color == WebCordColors.panel ? palette.panel : color;
     final panelAlpha = (panelColor.a * 255).round().clamp(0, 255);
-    final glassAlpha = panelAlpha < 255 ? panelAlpha : 174;
+    final glassAlpha = panelAlpha < 255
+        ? panelAlpha
+        : system.usesGlass
+        ? 174
+        : 255;
+    final resolvedRadius = radius == 18 ? system.controlRadius : radius;
+    final resolvedBlur = blur && system.usesGlass;
     return ClipRRect(
-      borderRadius: BorderRadius.circular(radius),
+      borderRadius: BorderRadius.circular(resolvedRadius),
       child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: blur ? 30 : 0, sigmaY: blur ? 30 : 0),
+        filter: ImageFilter.blur(
+          sigmaX: resolvedBlur ? 30 : 0,
+          sigmaY: resolvedBlur ? 30 : 0,
+        ),
         child: AnimatedContainer(
-          duration: wcBaseMotion,
-          curve: wcEase,
+          duration: system.baseMotion,
+          curve: system.curve,
           decoration: BoxDecoration(
             color: panelColor.withAlpha(glassAlpha),
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                Colors.white.withAlpha(15),
-                Colors.white.withAlpha(4),
-                palette.accent.withAlpha(8),
-              ],
-              stops: const [0, 0.46, 1],
-            ),
-            borderRadius: BorderRadius.circular(radius),
+            gradient: system.usesGlass
+                ? LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      Colors.white.withAlpha(15),
+                      Colors.white.withAlpha(4),
+                      palette.accent.withAlpha(8),
+                    ],
+                    stops: const [0, 0.46, 1],
+                  )
+                : null,
+            borderRadius: BorderRadius.circular(resolvedRadius),
             border: showBorder ? Border.all(color: palette.border) : null,
-            boxShadow: radius > 0
+            boxShadow:
+                resolvedRadius > 0 && system.mode != AppThemeMode.telegram
                 ? [
                     BoxShadow(
-                      color: Colors.black.withAlpha(58),
-                      blurRadius: 34,
-                      offset: const Offset(0, 18),
+                      color: Colors.black.withAlpha(system.usesGlass ? 58 : 30),
+                      blurRadius: system.usesGlass ? 34 : 18,
+                      offset: Offset(0, system.usesGlass ? 18 : 8),
                     ),
                   ]
                 : null,
@@ -534,13 +787,28 @@ class SectionLabel extends StatelessWidget {
 }
 
 class _GlassVeilPainter extends CustomPainter {
-  const _GlassVeilPainter(this.palette, this.progress);
+  const _GlassVeilPainter(this.palette, this.progress, this.mode);
 
   final WebCordPalette palette;
   final double progress;
+  final AppThemeMode mode;
 
   @override
   void paint(Canvas canvas, Size size) {
+    if (mode == AppThemeMode.material) {
+      final tonalPaint = Paint()
+        ..color = palette.accent.withAlpha(18)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 34);
+      canvas.drawOval(
+        Rect.fromCenter(
+          center: Offset(size.width * .94, size.height * .42),
+          width: size.width * .7,
+          height: size.height * .82,
+        ),
+        tonalPaint,
+      );
+      return;
+    }
     final bandShift = lerpDouble(
       -size.width * .22,
       size.width * .18,
@@ -598,5 +866,7 @@ class _GlassVeilPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _GlassVeilPainter oldDelegate) =>
-      oldDelegate.palette != palette || oldDelegate.progress != progress;
+      oldDelegate.palette != palette ||
+      oldDelegate.progress != progress ||
+      oldDelegate.mode != mode;
 }

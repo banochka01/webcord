@@ -7,6 +7,32 @@ import 'package:webcord_native/src/app_theme.dart';
 import 'package:webcord_native/src/models.dart';
 
 void main() {
+  test('flagship themes change icons, motion, geometry and surfaces', () {
+    final telegram = WebCordThemeSystem(AppThemeMode.telegram);
+    final material = WebCordThemeSystem(AppThemeMode.material);
+    final atmosphere = WebCordThemeSystem(AppThemeMode.liquid);
+
+    expect(AppThemeMode.flagship, hasLength(3));
+    expect({
+      telegram.icon(WebCordIconRole.send),
+      material.icon(WebCordIconRole.send),
+      atmosphere.icon(WebCordIconRole.send),
+    }, hasLength(3));
+    expect({
+      telegram.baseMotion,
+      material.baseMotion,
+      atmosphere.baseMotion,
+    }, hasLength(3));
+    expect({
+      telegram.bubbleRadius,
+      material.bubbleRadius,
+      atmosphere.bubbleRadius,
+    }, hasLength(3));
+    expect(telegram.usesGlass, isFalse);
+    expect(material.usesGlass, isFalse);
+    expect(atmosphere.usesGlass, isTrue);
+  });
+
   testWidgets('renders native WebCord app shell', (tester) async {
     await tester.pumpWidget(const WebCordNativeApp());
     await tester.pump(const Duration(milliseconds: 500));
@@ -49,11 +75,11 @@ void main() {
       ),
     );
 
-    expect(find.byIcon(Icons.menu_rounded), findsOneWidget);
+    expect(find.byTooltip('Channels and calls'), findsOneWidget);
     expect(find.byIcon(Icons.graphic_eq_rounded), findsOneWidget);
     expect(find.text('General Voice'), findsNothing);
 
-    await tester.tap(find.byIcon(Icons.menu_rounded));
+    await tester.tap(find.byTooltip('Channels and calls'));
     await tester.pump(const Duration(milliseconds: 500));
 
     expect(find.text('TEXT CHANNELS'), findsOneWidget);

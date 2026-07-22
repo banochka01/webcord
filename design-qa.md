@@ -1,75 +1,45 @@
-# WebCord Telegram UI — Design QA
+# WebCord unified theme system — Design QA
 
-- Source visual truth:
-  - `design-reviews/concept-messenger-desktop-telegram.png`
-  - `design-reviews/concept-native-mobile.png`
-- Implementation screenshots:
-  - `design-reviews/native-desktop-telegram-final.png`
-  - `design-reviews/native-mobile-telegram-final.png`
-- Comparison boards:
-  - `design-reviews/qa-desktop-comparison.png`
-  - `design-reviews/qa-mobile-comparison.png`
-- Viewports: desktop 1536 × 1024; mobile 390 × 844 at DPR 1.
-- State: authenticated server workspace, `#общий`, populated message timeline.
+## Evidence
 
-## Full-view comparison evidence
+- Source of visual truth: `design-reviews/concept-unified-theme-system.png` (`1487 × 1058`).
+- Final comparison board: `design-reviews/qa-fidelity-final.png`.
+- Web captures: `design-reviews/web-fidelity-desktop.png` (`1536 × 1024`) and `design-reviews/web-fidelity-mobile.png` (`390 × 844`).
+- Flutter goldens: desktop and mobile captures for Telegram Focus, Material Motion, and Adaptive Atmosphere in `clients/webcord_native/test/goldens/`.
+- Tested state: authenticated Calm server workspace, populated text channel, voice room, personal conversations, outgoing messages, and Material Motion selected.
 
-Desktop now uses the same three-part composition as the reference: a narrow
-workspace rail, a wide navigation/conversation column, and a flat chat surface.
-The previous outer frame, pane gaps, and rounded nested shells are gone.
+## Full-view comparison
 
-Mobile now uses a full-width top bar, horizontally scrollable channels,
-unboxed incoming messages, a Telegram-like outgoing bubble, a bottom composer,
-and five persistent destinations. The voice-room card no longer consumes the
-top of every chat.
+The final implementations preserve the reference hierarchy: branded destination rail, wide conversation navigation, dominant chat surface, floating composer, and a dedicated Theme Studio on wide screens. Both clients use lightweight incoming messages and content-fit outgoing bubbles instead of full-width message cards.
 
-## Focused comparison evidence
+The theme selector changes the complete interaction system:
 
-Focused review covered the brand mark, sidebar/header proportions, message
-alignment, composer, and mobile bottom navigation. The launcher and in-app
-brand asset use the landing-page `webcord.png`. Standard controls continue to
-use Material Symbols rather than hand-built icons.
+- Telegram Focus: compact density, outline icons, flat surfaces, quick motion, and blue message geometry.
+- Material Motion: Material icon mapping, tonal containers, emphasized easing, state layers, and expressive shapes.
+- Adaptive Atmosphere: luminous icon mapping, translucent surfaces, spring motion, ambient light, and reactive depth.
 
-## Findings
+## Focused checks
 
-- No actionable P0, P1, or P2 mismatch remains.
-- P3: fixture avatars use initials because the deterministic test does not
-  perform network requests. Real user avatars continue to render from profile
-  data.
-- P3: the native client intentionally keeps voice/video actions in the header
-  and composer; the concept shows a smaller subset of the production controls.
-- P3: the source mobile mock includes reactions and administrative role chips
-  not available in the current message payload.
+- Desktop pane proportions, header hierarchy, selected rows, message grouping, timestamps, composer width, and Theme Studio density.
+- Mobile navigation, channel opening, message geometry, composer fit, and text wrapping at `390 × 844`.
+- Theme interactions in the browser: Telegram Focus → Adaptive Atmosphere → Material Motion, with `data-theme-mode` verified after each selection.
+- Flutter Theme Studio selected state and all desktop/mobile golden fixtures.
 
-## Required fidelity surfaces
+## Findings and fixes
 
-- Fonts and typography: Segoe UI is loaded for the Windows-native hierarchy;
-  sizes, weights, line heights, truncation, and wrapping were checked at both
-  viewports.
-- Spacing and layout rhythm: pane widths, separators, chat gutters, channel
-  strip, composer, and bottom navigation align with the selected direction.
-- Colors and visual tokens: deep navy surfaces, violet selection/outgoing
-  messages, cyan identity accents, muted labels, and semantic live state all
-  map through the active theme palette.
-- Image quality and asset fidelity: the landing-page logo is used directly;
-  screenshots render at native pixel dimensions without resampling artifacts.
-- Copy and content: app-specific labels, channel names, Russian sample
-  messages, and navigation destinations were verified for clipping.
+1. P1 fixed: later legacy responsive rules hid Theme Studio and collapsed the rail/sidebar widths. Final scoped layout guards now preserve the four-column concept at `≥1380px`.
+2. P1 fixed: incoming messages inherited Material containers on mobile. Incoming messages are now unboxed in every theme and viewport; outgoing messages remain compact, asymmetric bubbles.
+3. P1 fixed: the original raster logo contained a large opaque white canvas. The client now uses a real icon-library brand glyph in a theme-aware container.
+4. P2 fixed: full locale timestamps crowded message bubbles. Timeline messages now show compact local time while the date divider carries the calendar context.
+5. P2 fixed: mobile composer copy and controls clipped at `390px`; the hint is shortened and the form is constrained to the viewport.
+6. P3 accepted: deterministic Flutter fixtures use initial avatars because golden tests do not perform network requests; production avatars remain data-driven.
 
-## Comparison history
+## Regression checks
 
-1. Initial implementation: P1 nested card composition and P1 mobile voice dock;
-   P2 incoming mobile bubbles; P2 missing personal-message section.
-2. Fixes: flattened desktop panes, removed permanent mobile voice dock, added
-   personal-message rows, expanded mobile content width, and removed incoming
-   message cards.
-3. Post-fix evidence: both final screenshots and comparison boards above.
-
-## Interaction and regression checks
-
-- Channel switching, navigation destinations, menu/voice sheets, composer
-  controls, and responsive shell selection remain wired to production state.
-- Flutter analyzer and widget tests pass, including 390 × 844 overflow coverage.
-- Deterministic golden captures pass for desktop and mobile.
+- `npm.cmd run check` — passed, including backend syntax, Prisma validation, and React production build.
+- Flutter analyzer — passed with no issues.
+- Flutter tests — all 10 passed, including responsive theme goldens and Theme Studio coverage.
+- Browser QA — desktop/mobile rendering and all three theme selections passed. The only console entries were expected failed WebSocket handshakes from the isolated mocked QA backend; no React runtime errors occurred.
+- Reduced-motion behavior remains implemented in both clients.
 
 final result: passed

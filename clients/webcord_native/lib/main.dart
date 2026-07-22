@@ -49,12 +49,13 @@ class _WebCordNativeAppState extends State<WebCordNativeApp> {
     return AnimatedBuilder(
       animation: state,
       builder: (context, _) {
+        final themeSystem = WebCordThemeSystem(state.themeMode);
         return MaterialApp(
           title: 'WebCord',
           debugShowCheckedModeBanner: false,
           theme: webCordTheme(state.themeMode),
-          themeAnimationDuration: wcSlowMotion,
-          themeAnimationCurve: wcEase,
+          themeAnimationDuration: themeSystem.baseMotion,
+          themeAnimationCurve: themeSystem.curve,
           home: WebCordShell(state: state),
         );
       },

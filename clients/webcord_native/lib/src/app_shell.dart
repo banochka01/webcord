@@ -232,26 +232,40 @@ class DesktopShell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        _DesktopPaneEntrance(
-          delay: Duration.zero,
-          offset: const Offset(-.18, 0),
-          child: ServerRail(state: state),
-        ),
-        _DesktopPaneEntrance(
-          delay: const Duration(milliseconds: 70),
-          offset: const Offset(-.1, 0),
-          child: SizedBox(width: 410, child: Sidebar(state: state)),
-        ),
-        Expanded(
-          child: _DesktopPaneEntrance(
-            delay: const Duration(milliseconds: 130),
-            offset: const Offset(.02, .035),
-            child: MainSurface(state: state),
-          ),
-        ),
-      ],
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final showThemeStudio = constraints.maxWidth >= 1380;
+        return Row(
+          children: [
+            _DesktopPaneEntrance(
+              delay: Duration.zero,
+              offset: const Offset(-.18, 0),
+              child: ServerRail(state: state),
+            ),
+            _DesktopPaneEntrance(
+              delay: const Duration(milliseconds: 70),
+              offset: const Offset(-.1, 0),
+              child: SizedBox(width: 366, child: Sidebar(state: state)),
+            ),
+            Expanded(
+              child: _DesktopPaneEntrance(
+                delay: const Duration(milliseconds: 130),
+                offset: const Offset(.02, .035),
+                child: MainSurface(state: state),
+              ),
+            ),
+            if (showThemeStudio)
+              _DesktopPaneEntrance(
+                delay: const Duration(milliseconds: 190),
+                offset: const Offset(.12, 0),
+                child: SizedBox(
+                  width: 366,
+                  child: ThemeStudioPanel(state: state),
+                ),
+              ),
+          ],
+        );
+      },
     );
   }
 }
@@ -286,15 +300,16 @@ class _DesktopPaneEntranceState extends State<_DesktopPaneEntrance> {
   Widget build(BuildContext context) {
     final disableAnimations =
         MediaQuery.maybeOf(context)?.disableAnimations ?? false;
+    final themeSystem = WebCordThemeSystem.of(context);
     final visible = _visible || disableAnimations;
     return AnimatedSlide(
       offset: visible ? Offset.zero : widget.offset,
-      duration: wcBaseMotion,
-      curve: wcEase,
+      duration: themeSystem.baseMotion,
+      curve: themeSystem.curve,
       child: AnimatedOpacity(
         opacity: visible ? 1 : 0,
-        duration: wcBaseMotion,
-        curve: wcEase,
+        duration: themeSystem.baseMotion,
+        curve: themeSystem.curve,
         child: widget.child,
       ),
     );
@@ -309,6 +324,7 @@ class MobileShell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final palette = WebCordPalette.of(context);
+    final themeSystem = WebCordThemeSystem.of(context);
     final showLists =
         state.workspace == WorkspaceKind.friends ||
         (state.workspace == WorkspaceKind.server &&
@@ -328,7 +344,7 @@ class MobileShell extends StatelessWidget {
         leading: IconButton(
           tooltip: 'Channels and calls',
           onPressed: () => showMobileNavigationSheet(context, state),
-          icon: const Icon(Icons.menu_rounded),
+          icon: Icon(themeSystem.icon(WebCordIconRole.menu)),
         ),
         titleSpacing: 4,
         title: Row(
@@ -378,18 +394,18 @@ class MobileShell extends StatelessWidget {
           IconButton(
             tooltip: 'Settings',
             onPressed: () => showSettingsDialog(context, state),
-            icon: const Icon(Icons.settings_rounded),
+            icon: Icon(themeSystem.icon(WebCordIconRole.settings)),
           ),
           IconButton(
             tooltip: 'Logout',
             onPressed: state.logout,
-            icon: const Icon(Icons.logout_rounded),
+            icon: Icon(themeSystem.icon(WebCordIconRole.logout)),
           ),
         ],
       ),
       body: AnimatedSwitcher(
-        duration: wcBaseMotion,
-        switchInCurve: wcEase,
+        duration: themeSystem.baseMotion,
+        switchInCurve: themeSystem.curve,
         switchOutCurve: Curves.easeInCubic,
         transitionBuilder: (child, animation) {
           return FadeTransition(
@@ -443,31 +459,51 @@ class MobileShell extends StatelessWidget {
         destinations: [
           NavigationDestination(
             icon: NavIconWithBadge(
-              icon: Icons.chat_bubble_rounded,
+              icon: themeSystem.icon(WebCordIconRole.direct),
+              count: state.directUnreadCount,
+            ),
+            selectedIcon: NavIconWithBadge(
+              icon: themeSystem.icon(WebCordIconRole.direct, selected: true),
               count: state.directUnreadCount,
             ),
             label: 'Chats',
           ),
           NavigationDestination(
             icon: NavIconWithBadge(
-              icon: Icons.tag_rounded,
+              icon: themeSystem.icon(WebCordIconRole.channels),
+              count: state.serverUnreadCount,
+            ),
+            selectedIcon: NavIconWithBadge(
+              icon: themeSystem.icon(WebCordIconRole.channels, selected: true),
               count: state.serverUnreadCount,
             ),
             label: 'Channels',
           ),
-          const NavigationDestination(
-            icon: Icon(Icons.call_rounded),
+          NavigationDestination(
+            icon: Icon(themeSystem.icon(WebCordIconRole.calls)),
+            selectedIcon: Icon(
+              themeSystem.icon(WebCordIconRole.calls, selected: true),
+            ),
             label: 'Calls',
           ),
           NavigationDestination(
             icon: Badge(
               isLabelVisible: state.stories.any((story) => !story.viewed),
-              child: const Icon(Icons.auto_stories_rounded),
+              child: Icon(themeSystem.icon(WebCordIconRole.stories)),
+            ),
+            selectedIcon: Badge(
+              isLabelVisible: state.stories.any((story) => !story.viewed),
+              child: Icon(
+                themeSystem.icon(WebCordIconRole.stories, selected: true),
+              ),
             ),
             label: 'Stories',
           ),
-          const NavigationDestination(
-            icon: Icon(Icons.person_rounded),
+          NavigationDestination(
+            icon: Icon(themeSystem.icon(WebCordIconRole.profile)),
+            selectedIcon: Icon(
+              themeSystem.icon(WebCordIconRole.profile, selected: true),
+            ),
             label: 'Profile',
           ),
         ],
@@ -499,44 +535,65 @@ class ServerRail extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final themeSystem = WebCordThemeSystem.of(context);
     return Panel(
-      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+      padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
       color: WebCordColors.rail,
       radius: 0,
       blur: false,
       child: SizedBox(
-        width: 66,
+        width: 88,
         child: Column(
           children: [
-            const BrandMark(size: 34),
-            const SizedBox(height: 16),
+            const BrandMark(size: 42),
+            const SizedBox(height: 6),
+            const Text(
+              'WebCord',
+              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 22),
             RailButton(
               selected: state.workspace == WorkspaceKind.server,
-              icon: Icons.tag_rounded,
+              icon: themeSystem.icon(
+                WebCordIconRole.channels,
+                selected: state.workspace == WorkspaceKind.server,
+              ),
               label: 'Channels',
               onTap: () => state.selectWorkspace(WorkspaceKind.server),
             ),
             RailButton(
               selected: state.workspace == WorkspaceKind.friends,
-              icon: Icons.people_alt_rounded,
+              icon: themeSystem.icon(
+                WebCordIconRole.friends,
+                selected: state.workspace == WorkspaceKind.friends,
+              ),
               label: 'Friends',
               onTap: () => state.selectWorkspace(WorkspaceKind.friends),
             ),
             RailButton(
               selected: state.workspace == WorkspaceKind.direct,
-              icon: Icons.alternate_email_rounded,
+              icon: themeSystem.icon(
+                WebCordIconRole.direct,
+                selected: state.workspace == WorkspaceKind.direct,
+              ),
               label: 'Directs',
               onTap: () => state.selectWorkspace(WorkspaceKind.direct),
             ),
             RailButton(
               selected: state.workspace == WorkspaceKind.calls,
-              icon: Icons.call_rounded,
+              icon: themeSystem.icon(
+                WebCordIconRole.calls,
+                selected: state.workspace == WorkspaceKind.calls,
+              ),
               label: 'Calls',
               onTap: () => state.selectWorkspace(WorkspaceKind.calls),
             ),
             RailButton(
               selected: state.workspace == WorkspaceKind.stories,
-              icon: Icons.auto_stories_rounded,
+              icon: themeSystem.icon(
+                WebCordIconRole.stories,
+                selected: state.workspace == WorkspaceKind.stories,
+              ),
               label: 'Stories',
               onTap: () => state.selectWorkspace(WorkspaceKind.stories),
             ),
@@ -552,13 +609,13 @@ class ServerRail extends StatelessWidget {
             const SizedBox(height: 8),
             RailButton(
               selected: false,
-              icon: Icons.settings_rounded,
+              icon: themeSystem.icon(WebCordIconRole.settings),
               label: 'Settings',
               onTap: () => showSettingsDialog(context, state),
             ),
             RailButton(
               selected: false,
-              icon: Icons.logout_rounded,
+              icon: themeSystem.icon(WebCordIconRole.logout),
               label: 'Logout',
               onTap: state.logout,
             ),
@@ -586,23 +643,30 @@ class RailButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final palette = WebCordPalette.of(context);
+    final themeSystem = WebCordThemeSystem.of(context);
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.only(bottom: 10),
       child: Tooltip(
         message: label,
         child: InkWell(
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(themeSystem.controlRadius),
           onTap: onTap,
           child: AnimatedScale(
-            scale: selected ? 1.06 : 1,
-            duration: wcFastMotion,
-            curve: wcEase,
+            scale: selected ? 1.035 : 1,
+            duration: themeSystem.fastMotion,
+            curve: themeSystem.curve,
             child: AnimatedContainer(
-              duration: wcFastMotion,
-              width: 40,
-              height: 40,
+              duration: themeSystem.fastMotion,
+              width: 76,
+              height: 64,
               decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(selected ? 12 : 15),
+                borderRadius: BorderRadius.circular(
+                  themeSystem.mode == AppThemeMode.material
+                      ? selected
+                            ? 16
+                            : 20
+                      : themeSystem.controlRadius,
+                ),
                 color: selected
                     ? palette.accent.withAlpha(48)
                     : Colors.transparent,
@@ -612,10 +676,26 @@ class RailButton extends StatelessWidget {
                       : Colors.transparent,
                 ),
               ),
-              child: Icon(
-                icon,
-                size: 20,
-                color: selected ? palette.text : palette.muted,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    icon,
+                    size: 23,
+                    color: selected ? palette.text : palette.muted,
+                  ),
+                  const SizedBox(height: 5),
+                  Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: selected ? palette.text : palette.muted,
+                      fontSize: 10,
+                      fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
@@ -638,6 +718,7 @@ class Sidebar extends StatefulWidget {
 class _SidebarState extends State<Sidebar> {
   final _friend = TextEditingController();
   String _query = '';
+  String _filter = 'all';
 
   @override
   void dispose() {
@@ -648,6 +729,7 @@ class _SidebarState extends State<Sidebar> {
   @override
   Widget build(BuildContext context) {
     final state = widget.state;
+    final themeSystem = WebCordThemeSystem.of(context);
     return Panel(
       padding: EdgeInsets.zero,
       radius: 0,
@@ -668,16 +750,24 @@ class _SidebarState extends State<Sidebar> {
             ),
             child: TextField(
               onChanged: (value) => setState(() => _query = value.trim()),
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 hintText: 'Search',
-                prefixIcon: Icon(Icons.search_rounded, size: 20),
-                contentPadding: EdgeInsets.symmetric(
+                prefixIcon: Icon(
+                  themeSystem.icon(WebCordIconRole.search),
+                  size: 20,
+                ),
+                contentPadding: const EdgeInsets.symmetric(
                   horizontal: 14,
                   vertical: 11,
                 ),
               ),
             ),
           ),
+          if (!widget.compact && state.workspace == WorkspaceKind.server)
+            _SidebarFilterBar(
+              selected: _filter,
+              onSelected: (value) => setState(() => _filter = value),
+            ),
           Expanded(
             child: Padding(
               padding: EdgeInsets.symmetric(
@@ -699,6 +789,7 @@ class _SidebarState extends State<Sidebar> {
   }
 
   Widget _serverList(BuildContext context, WebCordState state) {
+    final themeSystem = WebCordThemeSystem.of(context);
     final query = _query.toLowerCase();
     final textChannels = state.textChannels
         .where(
@@ -712,60 +803,87 @@ class _SidebarState extends State<Sidebar> {
               query.isEmpty || channel.name.toLowerCase().contains(query),
         )
         .toList();
+    final showChannels = _filter == 'all' || _filter == 'channels';
+    final showDirects = _filter == 'all' || _filter == 'directs';
+    final showUnread = _filter == 'unread';
+    final visibleTextChannels = showUnread
+        ? textChannels
+              .where((channel) => state.unreadChannelIds.contains(channel.id))
+              .toList()
+        : textChannels;
+    final visibleConversations = showUnread
+        ? state.social.conversations
+              .where(
+                (conversation) =>
+                    state.unreadConversationIds.contains(conversation.id),
+              )
+              .toList()
+        : state.social.conversations;
     return ListView(
+      padding: const EdgeInsets.only(top: 4, bottom: 18),
       children: [
-        Row(
-          children: [
-            const Expanded(child: SectionLabel('Text channels')),
-            if (state.canManageChannels)
-              IconButton(
-                tooltip: 'Create text channel',
-                onPressed: () =>
-                    showCreateChannelDialog(context, state, ChannelKind.text),
-                icon: const Icon(Icons.add_rounded, size: 19),
-              ),
-          ],
-        ),
-        for (final channel in textChannels)
+        if (showChannels || showUnread)
+          Row(
+            children: [
+              const Expanded(child: SectionLabel('Text channels')),
+              if (state.canManageChannels)
+                IconButton(
+                  tooltip: 'Create text channel',
+                  onPressed: () =>
+                      showCreateChannelDialog(context, state, ChannelKind.text),
+                  icon: const Icon(Icons.add_rounded, size: 19),
+                ),
+            ],
+          ),
+        for (final channel in visibleTextChannels)
           NavRow(
             selected: channel.id == state.selectedTextChannelId,
-            icon: Icons.tag_rounded,
+            icon: themeSystem.icon(
+              WebCordIconRole.channels,
+              selected: channel.id == state.selectedTextChannelId,
+            ),
             title: channel.name,
             trailing: state.unreadChannelIds.contains(channel.id)
                 ? const UnreadDot()
                 : null,
             onTap: () => state.selectTextChannel(channel.id),
           ),
-        Row(
-          children: [
-            const Expanded(child: SectionLabel('Voice rooms')),
-            if (state.canManageChannels)
-              IconButton(
-                tooltip: 'Create voice channel',
-                onPressed: () =>
-                    showCreateChannelDialog(context, state, ChannelKind.voice),
-                icon: const Icon(Icons.add_rounded, size: 19),
-              ),
-          ],
-        ),
-        for (final channel in voiceChannels)
-          NavRow(
-            selected: channel.id == state.selectedVoiceChannelId,
-            icon: Icons.graphic_eq_rounded,
-            title: channel.name,
-            trailing:
-                channel.id == state.selectedVoiceChannelId && state.voiceJoined
-                ? const Icon(
-                    Icons.circle,
-                    size: 9,
-                    color: WebCordColors.success,
-                  )
-                : null,
-            onTap: () => state.selectVoiceChannel(channel.id),
+        if (showChannels)
+          Row(
+            children: [
+              const Expanded(child: SectionLabel('Voice rooms')),
+              if (state.canManageChannels)
+                IconButton(
+                  tooltip: 'Create voice channel',
+                  onPressed: () => showCreateChannelDialog(
+                    context,
+                    state,
+                    ChannelKind.voice,
+                  ),
+                  icon: const Icon(Icons.add_rounded, size: 19),
+                ),
+            ],
           ),
-        if (state.social.conversations.isNotEmpty) ...[
+        if (showChannels)
+          for (final channel in voiceChannels)
+            NavRow(
+              selected: channel.id == state.selectedVoiceChannelId,
+              icon: themeSystem.icon(WebCordIconRole.voice),
+              title: channel.name,
+              trailing:
+                  channel.id == state.selectedVoiceChannelId &&
+                      state.voiceJoined
+                  ? const Icon(
+                      Icons.circle,
+                      size: 9,
+                      color: WebCordColors.success,
+                    )
+                  : null,
+              onTap: () => state.selectVoiceChannel(channel.id),
+            ),
+        if ((showDirects || showUnread) && visibleConversations.isNotEmpty) ...[
           const SectionLabel('Personal messages'),
-          for (final conversation in state.social.conversations)
+          for (final conversation in visibleConversations)
             _ConversationSidebarRow(
               conversation: conversation,
               selected:
@@ -883,6 +1001,73 @@ class _SidebarState extends State<Sidebar> {
   }
 }
 
+class _SidebarFilterBar extends StatelessWidget {
+  const _SidebarFilterBar({required this.selected, required this.onSelected});
+
+  final String selected;
+  final ValueChanged<String> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = WebCordPalette.of(context);
+    final system = WebCordThemeSystem.of(context);
+    const items = <(String, String)>[
+      ('all', 'All'),
+      ('channels', 'Channels'),
+      ('directs', 'Directs'),
+      ('unread', 'Unread'),
+    ];
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 4, 14, 9),
+      child: Row(
+        children: [
+          for (final item in items)
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 2),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(10),
+                  onTap: () => onSelected(item.$1),
+                  child: AnimatedContainer(
+                    duration: system.fastMotion,
+                    curve: system.curve,
+                    padding: const EdgeInsets.symmetric(vertical: 9),
+                    decoration: BoxDecoration(
+                      color: selected == item.$1
+                          ? palette.accent.withAlpha(34)
+                          : Colors.transparent,
+                      border: Border(
+                        bottom: BorderSide(
+                          width: 2,
+                          color: selected == item.$1
+                              ? palette.accent
+                              : Colors.transparent,
+                        ),
+                      ),
+                    ),
+                    child: Text(
+                      item.$2,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: selected == item.$1
+                            ? palette.accentHot
+                            : palette.muted,
+                        fontSize: 11.5,
+                        fontWeight: selected == item.$1
+                            ? FontWeight.w800
+                            : FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
 class _TelegramSidebarHeader extends StatelessWidget {
   const _TelegramSidebarHeader({required this.state});
 
@@ -892,8 +1077,8 @@ class _TelegramSidebarHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final palette = WebCordPalette.of(context);
     return Container(
-      height: 70,
-      padding: const EdgeInsets.symmetric(horizontal: 16),
+      height: 96,
+      padding: const EdgeInsets.fromLTRB(20, 12, 12, 12),
       decoration: BoxDecoration(
         color: palette.bg.withAlpha(188),
         border: Border(bottom: BorderSide(color: palette.border)),
@@ -904,7 +1089,7 @@ class _TelegramSidebarHeader extends StatelessWidget {
             child: Text(
               state.guild?.name ?? 'WebCord',
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
+              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900),
             ),
           ),
           IconButton(
@@ -1074,6 +1259,7 @@ class MainSurface extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final themeSystem = WebCordThemeSystem.of(context);
     late final Widget content;
     if (state.workspace == WorkspaceKind.friends) {
       content = FriendsHome(state: state);
@@ -1108,8 +1294,8 @@ class MainSurface extends StatelessWidget {
     }
 
     return AnimatedSwitcher(
-      duration: wcBaseMotion,
-      switchInCurve: wcEase,
+      duration: themeSystem.baseMotion,
+      switchInCurve: themeSystem.curve,
       switchOutCurve: Curves.easeInCubic,
       transitionBuilder: (child, animation) {
         return FadeTransition(
@@ -1136,18 +1322,21 @@ class ChatHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final mobile = MediaQuery.sizeOf(context).width < 980;
+    final themeSystem = WebCordThemeSystem.of(context);
     if (mobile) return const SizedBox.shrink();
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+    return Container(
+      height: 96,
+      padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 18),
       child: Row(
         children: [
           Icon(
             state.workspace == WorkspaceKind.direct
-                ? Icons.alternate_email_rounded
-                : Icons.tag_rounded,
-            color: WebCordColors.cyan,
+                ? themeSystem.icon(WebCordIconRole.direct)
+                : themeSystem.icon(WebCordIconRole.channels, selected: true),
+            color: WebCordColors.muted,
+            size: 28,
           ),
-          const SizedBox(width: 10),
+          const SizedBox(width: 14),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1156,7 +1345,7 @@ class ChatHeader extends StatelessWidget {
                   state.title,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                    fontSize: 18,
+                    fontSize: 19,
                     fontWeight: FontWeight.w900,
                   ),
                 ),
@@ -1171,14 +1360,31 @@ class ChatHeader extends StatelessWidget {
               ],
             ),
           ),
-          LivePill(status: state.socketStatus),
+          IconButton(
+            tooltip: 'Search messages',
+            onPressed: () => showMessageSearchDialog(context, state),
+            icon: Icon(themeSystem.icon(WebCordIconRole.search)),
+          ),
+          const SizedBox(width: 4),
+          if (state.workspace == WorkspaceKind.server)
+            IconButton(
+              tooltip: state.voiceJoined ? 'Leave voice' : 'Join voice',
+              onPressed: state.selectedVoiceChannelId == null || state.mediaBusy
+                  ? null
+                  : state.joinOrLeaveVoice,
+              icon: Icon(
+                state.voiceJoined
+                    ? Icons.call_end_rounded
+                    : themeSystem.icon(WebCordIconRole.calls),
+              ),
+            ),
           if (state.workspace == WorkspaceKind.server ||
               state.workspace == WorkspaceKind.direct) ...[
             const SizedBox(width: 8),
             IconButton.filledTonal(
               tooltip: 'Set chat wallpaper',
               onPressed: state.setCurrentChatWallpaper,
-              icon: const Icon(Icons.wallpaper_rounded),
+              icon: Icon(themeSystem.icon(WebCordIconRole.wallpaper)),
             ),
           ],
           if (state.workspace == WorkspaceKind.direct &&
@@ -1189,7 +1395,7 @@ class ChatHeader extends StatelessWidget {
               onPressed: state.busy || state.mediaBusy
                   ? null
                   : () => state.startDirectCall(state.activeConversation!),
-              icon: const Icon(Icons.call_rounded),
+              icon: Icon(themeSystem.icon(WebCordIconRole.calls)),
             ),
             const SizedBox(width: 6),
             IconButton.filledTonal(
@@ -1200,9 +1406,15 @@ class ChatHeader extends StatelessWidget {
                       state.activeConversation!,
                       video: true,
                     ),
-              icon: const Icon(Icons.videocam_rounded),
+              icon: Icon(themeSystem.icon(WebCordIconRole.video)),
             ),
           ],
+          const SizedBox(width: 4),
+          IconButton(
+            tooltip: 'More options',
+            onPressed: () => showSettingsDialog(context, state),
+            icon: const Icon(Icons.more_vert_rounded),
+          ),
           if (mobile && state.workspace == WorkspaceKind.server) ...[
             const SizedBox(width: 8),
             IconButton.filledTonal(
@@ -1899,10 +2111,21 @@ class MessageList extends StatelessWidget {
           );
         }
         final message = state.messages[index - extraTopItems];
+        final previousIndex = index - extraTopItems - 1;
+        final previous = previousIndex >= 0
+            ? state.messages[previousIndex]
+            : null;
+        final groupedWithPrevious =
+            previous != null &&
+            previous.author.id == message.author.id &&
+            message.createdAt.difference(previous.createdAt).inMinutes.abs() <
+                5;
         return MessageTile(
           message: message,
           own: message.author.id == state.user?.id,
           state: state,
+          groupedWithPrevious: groupedWithPrevious,
+          showDateDivider: previous == null,
         );
       },
     );
@@ -1918,6 +2141,7 @@ class ChatWallpaper extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final palette = WebCordPalette.of(context);
+    final system = WebCordThemeSystem.of(context);
     final path = state.chatWallpaperPath.trim();
     final wallpaper = path.isEmpty ? null : File(path);
     final hasWallpaper = wallpaper != null && wallpaper.existsSync();
@@ -1941,6 +2165,50 @@ class ChatWallpaper extends StatelessWidget {
       ),
       child: Stack(
         children: [
+          if (!hasWallpaper && system.mode != AppThemeMode.telegram) ...[
+            Positioned(
+              right: -120,
+              top: 34,
+              width: 420,
+              height: 760,
+              child: IgnorePointer(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: RadialGradient(
+                      colors: [
+                        palette.accent.withAlpha(
+                          system.mode == AppThemeMode.liquid ? 76 : 46,
+                        ),
+                        Colors.transparent,
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              right: 18,
+              top: 180,
+              width: 180,
+              height: 540,
+              child: IgnorePointer(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: RadialGradient(
+                      center: Alignment.center,
+                      radius: 1,
+                      colors: [
+                        palette.accentHot.withAlpha(52),
+                        palette.cyan.withAlpha(28),
+                        Colors.transparent,
+                      ],
+                      stops: const [0, .32, 1],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
           Positioned.fill(
             child: DecoratedBox(
               decoration: BoxDecoration(
@@ -1963,250 +2231,365 @@ class ChatWallpaper extends StatelessWidget {
   }
 }
 
-class MessageTile extends StatelessWidget {
+class MessageTile extends StatefulWidget {
   const MessageTile({
     required this.message,
     required this.own,
     required this.state,
+    this.groupedWithPrevious = false,
+    this.showDateDivider = false,
     super.key,
   });
 
   final ChatMessage message;
   final bool own;
   final WebCordState state;
+  final bool groupedWithPrevious;
+  final bool showDateDivider;
+
+  @override
+  State<MessageTile> createState() => _MessageTileState();
+}
+
+class _MessageTileState extends State<MessageTile> {
+  bool _hovered = false;
 
   @override
   Widget build(BuildContext context) {
+    final message = widget.message;
+    final own = widget.own;
+    final state = widget.state;
     final compact = state.compactMessages;
     final palette = WebCordPalette.of(context);
+    final themeSystem = WebCordThemeSystem.of(context);
     final screenWidth = MediaQuery.sizeOf(context).width;
     final mobile = screenWidth < 640;
-    final maxBubbleWidth = mobile ? screenWidth * .86 : 620.0;
-    final bubbleColor = own
-        ? Color.alphaBlend(palette.accent.withAlpha(138), palette.panelStrong)
-        : mobile
-        ? Colors.transparent
-        : palette.panelSoft.withAlpha(242);
-    final bubbleBorder = own
-        ? palette.accent.withAlpha(105)
-        : mobile
-        ? Colors.transparent
-        : palette.border.withAlpha(170);
+    final bubbleRadius = themeSystem.bubbleRadius;
     final radius = BorderRadius.only(
-      topLeft: Radius.circular(own ? 18 : 6),
-      topRight: Radius.circular(own ? 6 : 18),
-      bottomLeft: const Radius.circular(18),
-      bottomRight: const Radius.circular(18),
+      topLeft: Radius.circular(bubbleRadius),
+      topRight: Radius.circular(bubbleRadius),
+      bottomLeft: Radius.circular(bubbleRadius),
+      bottomRight: Radius.circular(own ? 6 : bubbleRadius),
     );
 
-    return TweenAnimationBuilder<double>(
-      tween: Tween(begin: 0, end: 1),
-      duration: wcBaseMotion,
-      curve: wcEase,
-      builder: (context, value, child) {
-        return Opacity(
-          opacity: value,
-          child: Transform.translate(
-            offset: Offset(0, (1 - value) * 8),
-            child: child,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final preferred = constraints.maxWidth * (mobile ? .82 : .66);
+        final maxBubbleWidth = preferred > 560 ? 560.0 : preferred;
+        return TweenAnimationBuilder<double>(
+          tween: Tween(begin: 0, end: 1),
+          duration: themeSystem.baseMotion,
+          curve: themeSystem.curve,
+          builder: (context, value, child) => Opacity(
+            opacity: value,
+            child: Transform.translate(
+              offset: Offset(0, (1 - value) * 7),
+              child: child,
+            ),
+          ),
+          child: MouseRegion(
+            onEnter: (_) => setState(() => _hovered = true),
+            onExit: (_) => setState(() => _hovered = false),
+            child: Column(
+              children: [
+                if (widget.showDateDivider)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8, bottom: 26),
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: palette.panelSoft.withAlpha(178),
+                        borderRadius: BorderRadius.circular(999),
+                        border: Border.all(color: palette.border),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 7,
+                        ),
+                        child: Text(
+                          _dateLabel(message.createdAt),
+                          style: TextStyle(
+                            color: palette.muted,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                Padding(
+                  padding: EdgeInsets.only(
+                    bottom: widget.groupedWithPrevious
+                        ? 4
+                        : compact
+                        ? 10
+                        : 18,
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    mainAxisAlignment: own
+                        ? MainAxisAlignment.end
+                        : MainAxisAlignment.start,
+                    children: [
+                      if (!own)
+                        widget.groupedWithPrevious
+                            ? SizedBox(width: mobile ? 44 : 40)
+                            : UserAvatar(
+                                user: message.author,
+                                size: mobile ? 44 : 40,
+                              ),
+                      if (!own) const SizedBox(width: 12),
+                      Flexible(
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(maxWidth: maxBubbleWidth),
+                          child: Stack(
+                            clipBehavior: Clip.none,
+                            children: [
+                              Column(
+                                crossAxisAlignment: own
+                                    ? CrossAxisAlignment.end
+                                    : CrossAxisAlignment.start,
+                                children: [
+                                  if (!own && !widget.groupedWithPrevious)
+                                    Padding(
+                                      padding: const EdgeInsets.only(
+                                        left: 2,
+                                        bottom: 7,
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Text(
+                                            message.author.displayLabel,
+                                            style: TextStyle(
+                                              color: palette.accentHot,
+                                              fontSize: 14,
+                                              fontWeight: FontWeight.w900,
+                                            ),
+                                          ),
+                                          const SizedBox(width: 9),
+                                          Text(
+                                            _timeLabel(message.createdAt),
+                                            style: TextStyle(
+                                              color: palette.muted,
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  DecoratedBox(
+                                    decoration: BoxDecoration(
+                                      color: own ? null : Colors.transparent,
+                                      gradient: own
+                                          ? LinearGradient(
+                                              begin: Alignment.topLeft,
+                                              end: Alignment.bottomRight,
+                                              colors: [
+                                                palette.accent.withAlpha(220),
+                                                palette.accentHot.withAlpha(
+                                                  178,
+                                                ),
+                                              ],
+                                            )
+                                          : null,
+                                      borderRadius: radius,
+                                      border: own
+                                          ? Border.all(
+                                              color: Colors.white.withAlpha(24),
+                                            )
+                                          : null,
+                                      boxShadow: const [],
+                                    ),
+                                    child: Padding(
+                                      padding: own
+                                          ? const EdgeInsets.fromLTRB(
+                                              17,
+                                              12,
+                                              14,
+                                              9,
+                                            )
+                                          : EdgeInsets.zero,
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          if (message.replyTo != null)
+                                            Padding(
+                                              padding: const EdgeInsets.only(
+                                                bottom: 8,
+                                              ),
+                                              child: DecoratedBox(
+                                                decoration: BoxDecoration(
+                                                  color: Colors.black.withAlpha(
+                                                    35,
+                                                  ),
+                                                  borderRadius:
+                                                      BorderRadius.circular(11),
+                                                ),
+                                                child: Padding(
+                                                  padding:
+                                                      const EdgeInsets.fromLTRB(
+                                                        10,
+                                                        7,
+                                                        11,
+                                                        7,
+                                                      ),
+                                                  child: Text(
+                                                    '${message.replyTo!.author.displayLabel}: ${message.replyTo!.content}',
+                                                    maxLines: 1,
+                                                    overflow:
+                                                        TextOverflow.ellipsis,
+                                                    style: TextStyle(
+                                                      color: own
+                                                          ? Colors.white
+                                                                .withAlpha(220)
+                                                          : palette.muted,
+                                                      fontSize: 12,
+                                                    ),
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                          if (message.isDeleted)
+                                            Text(
+                                              'Message deleted',
+                                              style: TextStyle(
+                                                color: palette.muted,
+                                                fontStyle: FontStyle.italic,
+                                              ),
+                                            )
+                                          else if (message.content.isNotEmpty)
+                                            Text(
+                                              message.content,
+                                              style: TextStyle(
+                                                color: own
+                                                    ? Colors.white
+                                                    : palette.text,
+                                                fontSize: mobile ? 15 : 15.5,
+                                                height: 1.42,
+                                                fontWeight: FontWeight.w400,
+                                              ),
+                                            ),
+                                          if (!message.isDeleted &&
+                                              message.hasAttachment)
+                                            Padding(
+                                              padding: const EdgeInsets.only(
+                                                top: 10,
+                                              ),
+                                              child: AttachmentChip(
+                                                message: message,
+                                                state: state,
+                                              ),
+                                            ),
+                                          if (own)
+                                            Padding(
+                                              padding: const EdgeInsets.only(
+                                                top: 5,
+                                              ),
+                                              child: Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  Text(
+                                                    _timeLabel(
+                                                      message.createdAt,
+                                                    ),
+                                                    style: TextStyle(
+                                                      color: Colors.white
+                                                          .withAlpha(185),
+                                                      fontSize: 10.5,
+                                                    ),
+                                                  ),
+                                                  if (message.editedAt != null)
+                                                    Text(
+                                                      ' · edited',
+                                                      style: TextStyle(
+                                                        color: Colors.white
+                                                            .withAlpha(165),
+                                                        fontSize: 10.5,
+                                                      ),
+                                                    ),
+                                                  const SizedBox(width: 5),
+                                                  Icon(
+                                                    Icons.done_all_rounded,
+                                                    size: 14,
+                                                    color: palette.cyan,
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              if (!message.isDeleted)
+                                Positioned(
+                                  top: -10,
+                                  right: own ? null : -34,
+                                  left: own ? -34 : null,
+                                  child: IgnorePointer(
+                                    ignoring: !_hovered,
+                                    child: AnimatedOpacity(
+                                      opacity: _hovered ? 1 : 0,
+                                      duration: themeSystem.fastMotion,
+                                      child: PopupMenuButton<String>(
+                                        tooltip: 'Message actions',
+                                        padding: EdgeInsets.zero,
+                                        icon: Icon(
+                                          Icons.more_horiz_rounded,
+                                          size: 19,
+                                          color: palette.muted,
+                                        ),
+                                        color: palette.panelStrong,
+                                        onSelected: (value) {
+                                          if (value == 'edit') {
+                                            showEditMessageDialog(
+                                              context,
+                                              state,
+                                              message,
+                                            );
+                                          } else if (value == 'delete') {
+                                            state.deleteMessage(message);
+                                          } else if (value == 'report') {
+                                            state.reportMessage(message);
+                                          }
+                                        },
+                                        itemBuilder: (context) => [
+                                          if (own)
+                                            const PopupMenuItem(
+                                              value: 'edit',
+                                              child: Text('Edit'),
+                                            ),
+                                          if (own)
+                                            const PopupMenuItem(
+                                              value: 'delete',
+                                              child: Text('Delete'),
+                                            ),
+                                          if (!own)
+                                            const PopupMenuItem(
+                                              value: 'report',
+                                              child: Text('Report'),
+                                            ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
         );
       },
-      child: Padding(
-        padding: EdgeInsets.only(bottom: compact ? 6 : 10),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
-          mainAxisAlignment: own
-              ? MainAxisAlignment.end
-              : MainAxisAlignment.start,
-          children: [
-            if (!own) UserAvatar(user: message.author, size: mobile ? 42 : 34),
-            if (!own) SizedBox(width: mobile ? 12 : 8),
-            Flexible(
-              child: ConstrainedBox(
-                constraints: BoxConstraints(maxWidth: maxBubbleWidth),
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: bubbleColor,
-                    borderRadius: radius,
-                    border: Border.all(color: bubbleBorder),
-                    boxShadow: !own && mobile
-                        ? const []
-                        : [
-                            BoxShadow(
-                              color: Colors.black.withAlpha(32),
-                              blurRadius: 14,
-                              offset: const Offset(0, 7),
-                            ),
-                          ],
-                  ),
-                  child: Padding(
-                    padding: EdgeInsets.fromLTRB(
-                      !own && mobile ? 0 : (compact ? 10 : 13),
-                      compact ? 8 : 11,
-                      !own && mobile ? 0 : (compact ? 8 : 10),
-                      compact ? 9 : 12,
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            if (!own)
-                              Flexible(
-                                child: Text(
-                                  message.author.displayLabel,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    color: palette.cyan,
-                                    fontWeight: FontWeight.w900,
-                                  ),
-                                ),
-                              ),
-                            if (!own) const SizedBox(width: 8),
-                            Text(
-                              _timeLabel(message.createdAt),
-                              style: TextStyle(
-                                color: own
-                                    ? Colors.white.withAlpha(205)
-                                    : palette.muted,
-                                fontSize: 11,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                            if (message.editedAt != null)
-                              Text(
-                                ' edited',
-                                style: TextStyle(
-                                  color: own
-                                      ? Colors.white.withAlpha(185)
-                                      : palette.muted,
-                                  fontSize: 11,
-                                ),
-                              ),
-                            if (!message.isDeleted)
-                              PopupMenuButton<String>(
-                                tooltip: 'Message actions',
-                                padding: EdgeInsets.zero,
-                                icon: Icon(
-                                  Icons.more_horiz_rounded,
-                                  size: 18,
-                                  color: own
-                                      ? Colors.white.withAlpha(220)
-                                      : palette.muted,
-                                ),
-                                color: palette.panelStrong,
-                                onSelected: (value) {
-                                  if (value == 'edit') {
-                                    showEditMessageDialog(
-                                      context,
-                                      state,
-                                      message,
-                                    );
-                                  } else if (value == 'delete') {
-                                    state.deleteMessage(message);
-                                  } else if (value == 'report') {
-                                    state.reportMessage(message);
-                                  }
-                                },
-                                itemBuilder: (context) => [
-                                  if (own)
-                                    const PopupMenuItem(
-                                      value: 'edit',
-                                      child: Text('Edit'),
-                                    ),
-                                  if (own)
-                                    const PopupMenuItem(
-                                      value: 'delete',
-                                      child: Text('Delete'),
-                                    ),
-                                  if (!own)
-                                    const PopupMenuItem(
-                                      value: 'report',
-                                      child: Text('Report'),
-                                    ),
-                                ],
-                              ),
-                          ],
-                        ),
-                        if (message.replyTo != null)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 7),
-                            child: DecoratedBox(
-                              decoration: BoxDecoration(
-                                color: Colors.black.withAlpha(38),
-                                borderRadius: BorderRadius.circular(14),
-                              ),
-                              child: Padding(
-                                padding: const EdgeInsets.fromLTRB(9, 7, 10, 7),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Container(
-                                      width: 3,
-                                      height: 18,
-                                      decoration: BoxDecoration(
-                                        color: own
-                                            ? palette.cyan
-                                            : palette.accent,
-                                        borderRadius: BorderRadius.circular(99),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Flexible(
-                                      child: Text(
-                                        'Reply to ${message.replyTo!.author.displayLabel}: ${message.replyTo!.content}',
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: TextStyle(
-                                          color: own
-                                              ? Colors.white.withAlpha(220)
-                                              : palette.muted,
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.w700,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ),
-                        if (message.isDeleted)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 6),
-                            child: Text(
-                              'Message deleted',
-                              style: TextStyle(color: palette.muted),
-                            ),
-                          )
-                        else if (message.content.isNotEmpty)
-                          Padding(
-                            padding: EdgeInsets.only(top: own ? 5 : 6),
-                            child: Text(
-                              message.content,
-                              style: const TextStyle(height: 1.34),
-                            ),
-                          ),
-                        if (!message.isDeleted && message.hasAttachment)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 10),
-                            child: AttachmentChip(
-                              message: message,
-                              state: state,
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-            if (own) const SizedBox(width: 42),
-          ],
-        ),
-      ),
     );
   }
 }
@@ -2246,205 +2629,240 @@ class _ComposerState extends State<Composer> {
   Widget build(BuildContext context) {
     final state = widget.state;
     final palette = WebCordPalette.of(context);
+    final themeSystem = WebCordThemeSystem.of(context);
     final canSendPayload = _hasText || state.pendingAttachment != null;
+    final mobile = MediaQuery.sizeOf(context).width < 640;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(14, 8, 14, 14),
-      child: Column(
-        children: [
-          AnimatedSwitcher(
-            duration: wcBaseMotion,
-            switchInCurve: wcEase,
-            switchOutCurve: Curves.easeInCubic,
-            child: state.recordingVoice
-                ? Padding(
-                    key: const ValueKey('recording'),
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        color: WebCordColors.danger.withAlpha(34),
-                        borderRadius: BorderRadius.circular(22),
-                        border: Border.all(
-                          color: WebCordColors.danger.withAlpha(120),
+      padding: EdgeInsets.fromLTRB(18, 10, 18, mobile ? 14 : 30),
+      child: Align(
+        alignment: Alignment.center,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: mobile ? double.infinity : 720),
+          child: Column(
+            children: [
+              AnimatedSwitcher(
+                duration: themeSystem.baseMotion,
+                switchInCurve: themeSystem.curve,
+                switchOutCurve: Curves.easeInCubic,
+                child: state.recordingVoice
+                    ? Padding(
+                        key: const ValueKey('recording'),
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            color: WebCordColors.danger.withAlpha(34),
+                            borderRadius: BorderRadius.circular(22),
+                            border: Border.all(
+                              color: WebCordColors.danger.withAlpha(120),
+                            ),
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 8,
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(
+                                  Icons.fiber_manual_record_rounded,
+                                  color: WebCordColors.danger,
+                                  size: 18,
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    'Recording voice ${_durationLabel(state.voiceRecordingElapsed)}',
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                ),
+                                IconButton(
+                                  tooltip: 'Cancel voice',
+                                  onPressed: state.mediaBusy
+                                      ? null
+                                      : () =>
+                                            state.stopVoiceMessage(send: false),
+                                  icon: const Icon(Icons.close_rounded),
+                                ),
+                                FilledButton.icon(
+                                  onPressed: state.mediaBusy
+                                      ? null
+                                      : () => state.stopVoiceMessage(),
+                                  icon: const Icon(
+                                    Icons.send_rounded,
+                                    size: 18,
+                                  ),
+                                  label: const Text('Send'),
+                                ),
+                              ],
+                            ),
+                          ),
                         ),
-                      ),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 8,
-                        ),
+                      )
+                    : state.pendingAttachment != null
+                    ? Padding(
+                        key: const ValueKey('attachment'),
+                        padding: const EdgeInsets.only(bottom: 8),
                         child: Row(
                           children: [
-                            const Icon(
-                              Icons.fiber_manual_record_rounded,
-                              color: WebCordColors.danger,
-                              size: 18,
-                            ),
-                            const SizedBox(width: 8),
                             Expanded(
-                              child: Text(
-                                'Recording voice ${_durationLabel(state.voiceRecordingElapsed)}',
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w800,
+                              child: DecoratedBox(
+                                decoration: BoxDecoration(
+                                  color: palette.panelStrong,
+                                  borderRadius: BorderRadius.circular(18),
+                                ),
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 8,
+                                  ),
+                                  child: Text(
+                                    state.pendingAttachment!.name,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
                                 ),
                               ),
                             ),
                             IconButton(
-                              tooltip: 'Cancel voice',
-                              onPressed: state.mediaBusy
-                                  ? null
-                                  : () => state.stopVoiceMessage(send: false),
+                              tooltip: 'Remove attachment',
+                              onPressed: state.clearAttachment,
                               icon: const Icon(Icons.close_rounded),
-                            ),
-                            FilledButton.icon(
-                              onPressed: state.mediaBusy
-                                  ? null
-                                  : () => state.stopVoiceMessage(),
-                              icon: const Icon(Icons.send_rounded, size: 18),
-                              label: const Text('Send'),
                             ),
                           ],
                         ),
-                      ),
-                    ),
-                  )
-                : state.pendingAttachment != null
-                ? Padding(
-                    key: const ValueKey('attachment'),
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: DecoratedBox(
-                            decoration: BoxDecoration(
-                              color: palette.panelStrong,
-                              borderRadius: BorderRadius.circular(18),
-                            ),
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 8,
-                              ),
-                              child: Text(
-                                state.pendingAttachment!.name,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          ),
-                        ),
-                        IconButton(
-                          tooltip: 'Remove attachment',
-                          onPressed: state.clearAttachment,
-                          icon: const Icon(Icons.close_rounded),
-                        ),
-                      ],
-                    ),
-                  )
-                : const SizedBox.shrink(key: ValueKey('empty')),
-          ),
-          DecoratedBox(
-            decoration: BoxDecoration(
-              color: palette.bgAlt.withAlpha(236),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: palette.border),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withAlpha(44),
-                  blurRadius: 16,
-                  offset: const Offset(0, 8),
-                ),
-              ],
-            ),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 5),
-              child: Row(
-                children: [
-                  IconButton(
-                    tooltip: 'Attach file',
-                    onPressed: state.uploading || !state.canSend
-                        ? null
-                        : state.pickAttachment,
-                    icon: state.uploading
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.attach_file_rounded),
-                  ),
-                  IconButton(
-                    tooltip: state.recordingVoice
-                        ? 'Send voice message'
-                        : 'Record voice message',
-                    onPressed: !state.recordingVoice && !state.canRecordMedia
-                        ? null
-                        : state.recordingVoice
-                        ? () => state.stopVoiceMessage()
-                        : state.startVoiceMessage,
-                    icon: state.mediaBusy && !state.recordingVoice
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : Icon(
-                            state.recordingVoice
-                                ? Icons.stop_circle_rounded
-                                : Icons.mic_rounded,
-                          ),
-                  ),
-                  IconButton(
-                    tooltip: 'Record video circle',
-                    onPressed: state.canRecordMedia && !state.recordingVoice
-                        ? () => showCircleRecorder(context, state)
-                        : null,
-                    icon: const Icon(Icons.video_camera_front_rounded),
-                  ),
-                  Expanded(
-                    child: TextField(
-                      controller: _controller,
-                      enabled: state.canSend,
-                      minLines: 1,
-                      maxLines: 4,
-                      textInputAction: TextInputAction.send,
-                      onSubmitted: (_) => _send(),
-                      decoration: InputDecoration(
-                        filled: false,
-                        border: InputBorder.none,
-                        enabledBorder: InputBorder.none,
-                        focusedBorder: InputBorder.none,
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 10,
-                        ),
-                        hintText: state.workspace == WorkspaceKind.direct
-                            ? 'Message your friend'
-                            : 'Message #${state.activeTextChannel?.name ?? 'lobby'}',
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 4),
-                  AnimatedContainer(
-                    duration: wcFastMotion,
-                    curve: wcEase,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: canSendPayload && state.canSend
-                          ? palette.accent
-                          : palette.panelStrong,
-                    ),
-                    child: IconButton(
-                      tooltip: 'Send',
-                      onPressed: state.busy || !state.canSend || !canSendPayload
-                          ? null
-                          : _send,
-                      icon: const Icon(Icons.send_rounded),
-                    ),
-                  ),
-                ],
+                      )
+                    : const SizedBox.shrink(key: ValueKey('empty')),
               ),
-            ),
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  color: palette.bgAlt.withAlpha(236),
+                  borderRadius: BorderRadius.circular(
+                    themeSystem.mode == AppThemeMode.material
+                        ? 32
+                        : themeSystem.controlRadius + 4,
+                  ),
+                  border: Border.all(color: palette.border),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withAlpha(44),
+                      blurRadius: 16,
+                      offset: const Offset(0, 8),
+                    ),
+                  ],
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 5,
+                  ),
+                  child: Row(
+                    children: [
+                      IconButton(
+                        tooltip: 'Attach file',
+                        onPressed: state.uploading || !state.canSend
+                            ? null
+                            : state.pickAttachment,
+                        icon: state.uploading
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : Icon(themeSystem.icon(WebCordIconRole.attach)),
+                      ),
+                      IconButton(
+                        tooltip: state.recordingVoice
+                            ? 'Send voice message'
+                            : 'Record voice message',
+                        onPressed:
+                            !state.recordingVoice && !state.canRecordMedia
+                            ? null
+                            : state.recordingVoice
+                            ? () => state.stopVoiceMessage()
+                            : state.startVoiceMessage,
+                        icon: state.mediaBusy && !state.recordingVoice
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : Icon(
+                                state.recordingVoice
+                                    ? Icons.stop_circle_rounded
+                                    : themeSystem.icon(
+                                        WebCordIconRole.microphone,
+                                      ),
+                              ),
+                      ),
+                      if (!mobile)
+                        IconButton(
+                          tooltip: 'Record video circle',
+                          onPressed:
+                              state.canRecordMedia && !state.recordingVoice
+                              ? () => showCircleRecorder(context, state)
+                              : null,
+                          icon: Icon(themeSystem.icon(WebCordIconRole.video)),
+                        ),
+                      Expanded(
+                        child: TextField(
+                          controller: _controller,
+                          enabled: state.canSend,
+                          minLines: 1,
+                          maxLines: 4,
+                          textInputAction: TextInputAction.send,
+                          onSubmitted: (_) => _send(),
+                          decoration: InputDecoration(
+                            filled: false,
+                            border: InputBorder.none,
+                            enabledBorder: InputBorder.none,
+                            focusedBorder: InputBorder.none,
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 10,
+                            ),
+                            hintText: mobile
+                                ? 'Message'
+                                : state.workspace == WorkspaceKind.direct
+                                ? 'Message your friend'
+                                : 'Message #${state.activeTextChannel?.name ?? 'lobby'}',
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      AnimatedContainer(
+                        duration: themeSystem.fastMotion,
+                        curve: themeSystem.curve,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(
+                            themeSystem.mode == AppThemeMode.material
+                                ? 18
+                                : 999,
+                          ),
+                          color: canSendPayload && state.canSend
+                              ? palette.accent
+                              : palette.panelStrong,
+                        ),
+                        child: IconButton(
+                          tooltip: 'Send',
+                          onPressed:
+                              state.busy || !state.canSend || !canSendPayload
+                              ? null
+                              : _send,
+                          icon: Icon(themeSystem.icon(WebCordIconRole.send)),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
@@ -4419,24 +4837,32 @@ class NavRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final palette = WebCordPalette.of(context);
+    final themeSystem = WebCordThemeSystem.of(context);
     return Padding(
-      padding: const EdgeInsets.only(bottom: 7),
+      padding: EdgeInsets.only(
+        bottom: themeSystem.mode == AppThemeMode.telegram ? 4 : 8,
+      ),
       child: InkWell(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(themeSystem.controlRadius),
         onTap: onTap,
         child: AnimatedContainer(
-          duration: wcFastMotion,
-          curve: wcEase,
-          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 10),
+          duration: themeSystem.fastMotion,
+          curve: themeSystem.curve,
+          padding: EdgeInsets.symmetric(
+            horizontal: themeSystem.mode == AppThemeMode.telegram ? 10 : 12,
+            vertical: themeSystem.mode == AppThemeMode.telegram ? 8 : 11,
+          ),
           decoration: BoxDecoration(
             color: selected ? palette.accent.withAlpha(66) : Colors.transparent,
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(themeSystem.controlRadius),
             border: Border.all(
               color: selected
-                  ? palette.accent.withAlpha(170)
+                  ? themeSystem.mode == AppThemeMode.telegram
+                        ? Colors.transparent
+                        : palette.accent.withAlpha(170)
                   : Colors.transparent,
             ),
-            boxShadow: selected
+            boxShadow: selected && themeSystem.mode != AppThemeMode.telegram
                 ? [
                     BoxShadow(
                       color: palette.accent.withAlpha(26),
@@ -6882,17 +7308,9 @@ class SettingsDialog extends StatelessWidget {
                       const SectionLabel('Profile'),
                       _ProfileSettingsPanel(state: state),
                       const SectionLabel('Appearance'),
-                      Wrap(
-                        spacing: 10,
-                        runSpacing: 10,
-                        children: [
-                          for (final mode in AppThemeMode.values)
-                            _ThemeChoiceCard(
-                              mode: mode,
-                              selected: state.themeMode == mode,
-                              onTap: () => state.setThemeMode(mode),
-                            ),
-                        ],
+                      ThemeSystemGallery(
+                        selectedMode: state.themeMode,
+                        onSelected: state.setThemeMode,
                       ),
                       const SizedBox(height: 12),
                       SwitchListTile(
@@ -7730,14 +8148,300 @@ class _SettingsSlider extends StatelessWidget {
   }
 }
 
+Future<void> showMessageSearchDialog(
+  BuildContext context,
+  WebCordState state,
+) async {
+  var query = '';
+  await showDialog<void>(
+    context: context,
+    builder: (dialogContext) => StatefulBuilder(
+      builder: (context, setDialogState) {
+        final matches = query.trim().isEmpty
+            ? const <ChatMessage>[]
+            : state.messages
+                  .where(
+                    (message) => message.content.toLowerCase().contains(
+                      query.trim().toLowerCase(),
+                    ),
+                  )
+                  .take(8)
+                  .toList();
+        return AlertDialog(
+          title: const Text('Search messages'),
+          content: SizedBox(
+            width: 440,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  autofocus: true,
+                  decoration: const InputDecoration(
+                    hintText: 'Type a name or phrase',
+                    prefixIcon: Icon(Icons.search_rounded),
+                  ),
+                  onChanged: (value) => setDialogState(() => query = value),
+                ),
+                if (query.trim().isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxHeight: 280),
+                    child: matches.isEmpty
+                        ? const Padding(
+                            padding: EdgeInsets.all(18),
+                            child: Text('Nothing found'),
+                          )
+                        : ListView.separated(
+                            shrinkWrap: true,
+                            itemCount: matches.length,
+                            separatorBuilder: (_, _) =>
+                                const Divider(height: 1),
+                            itemBuilder: (context, index) {
+                              final message = matches[index];
+                              return ListTile(
+                                leading: UserAvatar(
+                                  user: message.author,
+                                  size: 34,
+                                ),
+                                title: Text(message.author.displayLabel),
+                                subtitle: Text(
+                                  message.content,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                trailing: Text(_timeLabel(message.createdAt)),
+                              );
+                            },
+                          ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Close'),
+            ),
+          ],
+        );
+      },
+    ),
+  );
+}
+
 IconData _themeIcon(AppThemeMode mode) {
-  return switch (mode) {
-    AppThemeMode.liquid => Icons.blur_circular_rounded,
-    AppThemeMode.material => Icons.dashboard_customize_rounded,
-    AppThemeMode.nebula => Icons.auto_awesome_rounded,
-    AppThemeMode.graphite => Icons.contrast_rounded,
-    AppThemeMode.aurora => Icons.blur_on_rounded,
-  };
+  return WebCordThemeSystem(mode).icon(WebCordIconRole.theme);
+}
+
+class ThemeStudioPanel extends StatelessWidget {
+  const ThemeStudioPanel({required this.state, super.key});
+
+  final WebCordState state;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = WebCordPalette.of(context);
+    return Panel(
+      padding: const EdgeInsets.fromLTRB(24, 26, 24, 22),
+      radius: 0,
+      blur: true,
+      color: palette.bg.withAlpha(226),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Theme Studio',
+            style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+              fontSize: 20,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(height: 7),
+          Text(
+            'Icons, motion, geometry and behavior change together.',
+            style: TextStyle(color: palette.muted, height: 1.35),
+          ),
+          const SizedBox(height: 24),
+          Expanded(
+            child: SingleChildScrollView(
+              child: ThemeSystemGallery(
+                selectedMode: state.themeMode,
+                onSelected: state.setThemeMode,
+                vertical: true,
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          DecoratedBox(
+            decoration: BoxDecoration(
+              color: palette.panelSoft.withAlpha(184),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: palette.border),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(15),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    WebCordThemeSystem.of(context).icon(WebCordIconRole.theme),
+                    size: 19,
+                    color: palette.accentHot,
+                  ),
+                  const SizedBox(width: 11),
+                  Expanded(
+                    child: Text(
+                      state.themeMode.behavior,
+                      style: TextStyle(
+                        color: palette.muted,
+                        fontSize: 12,
+                        height: 1.4,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class ThemeSystemGallery extends StatelessWidget {
+  const ThemeSystemGallery({
+    required this.selectedMode,
+    required this.onSelected,
+    this.vertical = false,
+    super.key,
+  });
+
+  final AppThemeMode selectedMode;
+  final ValueChanged<AppThemeMode> onSelected;
+  final bool vertical;
+
+  @override
+  Widget build(BuildContext context) {
+    if (vertical) {
+      return Column(
+        children: [
+          for (final mode in AppThemeMode.flagship) ...[
+            _ThemeChoiceCard(
+              mode: mode,
+              selected: selectedMode == mode,
+              onTap: () => onSelected(mode),
+              wide: true,
+            ),
+            if (mode != AppThemeMode.flagship.last) const SizedBox(height: 14),
+          ],
+        ],
+      );
+    }
+    return Wrap(
+      spacing: 10,
+      runSpacing: 10,
+      children: [
+        for (final mode in AppThemeMode.flagship)
+          _ThemeChoiceCard(
+            mode: mode,
+            selected: selectedMode == mode,
+            onTap: () => onSelected(mode),
+          ),
+      ],
+    );
+  }
+}
+
+class _ThemeMiniPreview extends StatelessWidget {
+  const _ThemeMiniPreview({required this.mode});
+
+  final AppThemeMode mode;
+
+  @override
+  Widget build(BuildContext context) {
+    final preview = palettes[mode]!;
+    final system = WebCordThemeSystem(mode);
+    return SizedBox(
+      height: 58,
+      child: Row(
+        children: [
+          Container(
+            width: 34,
+            decoration: BoxDecoration(
+              color: preview.bg,
+              borderRadius: BorderRadius.circular(
+                mode == AppThemeMode.material ? 14 : 9,
+              ),
+            ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                Icon(
+                  system.icon(WebCordIconRole.direct, selected: true),
+                  size: 13,
+                  color: preview.accent,
+                ),
+                Icon(
+                  system.icon(WebCordIconRole.channels),
+                  size: 12,
+                  color: preview.muted,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 7),
+          Expanded(
+            child: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: preview.bgAlt,
+                borderRadius: BorderRadius.circular(
+                  mode == AppThemeMode.material ? 18 : 10,
+                ),
+                border: Border.all(color: preview.border),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  FractionallySizedBox(
+                    widthFactor: .52,
+                    child: Container(
+                      height: 7,
+                      decoration: BoxDecoration(
+                        color: preview.muted.withAlpha(72),
+                        borderRadius: BorderRadius.circular(99),
+                      ),
+                    ),
+                  ),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: FractionallySizedBox(
+                      widthFactor: .58,
+                      child: Container(
+                        height: 18,
+                        decoration: BoxDecoration(
+                          color: preview.accent,
+                          borderRadius: BorderRadius.only(
+                            topLeft: Radius.circular(system.bubbleRadius),
+                            topRight: Radius.circular(system.bubbleRadius),
+                            bottomLeft: Radius.circular(system.bubbleRadius),
+                            bottomRight: const Radius.circular(5),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _ThemeChoiceCard extends StatelessWidget {
@@ -7745,39 +8449,45 @@ class _ThemeChoiceCard extends StatelessWidget {
     required this.mode,
     required this.selected,
     required this.onTap,
+    this.wide = false,
   });
 
   final AppThemeMode mode;
   final bool selected;
   final VoidCallback onTap;
+  final bool wide;
 
   @override
   Widget build(BuildContext context) {
     final preview = palettes[mode]!;
+    final system = WebCordThemeSystem(mode);
     return Semantics(
       selected: selected,
       button: true,
       label: '${mode.label} theme',
       child: InkWell(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(system.controlRadius),
         onTap: onTap,
         child: AnimatedScale(
           scale: selected ? 1.025 : 1,
-          duration: wcFastMotion,
-          curve: wcEase,
+          duration: system.fastMotion,
+          curve: system.curve,
           child: AnimatedContainer(
-            width: 154,
-            height: 92,
-            duration: wcBaseMotion,
-            curve: wcEase,
-            padding: const EdgeInsets.all(11),
+            width: wide ? double.infinity : 224,
+            height: wide ? 190 : 148,
+            duration: system.baseMotion,
+            curve: system.curve,
+            padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [preview.panelStrong, preview.bgAlt],
-              ),
-              borderRadius: BorderRadius.circular(16),
+              color: preview.panelStrong,
+              gradient: system.usesGlass
+                  ? LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [preview.panelStrong, preview.bgAlt],
+                    )
+                  : null,
+              borderRadius: BorderRadius.circular(system.controlRadius),
               border: Border.all(
                 color: selected ? preview.accent : preview.border,
                 width: selected ? 1.6 : 1,
@@ -7798,12 +8508,23 @@ class _ThemeChoiceCard extends StatelessWidget {
                 Row(
                   children: [
                     Icon(_themeIcon(mode), size: 18, color: preview.accent),
+                    if (wide) ...[
+                      const SizedBox(width: 9),
+                      Text(
+                        mode.label,
+                        style: TextStyle(
+                          color: preview.text,
+                          fontWeight: FontWeight.w900,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ],
                     const Spacer(),
                     AnimatedSwitcher(
-                      duration: wcFastMotion,
+                      duration: system.fastMotion,
                       child: selected
                           ? Icon(
-                              Icons.check_circle_rounded,
+                              system.icon(WebCordIconRole.selected),
                               key: const ValueKey('selected'),
                               size: 18,
                               color: preview.accentHot,
@@ -7817,34 +8538,42 @@ class _ThemeChoiceCard extends StatelessWidget {
                   ],
                 ),
                 const Spacer(),
+                if (wide)
+                  _ThemeMiniPreview(mode: mode)
+                else
+                  Text(
+                    mode.label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: preview.text,
+                      fontWeight: FontWeight.w900,
+                      fontSize: 13,
+                    ),
+                  ),
+                const SizedBox(height: 6),
                 Text(
-                  mode.label,
-                  maxLines: 1,
+                  mode.description,
+                  maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    color: preview.text,
-                    fontWeight: FontWeight.w900,
-                    fontSize: 13,
+                    color: preview.muted,
+                    fontSize: 11,
+                    height: 1.25,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
-                const SizedBox(height: 5),
-                Row(
-                  children: [
-                    for (final color in [
-                      preview.accent,
-                      preview.accentHot,
-                      preview.cyan,
-                    ])
-                      Container(
-                        width: 18,
-                        height: 5,
-                        margin: const EdgeInsets.only(right: 4),
-                        decoration: BoxDecoration(
-                          color: color,
-                          borderRadius: BorderRadius.circular(999),
-                        ),
-                      ),
-                  ],
+                const SizedBox(height: 7),
+                Text(
+                  mode.behavior,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: preview.accentHot,
+                    fontSize: 9.5,
+                    height: 1.25,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
               ],
             ),
@@ -7867,6 +8596,30 @@ String _timeLabel(DateTime value) {
   final hour = value.hour.toString().padLeft(2, '0');
   final minute = value.minute.toString().padLeft(2, '0');
   return '$hour:$minute';
+}
+
+String _dateLabel(DateTime value) {
+  final now = DateTime.now();
+  final sameDay =
+      now.year == value.year &&
+      now.month == value.month &&
+      now.day == value.day;
+  if (sameDay) return 'Today';
+  const months = <String>[
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
+  ];
+  return '${value.day} ${months[value.month - 1]}';
 }
 
 String _durationLabel(Duration value) {
