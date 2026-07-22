@@ -4,28 +4,35 @@ import gsap from 'gsap';
 import { io } from 'socket.io-client';
 import {
   TbArrowLeft, TbArrowsMaximize, TbArrowsMinimize, TbBolt, TbBrowser, TbCameraRotate,
-  TbCircleCheck, TbCircleDashed, TbDotsVertical, TbHash, TbMenu2, TbMessageCircleBolt, TbMicrophone, TbMicrophoneOff,
-  TbMinus, TbMoodSmile, TbMusic, TbPaperclip, TbPhone, TbPhoneOff, TbPlayerPause,
+  TbCircleCheck, TbCircleDashed, TbDotsVertical, TbHash, TbMenu2, TbMicrophone, TbMicrophoneOff,
+  TbMinus, TbMoodSmile, TbMusic, TbPalette, TbPaperclip, TbPhone, TbPhoneOff, TbPlayerPause,
   TbPlayerPlay, TbPlayerStop, TbPlus, TbScreenShare, TbSearch, TbSend2, TbSettings,
-  TbVideo, TbVideoOff, TbVolume, TbVolumeOff, TbWaveSine, TbX
+  TbSun, TbMoon, TbVideo, TbVideoOff, TbVolume, TbVolumeOff, TbWaveSine, TbX
 } from 'react-icons/tb';
 import {
-  MdAdd, MdArrowBack, MdAttachFile, MdAutoStories, MdBolt, MdCall, MdCallEnd,
-  MdCameraswitch, MdCheckCircle, MdClose, MdFullscreen, MdFullscreenExit, MdGraphicEq, MdLanguage,
-  MdMenu, MdMic, MdMicOff, MdMoreVert, MdMusicNote, MdPause, MdPlayArrow, MdRemove,
-  MdSearch, MdScreenShare, MdSend, MdSentimentSatisfiedAlt, MdSettings, MdStop,
-  MdTag, MdVideocam, MdVideocamOff, MdVolumeOff, MdVolumeUp
+  MdAdd, MdArrowBackIosNew, MdClose, MdFullscreen, MdFullscreenExit, MdMenu,
+  MdMoreVert, MdOutlineAttachFile, MdOutlineAutoStories, MdOutlineBolt,
+  MdOutlineCall, MdOutlineCallEnd, MdOutlineCameraswitch, MdOutlineCheckCircle,
+  MdOutlineChatBubbleOutline, MdOutlineGraphicEq, MdOutlineGroup, MdOutlineMic,
+  MdOutlineDarkMode, MdOutlineLightMode, MdOutlineMicOff, MdOutlineMusicNote, MdOutlinePalette, MdOutlinePublic, MdOutlineScreenShare,
+  MdOutlineSearch, MdOutlineSend, MdOutlineSentimentSatisfiedAlt,
+  MdOutlineSettings, MdOutlineTag, MdOutlineVideocam, MdOutlineVideocamOff,
+  MdOutlineVolumeOff, MdOutlineVolumeUp, MdOutlineWallpaper, MdPause,
+  MdPlayArrow, MdRemove, MdStop
 } from 'react-icons/md';
 import {
-  PiArrowLeft, PiBrowser, PiCameraRotate, PiCheckCircle, PiCirclesThreePlus, PiCornersIn, PiCornersOut,
-  PiDotsThreeVertical, PiGearSix, PiHash, PiLightning, PiList, PiMagnifyingGlass,
-  PiMicrophone, PiMicrophoneSlash, PiMinus, PiMonitorArrowUp, PiMusicNotes,
-  PiPaperPlaneTilt, PiPaperclip, PiPause, PiPhone, PiPhoneSlash, PiPlay, PiPlus,
-  PiSmiley, PiSpeakerHigh, PiSpeakerSlash, PiStop, PiVideoCamera, PiVideoCameraSlash,
-  PiWaveform, PiX
+  PiArrowLeft, PiBrowser, PiCameraRotate, PiChatCircleDots, PiCheckCircle,
+  PiCornersIn, PiCornersOut, PiDotsThreeVertical, PiGear, PiHash, PiImageSquare,
+  PiImagesSquare, PiList, PiMagnifyingGlass, PiMicrophone, PiMicrophoneSlash, PiMoon,
+  PiMinus, PiMonitorArrowUp, PiMusicNotes, PiPalette, PiPaperPlaneTilt,
+  PiPaperclip, PiPause, PiPhoneCall, PiPhoneSlash, PiPlay, PiPlus, PiSignOut,
+  PiSmiley, PiSpeakerHigh, PiSpeakerSlash, PiStop, PiSun, PiUserCircle, PiUsersThree,
+  PiVideoCamera, PiVideoCameraSlash, PiWaveform, PiX
 } from 'react-icons/pi';
 
 gsap.registerPlugin(useGSAP);
+
+const IconFamilyContext = React.createContext('telegram');
 
 const REMOTE_ORIGIN = import.meta.env.VITE_REMOTE_ORIGIN || 'https://webcordes.ru';
 const DOWNLOAD_PAGE_URL = `${REMOTE_ORIGIN}/#download`;
@@ -60,7 +67,8 @@ const KEYS = {
   theme: 'webcord_theme',
   messages: 'webcord_message_cache_v1',
   settings: 'webcord_client_settings_v1',
-  folders: 'webcord_custom_folders_v1'
+  folders: 'webcord_custom_folders_v1',
+  colorMode: 'webcord_color_mode'
 };
 const ADMIN_PATH = '/adminka';
 const ADMIN_PATHS = new Set([ADMIN_PATH, '/admin']);
@@ -88,6 +96,14 @@ const PRESETS = {
     behavior: 'Spring depth, pointer-reactive light and breathing voice states'
   }
 };
+
+const LIGHT_PALETTES = {
+  telegram: { bg: '#edf3f8', panel: '#ffffff', accent: '#168acd', text: '#17212b' },
+  material: { bg: '#fffbfe', panel: '#f4eff7', accent: '#6750a4', text: '#1d1b20' },
+  liquid: { bg: '#eef8fb', panel: '#ffffff', accent: '#006a78', text: '#102027' }
+};
+
+const COLOR_MODES = ['system', 'dark', 'light'];
 
 const DEFAULT_THEME = PRESETS['Telegram Focus'];
 
@@ -842,12 +858,31 @@ function ThemeSystemCard({ name, preset, active, onSelect }) {
   );
 }
 
-function ThemeModal({ open, theme, onClose, onThemeChange, onReset }) {
+function ColorModePicker({ value, onChange }) {
+  return (
+    <div className="color-mode-picker" role="group" aria-label="Color mode">
+      {COLOR_MODES.map((mode) => (
+        <button
+          key={mode}
+          className={value === mode ? 'active' : ''}
+          type="button"
+          aria-pressed={value === mode}
+          onClick={() => onChange(mode)}
+        >
+          <AppIcon name={mode === 'system' ? 'browser' : mode === 'light' ? 'sun' : 'moon'} size={17} />
+          {mode[0].toUpperCase() + mode.slice(1)}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function ThemeModal({ open, theme, colorMode, onClose, onThemeChange, onColorModeChange, onReset }) {
   if (!open) return null;
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+    <div className="modal-backdrop theme-studio-backdrop" onClick={onClose}>
+      <div className="modal-card theme-studio-drawer" role="dialog" aria-modal="true" aria-label="Theme Studio" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <div>
             <h3>Theme Studio</h3>
@@ -868,6 +903,11 @@ function ThemeModal({ open, theme, onClose, onThemeChange, onReset }) {
           ))}
         </div>
 
+        <div className="theme-studio-section">
+          <span>Interface brightness</span>
+          <ColorModePicker value={colorMode} onChange={onColorModeChange} />
+        </div>
+
         <div className="color-grid">
           {['bg', 'panel', 'accent', 'text'].map((key) => (
             <label key={key}>
@@ -886,8 +926,13 @@ function ThemeModal({ open, theme, onClose, onThemeChange, onReset }) {
   );
 }
 
-function BrandLogo({ className = '' }) {
-  return <span className={className ? `brand-logo ${className}` : 'brand-logo'} aria-hidden="true"><TbMessageCircleBolt /></span>;
+function BrandLogo({ className = '', tone = 'auto' }) {
+  return (
+    <span className={`${className ? `brand-logo ${className}` : 'brand-logo'} brand-logo-${tone}`} aria-hidden="true">
+      <img className="brand-logo-image-light" src={getPublicAssetUrl('/icons/webcord-white.png')} alt="" />
+      <img className="brand-logo-image-dark" src={getPublicAssetUrl('/icons/webcord-black.png')} alt="" />
+    </span>
+  );
 }
 
 function DownloadIcon() {
@@ -984,41 +1029,49 @@ const ICON_FAMILIES = {
     play: TbPlayerPlay, plus: TbPlus, screen: TbScreenShare, send: TbSend2,
     settings: TbSettings, search: TbSearch, shrink: TbArrowsMinimize, smile: TbMoodSmile,
     stop: TbPlayerStop, story: TbCircleDashed, switchCamera: TbCameraRotate,
-    volume: TbVolume, volumeOff: TbVolumeOff, wave: TbWaveSine, zap: TbBolt
+    volume: TbVolume, volumeOff: TbVolumeOff, wave: TbWaveSine, zap: TbBolt,
+    sun: TbSun, moon: TbMoon, theme: TbPalette
   },
   material: {
-    arrowLeft: MdArrowBack, browser: MdLanguage, camera: MdVideocam, cameraOff: MdVideocamOff,
-    check: MdCheckCircle,
-    close: MdClose, expand: MdFullscreen, hash: MdTag, menu: MdMenu, more: MdMoreVert,
-    mic: MdMic, micOff: MdMicOff, minus: MdRemove, music: MdMusicNote,
-    paperclip: MdAttachFile, pause: MdPause, phone: MdCall, phoneOff: MdCallEnd,
-    play: MdPlayArrow, plus: MdAdd, screen: MdScreenShare, send: MdSend,
-    settings: MdSettings, search: MdSearch, shrink: MdFullscreenExit,
-    smile: MdSentimentSatisfiedAlt, stop: MdStop, story: MdAutoStories,
-    switchCamera: MdCameraswitch, volume: MdVolumeUp, volumeOff: MdVolumeOff,
-    wave: MdGraphicEq, zap: MdBolt
+    arrowLeft: MdArrowBackIosNew, browser: MdOutlinePublic, camera: MdOutlineVideocam,
+    cameraOff: MdOutlineVideocamOff, check: MdOutlineCheckCircle, close: MdClose,
+    expand: MdFullscreen, hash: MdOutlineTag, menu: MdMenu, more: MdMoreVert,
+    mic: MdOutlineMic, micOff: MdOutlineMicOff, minus: MdRemove,
+    music: MdOutlineMusicNote, paperclip: MdOutlineAttachFile, pause: MdPause,
+    phone: MdOutlineCall, phoneOff: MdOutlineCallEnd, play: MdPlayArrow,
+    plus: MdAdd, screen: MdOutlineScreenShare, send: MdOutlineSend,
+    settings: MdOutlineSettings, search: MdOutlineSearch, shrink: MdFullscreenExit,
+    smile: MdOutlineSentimentSatisfiedAlt, stop: MdStop, story: MdOutlineAutoStories,
+    switchCamera: MdOutlineCameraswitch, volume: MdOutlineVolumeUp,
+    volumeOff: MdOutlineVolumeOff, wave: MdOutlineGraphicEq, zap: MdOutlineBolt,
+    wallpaper: MdOutlineWallpaper, theme: MdOutlinePalette,
+    sun: MdOutlineLightMode, moon: MdOutlineDarkMode
   },
   atmosphere: {
     arrowLeft: PiArrowLeft, browser: PiBrowser, camera: PiVideoCamera,
-    check: PiCheckCircle,
-    cameraOff: PiVideoCameraSlash, close: PiX, expand: PiCornersOut, hash: PiHash,
-    menu: PiList, more: PiDotsThreeVertical, mic: PiMicrophone, micOff: PiMicrophoneSlash,
-    minus: PiMinus, music: PiMusicNotes, paperclip: PiPaperclip, pause: PiPause,
-    phone: PiPhone, phoneOff: PiPhoneSlash, play: PiPlay, plus: PiPlus,
-    screen: PiMonitorArrowUp, send: PiPaperPlaneTilt, settings: PiGearSix,
+    check: PiCheckCircle, cameraOff: PiVideoCameraSlash, close: PiX,
+    expand: PiCornersOut, hash: PiHash, menu: PiList, more: PiDotsThreeVertical,
+    mic: PiMicrophone, micOff: PiMicrophoneSlash, minus: PiMinus,
+    music: PiMusicNotes, paperclip: PiPaperclip, pause: PiPause,
+    phone: PiPhoneCall, phoneOff: PiPhoneSlash, play: PiPlay, plus: PiPlus,
+    screen: PiMonitorArrowUp, send: PiPaperPlaneTilt, settings: PiGear,
     search: PiMagnifyingGlass, shrink: PiCornersIn, smile: PiSmiley, stop: PiStop,
-    story: PiCirclesThreePlus, switchCamera: PiCameraRotate, volume: PiSpeakerHigh,
-    volumeOff: PiSpeakerSlash, wave: PiWaveform, zap: PiLightning
+    story: PiImagesSquare, switchCamera: PiCameraRotate, volume: PiSpeakerHigh,
+    volumeOff: PiSpeakerSlash, wave: PiWaveform, zap: PiPalette,
+    channels: PiHash, friends: PiUsersThree, direct: PiChatCircleDots,
+    profile: PiUserCircle, wallpaper: PiImageSquare, logout: PiSignOut,
+    sun: PiSun, moon: PiMoon
   }
 };
 
 function AppIcon({ name, size = 20, className = '', family }) {
-  const iconFamily = family || document.documentElement.dataset.iconFamily || 'telegram';
+  const currentFamily = React.useContext(IconFamilyContext);
+  const iconFamily = family || currentFamily || 'telegram';
   const IconComponent = ICON_FAMILIES[iconFamily]?.[name] || ICON_FAMILIES.telegram[name] || TbWaveSine;
   return (
     <IconComponent
       aria-hidden="true"
-      className={className ? `app-icon ${className}` : 'app-icon'}
+      className={`app-icon icon-family-${iconFamily}${className ? ` ${className}` : ''}`}
       size={size}
       focusable="false"
     />
@@ -1103,22 +1156,7 @@ function LandingPage({
   onSubmit
 }) {
   const [authOpen, setAuthOpen] = useState(false);
-  const [designDraft, setDesignDraft] = useState(() => {
-    try {
-      return window.localStorage.getItem('wc-design-draft') || 'a';
-    } catch {
-      return 'a';
-    }
-  });
   const [downloadState, setDownloadState] = useState({ status: 'loading', items: {} });
-
-  useEffect(() => {
-    try {
-      window.localStorage.setItem('wc-design-draft', designDraft);
-    } catch {
-      /* ignore persistence errors */
-    }
-  }, [designDraft]);
 
   const landingRef = useRef(null);
   const usernameInputRef = useRef(null);
@@ -1210,15 +1248,8 @@ function LandingPage({
   }
 
   return (
-    <main ref={landingRef} className={`landing-page design-draft-${designDraft}`}>
+    <main ref={landingRef} className="landing-page design-draft-a">
       <div className="landing-aurora" aria-hidden="true" />
-
-      <div className="design-draft-switch" role="group" aria-label="Визуальное направление">
-        <span>Дизайн</span>
-        <button type="button" className={designDraft === 'a' ? 'active' : ''} onClick={() => setDesignDraft('a')}>A · Aurora Nightfall</button>
-        <button type="button" className={designDraft === 'b' ? 'active' : ''} onClick={() => setDesignDraft('b')}>B · Clean Aurora</button>
-        <button type="button" className={designDraft === 'c' ? 'active' : ''} onClick={() => setDesignDraft('c')}>C · Playful Gradient</button>
-      </div>
 
       <header className="landing-header">
 
@@ -2139,7 +2170,8 @@ function MessageItem({ message, currentUserId, workspace, grouped = false, showD
           {message.author?.avatarUrl ? <img src={getAttachmentUrl(message.author.avatarUrl)} alt={getDisplayName(message.author)} /> : getDisplayName(message.author).slice(0, 1).toUpperCase()}
         </button>
         <strong>{getDisplayName(message.author)}</strong>
-        <span>{new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' }).format(new Date(message.createdAt))}{message.editedAt ? ' · edited' : ''}{statusText ? ` · ${statusText}` : ''}</span>
+        <span>{new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' }).format(new Date(message.createdAt))}{message.editedAt ? ' · edited' : ''}</span>
+        {statusText ? <span className={`message-delivery-status ${message.readAt ? 'is-read' : 'is-delivered'}`}>{statusText}</span> : null}
         <div className="message-actions">
           {!isDeleted ? <button type="button" onClick={() => onReply?.(message)}>Reply</button> : null}
           {!isOwn && !isDeleted ? <button type="button" onClick={() => onReport?.(message)}>Report</button> : null}
@@ -2543,6 +2575,7 @@ function SettingsModal({
   user,
   draft,
   theme,
+  colorMode,
   inputVolume,
   outputVolume,
   micMuted,
@@ -2568,6 +2601,7 @@ function SettingsModal({
   onRemoveTrack,
   onSaveProfile,
   onThemeChange,
+  onColorModeChange,
   onThemeReset,
   onInputVolumeChange,
   onOutputVolumeChange,
@@ -2797,6 +2831,12 @@ function SettingsModal({
         {activeSection === 'appearance' ? (
           <div className="settings-page">
             <h2>Appearance</h2>
+            <div className="settings-card-list color-mode-settings">
+              <div className="settings-row color-mode-row">
+                <span>Interface brightness</span>
+                <ColorModePicker value={colorMode} onChange={onColorModeChange} />
+              </div>
+            </div>
             <div className="theme-preview theme-system-summary" style={{ background: theme.panel }}>
               <span style={{ background: theme.accent }}><AppIcon name="zap" size={18} family={theme.iconFamily} /></span>
               <div><strong>{Object.entries(PRESETS).find(([, preset]) => preset.id === theme.id)?.[0] || 'Custom system'}</strong><p>{theme.behavior || 'A coordinated WebCord interface system.'}</p></div>
@@ -3138,6 +3178,7 @@ export default function App() {
   const [newFolderName, setNewFolderName] = useState('');
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [showThemeModal, setShowThemeModal] = useState(false);
   const [settingsSection, setSettingsSection] = useState('account');
   const [viewedProfile, setViewedProfile] = useState(null);
   const [viewedMedia, setViewedMedia] = useState(null);
@@ -3190,6 +3231,14 @@ export default function App() {
   const [networkOnline, setNetworkOnline] = useState(() => navigator.onLine !== false);
   const [socketStatus, setSocketStatus] = useState(() => (navigator.onLine === false ? 'offline' : 'disconnected'));
   const [lastRealtimeSync, setLastRealtimeSync] = useState(null);
+  const [composerPhase, setComposerPhase] = useState('idle');
+  const [colorMode, setColorMode] = useState(() => {
+    const stored = localStorage.getItem(KEYS.colorMode);
+    return COLOR_MODES.includes(stored) ? stored : 'system';
+  });
+  const [systemColorMode, setSystemColorMode] = useState(() => (
+    window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+  ));
   const [theme, setTheme] = useState(() => {
     try {
       return hydrateTheme(JSON.parse(localStorage.getItem(KEYS.theme) || 'null'));
@@ -3248,6 +3297,7 @@ export default function App() {
   const lastVoiceStatsRef = useRef({ at: 0, bytesReceived: 0, bytesSent: 0 });
   const micMutedRef = useRef(false);
   const appShellRef = useRef(null);
+  const composerPhaseTimerRef = useRef(null);
 
   const isAdminRoute = ADMIN_PATHS.has(currentPath);
   const isAuthed = Boolean(token && user);
@@ -3393,19 +3443,35 @@ export default function App() {
   }, [isAdminRoute, isAuthed, token]);
 
   useEffect(() => {
+    const media = window.matchMedia?.('(prefers-color-scheme: dark)');
+    if (!media) return undefined;
+    const sync = (event) => setSystemColorMode(event.matches ? 'dark' : 'light');
+    sync(media);
+    media.addEventListener?.('change', sync);
+    return () => media.removeEventListener?.('change', sync);
+  }, []);
+
+  useEffect(() => {
+    const resolvedColorMode = colorMode === 'system' ? systemColorMode : colorMode;
+    const palette = resolvedColorMode === 'light' ? (LIGHT_PALETTES[theme.mode] || LIGHT_PALETTES.telegram) : theme;
     Object.entries({
-      '--bg-color': theme.bg,
-      '--panel-color': theme.panel,
-      '--accent-color': theme.accent,
-      '--text-color': theme.text
+      '--bg-color': palette.bg,
+      '--panel-color': palette.panel,
+      '--accent-color': palette.accent,
+      '--text-color': palette.text
     }).forEach(([key, value]) => document.documentElement.style.setProperty(key, value));
     document.documentElement.dataset.themeMode = theme.mode || 'solid';
     document.documentElement.dataset.iconFamily = theme.iconFamily || 'telegram';
     document.documentElement.dataset.motionProfile = theme.motion || 'quick';
     document.documentElement.dataset.density = theme.density || 'comfortable';
     document.documentElement.dataset.surface = theme.surface || 'flat';
+    document.documentElement.dataset.colorScheme = resolvedColorMode;
+    document.documentElement.style.colorScheme = resolvedColorMode;
     localStorage.setItem(KEYS.theme, JSON.stringify(theme));
-  }, [theme]);
+    localStorage.setItem(KEYS.colorMode, colorMode);
+  }, [theme, colorMode, systemColorMode]);
+
+  useEffect(() => () => window.clearTimeout(composerPhaseTimerRef.current), []);
 
   useEffect(() => {
     localStorage.setItem(KEYS.settings, JSON.stringify(clientSettings));
@@ -3809,6 +3875,14 @@ export default function App() {
     window.setTimeout(() => {
       setToasts((prev) => prev.filter((toast) => toast.id !== id));
     }, 4200);
+  }
+
+  function announceComposerPhase(phase) {
+    window.clearTimeout(composerPhaseTimerRef.current);
+    setComposerPhase(phase);
+    if (phase === 'sent' || phase === 'saved' || phase === 'error') {
+      composerPhaseTimerRef.current = window.setTimeout(() => setComposerPhase('idle'), 1800);
+    }
   }
 
   function reportError(err, fallback = 'Something went wrong') {
@@ -4906,10 +4980,12 @@ export default function App() {
     if (!networkOnline) {
       setError('You are offline. Reconnect before sending.');
       setSocketStatus('offline');
+      announceComposerPhase('error');
       return;
     }
 
     try {
+      announceComposerPhase(editingMessage ? 'saving' : 'sending');
       shouldStickToBottomRef.current = true;
       let createdMessage = null;
 
@@ -4925,6 +5001,7 @@ export default function App() {
         setNewMessage('');
         setPendingAttachment(null);
         setShowEmojiPicker(false);
+        announceComposerPhase('saved');
         pushToast('Message updated');
         return;
       }
@@ -4973,7 +5050,9 @@ export default function App() {
       setPendingAttachment(null);
       setReplyTarget(null);
       setShowEmojiPicker(false);
+      announceComposerPhase('sent');
     } catch (err) {
+      announceComposerPhase('error');
       reportError(err, 'Failed to send message');
     }
   }
@@ -5721,6 +5800,7 @@ export default function App() {
   }
 
   return (
+    <IconFamilyContext.Provider value={theme.iconFamily}>
     <>
       <input ref={avatarInputRef} type="file" accept="image/*" hidden onChange={(e) => uploadProfileAsset('avatar', e.target.files?.[0])} />
       <input ref={bannerInputRef} type="file" accept="image/*" hidden onChange={(e) => uploadProfileAsset('banner', e.target.files?.[0])} />
@@ -6030,11 +6110,12 @@ export default function App() {
                   <button
                     className="icon-btn"
                     type="button"
-                    title="Appearance"
-                    aria-label="Appearance"
-                    onClick={() => { setSettingsSection('appearance'); setShowSettingsModal(true); }}
+                    title="Theme Studio"
+                    aria-label="Theme Studio"
+                    aria-expanded={showThemeModal}
+                    onClick={() => setShowThemeModal(true)}
                   >
-                    <AppIcon name="more" />
+                    <AppIcon name="theme" />
                   </button>
                 </div>
               ) : null}
@@ -6127,7 +6208,7 @@ export default function App() {
                 })}
                 <div ref={endRef} />
               </div>
-              <form className="message-form composer" onSubmit={sendMessage}>
+              <form className={`message-form composer composer-${composerPhase}`} onSubmit={sendMessage}>
                 {replyTarget || editingMessage ? (
                   <div className="composer-context">
                     <span>{editingMessage ? 'Editing message' : `Replying to ${getDisplayName(replyTarget?.author)}`}</span>
@@ -6167,8 +6248,23 @@ export default function App() {
                     </div>
                   ) : null}
                 </div>
-                <input value={newMessage} onChange={(e) => setNewMessage(e.target.value)} placeholder={editingMessage ? 'Edit your message' : isMobile ? 'Message' : workspace === 'dm' ? 'Message your friend' : 'Send a message'} />
-                <button className="composer-send" type="submit" disabled={uploading || (!newMessage.trim() && !pendingAttachment)}><AppIcon name="send" size={16} />{editingMessage ? 'Save' : 'Send'}</button>
+                <textarea
+                  rows={1}
+                  value={newMessage}
+                  onChange={(e) => setNewMessage(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+                      e.preventDefault();
+                      e.currentTarget.form?.requestSubmit();
+                    }
+                  }}
+                  aria-label="Message"
+                  placeholder={editingMessage ? 'Edit your message' : isMobile ? 'Message' : workspace === 'dm' ? 'Message your friend' : 'Send a message'}
+                />
+                <span className="composer-phase" aria-live="polite">
+                  {composerPhase === 'sending' ? 'Sending' : composerPhase === 'saving' ? 'Saving' : composerPhase === 'sent' ? 'Sent' : composerPhase === 'saved' ? 'Saved' : composerPhase === 'error' ? 'Try again' : ''}
+                </span>
+                <button className="composer-send" type="submit" disabled={uploading || composerPhase === 'sending' || composerPhase === 'saving' || (!newMessage.trim() && !pendingAttachment)}><AppIcon name={composerPhase === 'sending' || composerPhase === 'saving' ? 'wave' : 'send'} size={16} />{editingMessage ? 'Save' : 'Send'}</button>
               </form>
             </>
           )}
@@ -6237,30 +6333,17 @@ export default function App() {
           />
         ) : null}
 
-        <aside className="activity-panel concept-theme-studio">
-          <header>
-            <div>
-              <h2>Theme Studio</h2>
-              <p>Icons, motion, geometry and behavior change together.</p>
-            </div>
-          </header>
-          <div className="concept-theme-list">
-            {Object.entries(PRESETS).map(([name, preset]) => (
-              <ThemeSystemCard
-                key={name}
-                name={name}
-                preset={preset}
-                active={theme.id === preset.id}
-                onSelect={setTheme}
-              />
-            ))}
-          </div>
-          <div className="concept-theme-behavior">
-            <AppIcon name="zap" size={18} />
-            <span>{theme.behavior}</span>
-          </div>
-        </aside>
       </main>
+
+      <ThemeModal
+        open={showThemeModal}
+        theme={theme}
+        colorMode={colorMode}
+        onClose={() => setShowThemeModal(false)}
+        onThemeChange={setTheme}
+        onColorModeChange={setColorMode}
+        onReset={() => { setTheme(DEFAULT_THEME); setColorMode('system'); }}
+      />
 
       <div className="toast-stack" aria-live="polite">
         {toasts.map((toast) => <div className={`toast ${toast.tone}`} key={toast.id}>{toast.message}</div>)}
@@ -6272,6 +6355,7 @@ export default function App() {
         user={user}
         draft={profileDraft}
         theme={theme}
+        colorMode={colorMode}
         inputVolume={inputVolume}
         outputVolume={outputVolume}
         micMuted={micMuted}
@@ -6297,6 +6381,7 @@ export default function App() {
         onRemoveTrack={() => removeProfileTrack().catch((err) => setError(err.message))}
         onSaveProfile={() => saveProfile().catch((err) => setError(err.message))}
         onThemeChange={setTheme}
+        onColorModeChange={setColorMode}
         onThemeReset={() => setTheme(DEFAULT_THEME)}
         onInputVolumeChange={setInputVolume}
         onOutputVolumeChange={setOutputVolume}
@@ -6350,5 +6435,6 @@ export default function App() {
         onPublish={() => publishStoryDraft()}
       />
     </>
+    </IconFamilyContext.Provider>
   );
 }

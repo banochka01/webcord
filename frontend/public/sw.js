@@ -1,5 +1,10 @@
 const CACHE_NAME = 'webcord-app-v8-telegram-motion';
-const SHELL_ASSETS = ['/manifest.webmanifest', '/icons/webcord.png'];
+const SHELL_ASSETS = [
+  '/manifest.webmanifest',
+  '/icons/webcord.png',
+  '/icons/webcord-white.png',
+  '/icons/webcord-black.png'
+];
 
 self.addEventListener('install', (event) => {
   self.skipWaiting();
@@ -65,6 +70,6 @@ self.addEventListener('fetch', (event) => {
         caches.open(CACHE_NAME).then((cache) => cache.put(request, copy)).catch(() => {});
         return response;
       }))
-      .catch(() => caches.match('/icons/webcord.png') || Response.error())
+      .catch(() => caches.match('/icons/webcord-white.png') || caches.match('/icons/webcord.png') || Response.error())
   );
 });

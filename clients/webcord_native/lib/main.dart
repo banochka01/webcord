@@ -53,9 +53,32 @@ class _WebCordNativeAppState extends State<WebCordNativeApp> {
         return MaterialApp(
           title: 'WebCord',
           debugShowCheckedModeBanner: false,
-          theme: webCordTheme(state.themeMode),
+          theme: webCordTheme(state.themeMode, Brightness.light),
+          darkTheme: webCordTheme(state.themeMode, Brightness.dark),
+          themeMode: state.brightnessMode.themeMode,
           themeAnimationDuration: themeSystem.baseMotion,
           themeAnimationCurve: themeSystem.curve,
+          builder: (context, child) {
+            final light = Theme.of(context).brightness == Brightness.light;
+            return AnnotatedRegion<SystemUiOverlayStyle>(
+              value: SystemUiOverlayStyle(
+                statusBarColor: Colors.transparent,
+                systemNavigationBarColor: light
+                    ? const Color(0xFFF1F5FA)
+                    : const Color(0xFF070A12),
+                systemNavigationBarDividerColor: light
+                    ? const Color(0xFFDDE6F1)
+                    : const Color(0xFF11172A),
+                statusBarIconBrightness: light
+                    ? Brightness.dark
+                    : Brightness.light,
+                systemNavigationBarIconBrightness: light
+                    ? Brightness.dark
+                    : Brightness.light,
+              ),
+              child: child ?? const SizedBox.shrink(),
+            );
+          },
           home: WebCordShell(state: state),
         );
       },

@@ -8,6 +8,29 @@ const wcBaseMotion = Duration(milliseconds: 320);
 const wcSlowMotion = Duration(milliseconds: 620);
 const wcEase = Curves.easeOutCubic;
 
+enum AppBrightnessMode {
+  system('System'),
+  dark('Dark'),
+  light('Light');
+
+  const AppBrightnessMode(this.label);
+
+  final String label;
+
+  ThemeMode get themeMode => switch (this) {
+    AppBrightnessMode.system => ThemeMode.system,
+    AppBrightnessMode.dark => ThemeMode.dark,
+    AppBrightnessMode.light => ThemeMode.light,
+  };
+
+  static AppBrightnessMode fromName(String? value) {
+    for (final mode in values) {
+      if (mode.name == value) return mode;
+    }
+    return AppBrightnessMode.system;
+  }
+}
+
 enum AppThemeMode {
   telegram('Telegram Focus'),
   material('Material Motion'),
@@ -143,50 +166,44 @@ class WebCordThemeSystem extends ThemeExtension<WebCordThemeSystem> {
     if (mode == AppThemeMode.material) {
       return switch (role) {
         WebCordIconRole.menu => Icons.menu_rounded,
-        WebCordIconRole.channels =>
-          selected ? Icons.tag_rounded : Icons.tag_outlined,
-        WebCordIconRole.friends =>
-          selected ? Icons.group_rounded : Icons.group_outlined,
-        WebCordIconRole.direct =>
-          selected ? Icons.chat_rounded : Icons.chat_outlined,
-        WebCordIconRole.calls =>
-          selected ? Icons.call_rounded : Icons.call_outlined,
-        WebCordIconRole.stories =>
-          selected ? Icons.auto_stories_rounded : Icons.auto_stories_outlined,
-        WebCordIconRole.profile =>
-          selected ? Icons.person_rounded : Icons.person_outline_rounded,
-        WebCordIconRole.settings => Icons.settings_rounded,
+        WebCordIconRole.channels => Icons.tag_outlined,
+        WebCordIconRole.friends => Icons.group_outlined,
+        WebCordIconRole.direct => Icons.chat_bubble_outline_rounded,
+        WebCordIconRole.calls => Icons.call_outlined,
+        WebCordIconRole.stories => Icons.auto_stories_outlined,
+        WebCordIconRole.profile => Icons.account_circle_outlined,
+        WebCordIconRole.settings => Icons.settings_outlined,
         WebCordIconRole.logout => Icons.logout_rounded,
         WebCordIconRole.search => Icons.search_rounded,
         WebCordIconRole.voice => Icons.graphic_eq_rounded,
-        WebCordIconRole.send => Icons.send_rounded,
+        WebCordIconRole.send => Icons.send_outlined,
         WebCordIconRole.attach => Icons.attach_file_rounded,
-        WebCordIconRole.microphone => Icons.mic_rounded,
-        WebCordIconRole.video => Icons.video_camera_front_rounded,
-        WebCordIconRole.wallpaper => Icons.wallpaper_rounded,
-        WebCordIconRole.theme => Icons.dashboard_customize_rounded,
-        WebCordIconRole.selected => Icons.check_circle_rounded,
+        WebCordIconRole.microphone => Icons.mic_none_rounded,
+        WebCordIconRole.video => Icons.videocam_outlined,
+        WebCordIconRole.wallpaper => Icons.wallpaper_outlined,
+        WebCordIconRole.theme => Icons.palette_outlined,
+        WebCordIconRole.selected => Icons.check_circle_outline_rounded,
       };
     }
     return switch (role) {
-      WebCordIconRole.menu => Icons.blur_on_rounded,
-      WebCordIconRole.channels => Icons.grid_view_rounded,
-      WebCordIconRole.friends => Icons.diversity_3_outlined,
-      WebCordIconRole.direct => Icons.bubble_chart_outlined,
-      WebCordIconRole.calls => Icons.phone_in_talk_outlined,
-      WebCordIconRole.stories => Icons.motion_photos_on_outlined,
-      WebCordIconRole.profile => Icons.face_outlined,
+      WebCordIconRole.menu => Icons.menu_open_rounded,
+      WebCordIconRole.channels => Icons.tag_outlined,
+      WebCordIconRole.friends => Icons.people_outline_rounded,
+      WebCordIconRole.direct => Icons.chat_bubble_outline_rounded,
+      WebCordIconRole.calls => Icons.phone_outlined,
+      WebCordIconRole.stories => Icons.collections_outlined,
+      WebCordIconRole.profile => Icons.account_circle_outlined,
       WebCordIconRole.settings => Icons.tune_rounded,
-      WebCordIconRole.logout => Icons.power_settings_new_rounded,
-      WebCordIconRole.search => Icons.travel_explore_rounded,
-      WebCordIconRole.voice => Icons.multiline_chart_rounded,
-      WebCordIconRole.send => Icons.rocket_launch_rounded,
-      WebCordIconRole.attach => Icons.add_link_rounded,
-      WebCordIconRole.microphone => Icons.spatial_audio_off_rounded,
-      WebCordIconRole.video => Icons.video_camera_front_outlined,
-      WebCordIconRole.wallpaper => Icons.gradient_rounded,
-      WebCordIconRole.theme => Icons.auto_awesome_rounded,
-      WebCordIconRole.selected => Icons.task_alt_rounded,
+      WebCordIconRole.logout => Icons.logout_rounded,
+      WebCordIconRole.search => Icons.search_rounded,
+      WebCordIconRole.voice => Icons.graphic_eq_rounded,
+      WebCordIconRole.send => Icons.send_outlined,
+      WebCordIconRole.attach => Icons.attach_file_rounded,
+      WebCordIconRole.microphone => Icons.mic_none_rounded,
+      WebCordIconRole.video => Icons.videocam_outlined,
+      WebCordIconRole.wallpaper => Icons.image_outlined,
+      WebCordIconRole.theme => Icons.palette_outlined,
+      WebCordIconRole.selected => Icons.check_circle_outline_rounded,
     };
   }
 
@@ -461,8 +478,44 @@ const palettes = <AppThemeMode, WebCordPalette>{
   ),
 };
 
-ThemeData webCordTheme([AppThemeMode mode = AppThemeMode.telegram]) {
-  final palette = palettes[mode]!;
+WebCordPalette _lightPalette(AppThemeMode mode) {
+  final accent = switch (mode) {
+    AppThemeMode.material => const Color(0xFF6750A4),
+    AppThemeMode.liquid => const Color(0xFF006A78),
+    AppThemeMode.telegram => const Color(0xFF168ACD),
+    _ => palettes[mode]!.accent,
+  };
+  return WebCordPalette(
+    bg: const Color(0xFFF1F5FA),
+    bgAlt: const Color(0xFFEAF0F7),
+    rail: const Color(0xFFFFFFFF),
+    panel: const Color(0xFFFFFFFF),
+    panelSoft: const Color(0xFFF4F7FB),
+    panelStrong: const Color(0xFFE5EBF3),
+    border: const Color(0x26344152),
+    text: const Color(0xFF172033),
+    muted: const Color(0xFF627184),
+    accent: accent,
+    accentHot: Color.lerp(accent, const Color(0xFF8B3D74), .28)!,
+    cyan: Color.lerp(accent, const Color(0xFF0089A6), .42)!,
+    danger: const Color(0xFFBA1A1A),
+    success: const Color(0xFF087F5B),
+    backdrop: const [
+      Color(0xFFF8FAFE),
+      Color(0xFFF1F5FA),
+      Color(0xFFEAF0F7),
+      Color(0xFFDDE6F1),
+    ],
+  );
+}
+
+ThemeData webCordTheme([
+  AppThemeMode mode = AppThemeMode.telegram,
+  Brightness brightness = Brightness.dark,
+]) {
+  final palette = brightness == Brightness.light
+      ? _lightPalette(mode)
+      : palettes[mode]!;
   final system = WebCordThemeSystem(mode);
   final materialExpressive = mode == AppThemeMode.material;
   final telegramFocus = mode == AppThemeMode.telegram;
@@ -470,13 +523,13 @@ ThemeData webCordTheme([AppThemeMode mode = AppThemeMode.telegram]) {
   final fieldRadius = materialExpressive ? 24.0 : system.controlRadius;
   final scheme = ColorScheme.fromSeed(
     seedColor: palette.accent,
-    brightness: Brightness.dark,
+    brightness: brightness,
     surface: palette.panel,
   );
 
   return ThemeData(
     useMaterial3: true,
-    brightness: Brightness.dark,
+    brightness: brightness,
     scaffoldBackgroundColor: palette.bg,
     visualDensity: telegramFocus
         ? VisualDensity.compact

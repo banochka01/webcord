@@ -29,7 +29,7 @@ The theme selector changes the complete interaction system:
 
 1. P1 fixed: later legacy responsive rules hid Theme Studio and collapsed the rail/sidebar widths. Final scoped layout guards now preserve the four-column concept at `≥1380px`.
 2. P1 fixed: incoming messages inherited Material containers on mobile. Incoming messages are now unboxed in every theme and viewport; outgoing messages remain compact, asymmetric bubbles.
-3. P1 fixed: the original raster logo contained a large opaque white canvas. The client now uses a real icon-library brand glyph in a theme-aware container.
+3. P1 fixed: all clients now use the supplied transparent white/black WebCord brand assets; generated launcher tiles use the white mark on Aura Nightfall.
 4. P2 fixed: full locale timestamps crowded message bubbles. Timeline messages now show compact local time while the date divider carries the calendar context.
 5. P2 fixed: mobile composer copy and controls clipped at `390px`; the hint is shortened and the form is constrained to the viewport.
 6. P3 accepted: deterministic Flutter fixtures use initial avatars because golden tests do not perform network requests; production avatars remain data-driven.
@@ -41,5 +41,24 @@ The theme selector changes the complete interaction system:
 - Flutter tests — all 10 passed, including responsive theme goldens and Theme Studio coverage.
 - Browser QA — desktop/mobile rendering and all three theme selections passed. The only console entries were expected failed WebSocket handshakes from the isolated mocked QA backend; no React runtime errors occurred.
 - Reduced-motion behavior remains implemented in both clients.
+
+final result: passed
+
+## 2026-07-23 brand and icon polish
+
+- Aura Nightfall is now the only landing presentation; the A/B/C design switch is no longer rendered.
+- Material and Atmosphere use familiar semantic icon mappings in React and Flutter. The React SVG contract was fixed so fill-based icon libraries no longer inherit the outline-only `fill: none` rule.
+- The supplied 2000 x 2000 white and black logos are used by the web and Flutter clients. Windows, Android, Capacitor, desktop bundle, PWA, and touch icons were regenerated from the same mark.
+- Browser QA verified zero design switches, the locked Nightfall class, both 2000 x 2000 source assets, Material/Atmosphere icon-family rendering, and zero React/console errors.
+- React production build, Flutter analyzer, seven golden scenarios, and all ten Flutter tests passed.
+
+## 2026-07-23 release polish
+
+- The always-visible Theme Studio was replaced with a compact right-side drawer on the web and an on-demand dialog in Flutter. The conversation now keeps the full remaining width.
+- Web and Flutter now persist `System`, `Dark`, and `Light` appearance modes. Light mode has its own surface hierarchy, contrast tokens, system chrome, and the supplied black WebCord mark.
+- The web composer is a Telegram-style multiline pill with `Enter` to send, `Shift+Enter` for a newline, an icon-only send action, and visible sending/saved/error phases. Direct-message delivery state has a separate animated treatment.
+- The landing page remains locked to Aura Nightfall; obsolete design-switch markup and the B/C presentation blocks were removed. Theme-system overrides were split into `frontend/src/theme-systems.css`.
+- Browser QA covered desktop dark, desktop light, the compact Theme Studio, multiline send behavior, and the `390 x 844` mobile shell with no page errors. Comparison evidence: `design-reviews/qa-release-polish-comparison.png`.
+- Flutter QA now includes eight golden scenarios, including a real Material Motion light render with the black logo. Analyzer and all 12 tests pass.
 
 final result: passed

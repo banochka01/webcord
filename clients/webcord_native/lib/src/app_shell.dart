@@ -234,7 +234,6 @@ class DesktopShell extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final showThemeStudio = constraints.maxWidth >= 1380;
         return Row(
           children: [
             _DesktopPaneEntrance(
@@ -254,15 +253,6 @@ class DesktopShell extends StatelessWidget {
                 child: MainSurface(state: state),
               ),
             ),
-            if (showThemeStudio)
-              _DesktopPaneEntrance(
-                delay: const Duration(milliseconds: 190),
-                offset: const Offset(.12, 0),
-                child: SizedBox(
-                  width: 366,
-                  child: ThemeStudioPanel(state: state),
-                ),
-              ),
           ],
         );
       },
@@ -536,9 +526,10 @@ class ServerRail extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final themeSystem = WebCordThemeSystem.of(context);
+    final palette = WebCordPalette.of(context);
     return Panel(
       padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
-      color: WebCordColors.rail,
+      color: palette.rail,
       radius: 0,
       blur: false,
       child: SizedBox(
@@ -607,6 +598,12 @@ class ServerRail extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 8),
+            RailButton(
+              selected: false,
+              icon: themeSystem.icon(WebCordIconRole.theme),
+              label: 'Theme',
+              onTap: () => showThemeStudioDialog(context, state),
+            ),
             RailButton(
               selected: false,
               icon: themeSystem.icon(WebCordIconRole.settings),
@@ -1260,6 +1257,7 @@ class MainSurface extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final themeSystem = WebCordThemeSystem.of(context);
+    final palette = WebCordPalette.of(context);
     late final Widget content;
     if (state.workspace == WorkspaceKind.friends) {
       content = FriendsHome(state: state);
@@ -1272,7 +1270,7 @@ class MainSurface extends StatelessWidget {
     } else {
       content = Panel(
         padding: EdgeInsets.zero,
-        color: WebCordColors.panel.withAlpha(238),
+        color: palette.panel.withAlpha(238),
         radius: 0,
         blur: false,
         child: Column(
@@ -1280,7 +1278,7 @@ class MainSurface extends StatelessWidget {
             ChatHeader(state: state),
             if (state.voiceJoined) VoiceCallBanner(state: state),
             if (state.voiceJoined) VoiceStage(state: state),
-            const Divider(height: 1, color: WebCordColors.border),
+            Divider(height: 1, color: palette.border),
             Expanded(
               child: ChatWallpaper(
                 state: state,
@@ -1323,6 +1321,7 @@ class ChatHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final mobile = MediaQuery.sizeOf(context).width < 980;
     final themeSystem = WebCordThemeSystem.of(context);
+    final palette = WebCordPalette.of(context);
     if (mobile) return const SizedBox.shrink();
     return Container(
       height: 96,
@@ -1333,7 +1332,7 @@ class ChatHeader extends StatelessWidget {
             state.workspace == WorkspaceKind.direct
                 ? themeSystem.icon(WebCordIconRole.direct)
                 : themeSystem.icon(WebCordIconRole.channels, selected: true),
-            color: WebCordColors.muted,
+            color: palette.muted,
             size: 28,
           ),
           const SizedBox(width: 14),
@@ -1352,10 +1351,7 @@ class ChatHeader extends StatelessWidget {
                 Text(
                   state.subtitle,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: WebCordColors.muted,
-                    fontSize: 12,
-                  ),
+                  style: TextStyle(color: palette.muted, fontSize: 12),
                 ),
               ],
             ),
@@ -5813,16 +5809,16 @@ class BrandMark extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final asset = Theme.of(context).brightness == Brightness.light
+        ? 'assets/images/webcord-black.png'
+        : 'assets/images/webcord-white.png';
     return SizedBox(
       width: size,
       height: size,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(size * .22),
-        child: Image.asset(
-          'assets/images/webcord.png',
-          fit: BoxFit.cover,
-          filterQuality: FilterQuality.high,
-        ),
+      child: Image.asset(
+        asset,
+        fit: BoxFit.contain,
+        filterQuality: FilterQuality.high,
       ),
     );
   }
@@ -7313,6 +7309,8 @@ class SettingsDialog extends StatelessWidget {
                         onSelected: state.setThemeMode,
                       ),
                       const SizedBox(height: 12),
+                      BrightnessModePicker(state: state),
+                      const SizedBox(height: 12),
                       SwitchListTile(
                         value: state.compactMessages,
                         onChanged: state.setCompactMessages,
@@ -8230,14 +8228,37 @@ Future<void> showMessageSearchDialog(
   );
 }
 
+Future<void> showThemeStudioDialog(
+  BuildContext context,
+  WebCordState state,
+) async {
+  final compact = MediaQuery.sizeOf(context).width < 700;
+  await showDialog<void>(
+    context: context,
+    builder: (dialogContext) => Dialog(
+      insetPadding: EdgeInsets.all(compact ? 12 : 28),
+      clipBehavior: Clip.antiAlias,
+      child: SizedBox(
+        width: compact ? double.maxFinite : 480,
+        height: compact ? MediaQuery.sizeOf(context).height * .82 : 680,
+        child: ThemeStudioPanel(
+          state: state,
+          onClose: () => Navigator.pop(dialogContext),
+        ),
+      ),
+    ),
+  );
+}
+
 IconData _themeIcon(AppThemeMode mode) {
   return WebCordThemeSystem(mode).icon(WebCordIconRole.theme);
 }
 
 class ThemeStudioPanel extends StatelessWidget {
-  const ThemeStudioPanel({required this.state, super.key});
+  const ThemeStudioPanel({required this.state, this.onClose, super.key});
 
   final WebCordState state;
+  final VoidCallback? onClose;
 
   @override
   Widget build(BuildContext context) {
@@ -8250,12 +8271,24 @@ class ThemeStudioPanel extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'Theme Studio',
-            style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-              fontSize: 20,
-              fontWeight: FontWeight.w900,
-            ),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Theme Studio',
+                  style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+              if (onClose != null)
+                IconButton(
+                  tooltip: 'Close',
+                  onPressed: onClose,
+                  icon: const Icon(Icons.close_rounded),
+                ),
+            ],
           ),
           const SizedBox(height: 7),
           Text(
@@ -8265,10 +8298,16 @@ class ThemeStudioPanel extends StatelessWidget {
           const SizedBox(height: 24),
           Expanded(
             child: SingleChildScrollView(
-              child: ThemeSystemGallery(
-                selectedMode: state.themeMode,
-                onSelected: state.setThemeMode,
-                vertical: true,
+              child: Column(
+                children: [
+                  BrightnessModePicker(state: state),
+                  const SizedBox(height: 16),
+                  ThemeSystemGallery(
+                    selectedMode: state.themeMode,
+                    onSelected: state.setThemeMode,
+                    vertical: true,
+                  ),
+                ],
               ),
             ),
           ),
@@ -8305,6 +8344,53 @@ class ThemeStudioPanel extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class BrightnessModePicker extends StatelessWidget {
+  const BrightnessModePicker({required this.state, super.key});
+
+  final WebCordState state;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = WebCordPalette.of(context);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: palette.panelSoft,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: palette.border),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(6),
+        child: SegmentedButton<AppBrightnessMode>(
+          showSelectedIcon: false,
+          segments: const [
+            ButtonSegment(
+              value: AppBrightnessMode.system,
+              icon: Icon(Icons.devices_rounded, size: 18),
+              label: Text('System'),
+            ),
+            ButtonSegment(
+              value: AppBrightnessMode.dark,
+              icon: Icon(Icons.dark_mode_outlined, size: 18),
+              label: Text('Dark'),
+            ),
+            ButtonSegment(
+              value: AppBrightnessMode.light,
+              icon: Icon(Icons.light_mode_outlined, size: 18),
+              label: Text('Light'),
+            ),
+          ],
+          selected: {state.brightnessMode},
+          onSelectionChanged: (selection) {
+            if (selection.isNotEmpty) {
+              state.setBrightnessMode(selection.first);
+            }
+          },
+        ),
       ),
     );
   }

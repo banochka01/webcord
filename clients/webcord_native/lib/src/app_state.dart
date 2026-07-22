@@ -120,6 +120,7 @@ class WebCordState extends ChangeNotifier {
   static const _voiceChannelKey = 'webcord_native_voice_channel';
   static const _conversationKey = 'webcord_native_conversation';
   static const _themeModeKey = 'webcord_native_theme_mode';
+  static const _brightnessModeKey = 'webcord_native_brightness_mode';
   static const _inputVolumeKey = 'webcord_native_input_volume';
   static const _outputVolumeKey = 'webcord_native_output_volume';
   static const _noiseSuppressionKey = 'webcord_native_noise_suppression';
@@ -178,6 +179,7 @@ class WebCordState extends ChangeNotifier {
   CallSession? activeCall;
   CallSession? incomingCall;
   AppThemeMode themeMode = AppThemeMode.telegram;
+  AppBrightnessMode brightnessMode = AppBrightnessMode.system;
   String selectedMicDeviceId = '';
   String selectedOutputDeviceId = '';
   String selectedCameraDeviceId = '';
@@ -351,6 +353,9 @@ class WebCordState extends ChangeNotifier {
     selectedOutputDeviceId = await _store?.getString(_outputDeviceKey) ?? '';
     selectedCameraDeviceId = await _store?.getString(_cameraDeviceKey) ?? '';
     themeMode = AppThemeMode.fromName(await _store?.getString(_themeModeKey));
+    brightnessMode = AppBrightnessMode.fromName(
+      await _store?.getString(_brightnessModeKey),
+    );
     chatWallpaperDim = _clampWallpaperDim(
       await _store?.getInt(_chatWallpaperDimKey),
     );
@@ -1353,6 +1358,12 @@ class WebCordState extends ChangeNotifier {
   Future<void> setThemeMode(AppThemeMode mode) async {
     themeMode = mode;
     await _store?.setString(_themeModeKey, mode.name);
+    notifyListeners();
+  }
+
+  Future<void> setBrightnessMode(AppBrightnessMode mode) async {
+    brightnessMode = mode;
+    await _store?.setString(_brightnessModeKey, mode.name);
     notifyListeners();
   }
 

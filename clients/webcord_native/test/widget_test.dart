@@ -7,17 +7,36 @@ import 'package:webcord_native/src/app_theme.dart';
 import 'package:webcord_native/src/models.dart';
 
 void main() {
-  test('flagship themes change icons, motion, geometry and surfaces', () {
+  test('light mode exposes a real light palette for every flagship theme', () {
+    for (final mode in AppThemeMode.flagship) {
+      final theme = webCordTheme(mode, Brightness.light);
+      final palette = theme.extension<WebCordPalette>()!;
+
+      expect(theme.brightness, Brightness.light);
+      expect(theme.colorScheme.brightness, Brightness.light);
+      expect(palette.bg.computeLuminance(), greaterThan(0.7));
+      expect(palette.text.computeLuminance(), lessThan(0.12));
+    }
+
+    expect(AppBrightnessMode.fromName('light'), AppBrightnessMode.light);
+    expect(AppBrightnessMode.fromName('unknown'), AppBrightnessMode.system);
+  });
+
+  test('flagship themes preserve icon semantics and change presentation', () {
     final telegram = WebCordThemeSystem(AppThemeMode.telegram);
     final material = WebCordThemeSystem(AppThemeMode.material);
     final atmosphere = WebCordThemeSystem(AppThemeMode.liquid);
 
     expect(AppThemeMode.flagship, hasLength(3));
-    expect({
-      telegram.icon(WebCordIconRole.send),
-      material.icon(WebCordIconRole.send),
-      atmosphere.icon(WebCordIconRole.send),
-    }, hasLength(3));
+    expect(telegram.icon(WebCordIconRole.send), Icons.send_outlined);
+    expect(material.icon(WebCordIconRole.send), Icons.send_outlined);
+    expect(atmosphere.icon(WebCordIconRole.send), Icons.send_outlined);
+    expect(
+      telegram.icon(WebCordIconRole.profile),
+      Icons.person_outline_rounded,
+    );
+    expect(material.icon(WebCordIconRole.friends), Icons.group_outlined);
+    expect(atmosphere.icon(WebCordIconRole.settings), Icons.tune_rounded);
     expect({
       telegram.baseMotion,
       material.baseMotion,

@@ -109,8 +109,9 @@ void main() {
     WidgetTester tester,
     Size size,
     String golden,
-    AppThemeMode mode,
-  ) async {
+    AppThemeMode mode, [
+    Brightness brightness = Brightness.dark,
+  ]) async {
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1;
     final state = fixture(mode);
@@ -118,11 +119,21 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         debugShowCheckedModeBanner: false,
-        theme: webCordTheme(mode),
+        theme: webCordTheme(mode, brightness),
         home: RepaintBoundary(
           key: const ValueKey('capture'),
           child: WebCordShell(state: state),
         ),
+      ),
+    );
+    await tester.runAsync(
+      () => precacheImage(
+        AssetImage(
+          brightness == Brightness.light
+              ? 'assets/images/webcord-black.png'
+              : 'assets/images/webcord-white.png',
+        ),
+        tester.element(find.byKey(const ValueKey('capture'))),
       ),
     );
     await tester.pump(const Duration(milliseconds: 900));
@@ -166,6 +177,16 @@ void main() {
       const Size(390, 844),
       'goldens/native-mobile-material-motion.png',
       AppThemeMode.material,
+    );
+  });
+
+  testWidgets('captures desktop Material Motion in light mode', (tester) async {
+    await capture(
+      tester,
+      const Size(1536, 1024),
+      'goldens/native-desktop-material-motion-light.png',
+      AppThemeMode.material,
+      Brightness.light,
     );
   });
 
