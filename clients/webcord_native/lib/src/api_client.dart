@@ -243,6 +243,35 @@ class WebCordApi {
     return ChatMessage.fromJson(json);
   }
 
+  Future<List<MessageReaction>> toggleChannelMessageReaction({
+    required String token,
+    required int messageId,
+    required String emoji,
+  }) async {
+    final json = await _send(
+      'PUT',
+      '/messages/$messageId/reactions',
+      token: token,
+      body: {'emoji': emoji},
+    );
+    return _reactionList(json);
+  }
+
+  Future<List<MessageReaction>> toggleDirectMessageReaction({
+    required String token,
+    required int conversationId,
+    required int messageId,
+    required String emoji,
+  }) async {
+    final json = await _send(
+      'PUT',
+      '/dms/$conversationId/messages/$messageId/reactions',
+      token: token,
+      body: {'emoji': emoji},
+    );
+    return _reactionList(json);
+  }
+
   Future<Channel> createChannel({
     required String token,
     required int guildId,
@@ -530,6 +559,16 @@ class WebCordApi {
     return data
         .whereType<Map>()
         .map((item) => ChatMessage.fromJson(Map<String, dynamic>.from(item)))
+        .toList();
+  }
+
+  List<MessageReaction> _reactionList(dynamic data) {
+    if (data is! Map || data['reactions'] is! List) return const [];
+    return (data['reactions'] as List)
+        .whereType<Map>()
+        .map(
+          (item) => MessageReaction.fromJson(Map<String, dynamic>.from(item)),
+        )
         .toList();
   }
 

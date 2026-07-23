@@ -191,6 +191,7 @@ const ADMIN_ROLES = new Set(['ADMIN', 'OWNER']);
 const REPORT_TARGET_TYPES = new Set(['USER', 'MESSAGE', 'DIRECT_MESSAGE']);
 const REPORT_STATUSES = new Set(['OPEN', 'REVIEWED', 'RESOLVED', 'DISMISSED']);
 const MODERATION_ACTIONS = new Set(['MUTE', 'UNMUTE', 'BAN', 'UNBAN']);
+const MESSAGE_REACTIONS = new Set(['❤️', '👍', '😂', '🔥', '👏', '😮']);
 const MAX_SIGNAL_SDP_LENGTH = 80_000;
 const MAX_ICE_CANDIDATE_LENGTH = 4_096;
 
@@ -508,6 +509,11 @@ function parseMessagePagination(query = {}) {
   const limit = Math.min(MAX_MESSAGE_LIMIT, Math.max(1, parsePositiveInt(query.limit) || DEFAULT_MESSAGE_LIMIT));
   const beforeId = parseOptionalPositiveInt(query.beforeId);
   return { limit, beforeId };
+}
+
+function normalizeMessageReaction(value) {
+  const emoji = String(value || '').trim();
+  return MESSAGE_REACTIONS.has(emoji) ? emoji : null;
 }
 
 function sendCaughtApiError(res, error, fallbackCode, fallbackMessage) {
@@ -1135,6 +1141,7 @@ async function createChannelMessage({ channelId, userId, content, attachmentUrl,
     },
     include: {
       author: { select: publicUserSelect },
+      reactions: { select: { emoji: true, userId: true } },
       replyTo: {
         include: {
           author: { select: publicUserSelect }
@@ -1194,6 +1201,7 @@ async function createDirectConversationMessage({ conversationId, userId, content
     },
     include: {
       author: { select: publicUserSelect },
+      reactions: { select: { emoji: true, userId: true } },
       replyTo: {
         include: {
           author: { select: publicUserSelect }
@@ -2523,6 +2531,7 @@ app.get('/api/dms/:conversationId/messages', authMiddleware, async (req, res) =>
     const messages = await prisma.directMessage.findMany({
       where: {
         conversationId,
+        deletedAt: null,
         ...(blockedUserIds.length > 0 ? { authorId: { notIn: blockedUserIds } } : {}),
         ...(beforeId ? { id: { lt: beforeId } } : {})
       },
@@ -2530,6 +2539,7 @@ app.get('/api/dms/:conversationId/messages', authMiddleware, async (req, res) =>
       take: limit,
       include: {
         author: { select: publicUserSelect },
+        reactions: { select: { emoji: true, userId: true } },
         replyTo: {
           include: {
             author: { select: publicUserSelect }
@@ -2617,6 +2627,7 @@ app.get('/api/messages/:channelId', authMiddleware, async (req, res) => {
     const messages = await prisma.message.findMany({
       where: {
         channelId,
+        deletedAt: null,
         ...(blockedUserIds.length > 0 ? { authorId: { notIn: blockedUserIds } } : {}),
         ...(beforeId ? { id: { lt: beforeId } } : {})
       },
@@ -2624,6 +2635,7 @@ app.get('/api/messages/:channelId', authMiddleware, async (req, res) => {
       take: limit,
       include: {
         author: { select: publicUserSelect },
+        reactions: { select: { emoji: true, userId: true } },
         replyTo: {
           include: {
             author: { select: publicUserSelect }
@@ -2754,6 +2766,7 @@ app.patch('/api/messages/:messageId', authMiddleware, messageRateLimit, async (r
       data: { content, editedAt: new Date() },
       include: {
         author: { select: publicUserSelect },
+        reactions: { select: { emoji: true, userId: true } },
         replyTo: { include: { author: { select: publicUserSelect } } }
       }
     });
@@ -2763,6 +2776,49 @@ app.patch('/api/messages/:messageId', authMiddleware, messageRateLimit, async (r
   } catch (error) {
     console.error(error);
     return sendCaughtApiError(res, error, 'MESSAGE_EDIT_FAILED', 'Failed to edit message');
+  }
+});
+
+app.put('/api/messages/:messageId/reactions', authMiddleware, messageRateLimit, async (req, res) => {
+  try {
+    const messageId = Number(req.params.messageId);
+    const emoji = normalizeMessageReaction(req.body.emoji);
+    if (!messageId || Number.isNaN(messageId)) {
+      return sendApiError(res, 400, 'INVALID_MESSAGE_ID', 'Invalid message id');
+    }
+    if (!emoji) {
+      return sendApiError(res, 400, 'INVALID_REACTION', 'Unsupported message reaction');
+    }
+
+    const message = await prisma.message.findUnique({
+      where: { id: messageId },
+      select: { id: true, channelId: true, deletedAt: true }
+    });
+    if (!message || message.deletedAt) {
+      return sendApiError(res, 404, 'MESSAGE_NOT_FOUND', 'Message not found');
+    }
+
+    const key = { messageId, userId: req.user.userId, emoji };
+    const existing = await prisma.messageReaction.findUnique({
+      where: { messageId_userId_emoji: key }
+    });
+    if (existing) {
+      await prisma.messageReaction.delete({ where: { id: existing.id } });
+    } else {
+      await prisma.messageReaction.create({ data: key });
+    }
+
+    const reactions = await prisma.messageReaction.findMany({
+      where: { messageId },
+      orderBy: { id: 'asc' },
+      select: { emoji: true, userId: true }
+    });
+    const payload = { messageId, channelId: message.channelId, reactions };
+    io.to(`channel:${message.channelId}`).emit('message:reaction', payload);
+    return res.json(payload);
+  } catch (error) {
+    console.error(error);
+    return sendApiError(res, 500, 'MESSAGE_REACTION_FAILED', 'Failed to update reaction');
   }
 });
 
@@ -2792,6 +2848,7 @@ app.delete('/api/messages/:messageId', authMiddleware, messageRateLimit, async (
       },
       include: {
         author: { select: publicUserSelect },
+        reactions: { select: { emoji: true, userId: true } },
         replyTo: { include: { author: { select: publicUserSelect } } }
       }
     });
@@ -2839,6 +2896,7 @@ app.patch('/api/dms/:conversationId/messages/:messageId', authMiddleware, messag
       data: { content, editedAt: new Date() },
       include: {
         author: { select: publicUserSelect },
+        reactions: { select: { emoji: true, userId: true } },
         replyTo: { include: { author: { select: publicUserSelect } } }
       }
     });
@@ -2849,6 +2907,62 @@ app.patch('/api/dms/:conversationId/messages/:messageId', authMiddleware, messag
   } catch (error) {
     console.error(error);
     return sendCaughtApiError(res, error, 'MESSAGE_EDIT_FAILED', 'Failed to edit direct message');
+  }
+});
+
+app.put('/api/dms/:conversationId/messages/:messageId/reactions', authMiddleware, messageRateLimit, async (req, res) => {
+  try {
+    const conversationId = Number(req.params.conversationId);
+    const messageId = Number(req.params.messageId);
+    const emoji = normalizeMessageReaction(req.body.emoji);
+    if (!conversationId || Number.isNaN(conversationId) || !messageId || Number.isNaN(messageId)) {
+      return sendApiError(res, 400, 'INVALID_MESSAGE_ID', 'Invalid message id');
+    }
+    if (!emoji) {
+      return sendApiError(res, 400, 'INVALID_REACTION', 'Unsupported message reaction');
+    }
+
+    const [conversation, message] = await Promise.all([
+      prisma.directConversation.findUnique({
+        where: { id: conversationId },
+        include: { members: true }
+      }),
+      prisma.directMessage.findUnique({
+        where: { id: messageId },
+        select: { id: true, conversationId: true, deletedAt: true }
+      })
+    ]);
+    if (
+      !conversation ||
+      !getConversationMemberIds(conversation).includes(req.user.userId) ||
+      !message ||
+      message.conversationId !== conversationId ||
+      message.deletedAt
+    ) {
+      return sendApiError(res, 404, 'MESSAGE_NOT_FOUND', 'Message not found');
+    }
+
+    const key = { directMessageId: messageId, userId: req.user.userId, emoji };
+    const existing = await prisma.directMessageReaction.findUnique({
+      where: { directMessageId_userId_emoji: key }
+    });
+    if (existing) {
+      await prisma.directMessageReaction.delete({ where: { id: existing.id } });
+    } else {
+      await prisma.directMessageReaction.create({ data: key });
+    }
+
+    const reactions = await prisma.directMessageReaction.findMany({
+      where: { directMessageId: messageId },
+      orderBy: { id: 'asc' },
+      select: { emoji: true, userId: true }
+    });
+    const payload = { messageId, conversationId, reactions };
+    io.to(`dm:${conversationId}`).emit('direct-message:reaction', payload);
+    return res.json(payload);
+  } catch (error) {
+    console.error(error);
+    return sendApiError(res, 500, 'MESSAGE_REACTION_FAILED', 'Failed to update reaction');
   }
 });
 
@@ -2891,6 +3005,7 @@ app.delete('/api/dms/:conversationId/messages/:messageId', authMiddleware, messa
       },
       include: {
         author: { select: publicUserSelect },
+        reactions: { select: { emoji: true, userId: true } },
         replyTo: { include: { author: { select: publicUserSelect } } }
       }
     });

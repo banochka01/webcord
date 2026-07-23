@@ -1,4 +1,5 @@
 import React, { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useGSAP } from '@gsap/react';
 import gsap from 'gsap';
 import { io } from 'socket.io-client';
@@ -626,7 +627,7 @@ function showClientNotification(title, body) {
 }
 
 function sortMessages(list) {
-  return [...list].sort((left, right) => {
+  return [...list].filter((message) => !message?.deletedAt).sort((left, right) => {
     const timeDiff = new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime();
     return timeDiff || Number(left.id) - Number(right.id);
   });
@@ -634,14 +635,25 @@ function sortMessages(list) {
 
 function mergeMessage(list, item) {
   if (!item?.id) return list;
+  if (item.deletedAt) return list.filter((entry) => String(entry.id) !== String(item.id));
   if (list.some((entry) => String(entry.id) === String(item.id))) return list;
   return sortMessages([...list, item]);
 }
 
 function replaceMessage(list, item) {
   if (!item?.id) return list;
+  if (item.deletedAt) return list.filter((entry) => String(entry.id) !== String(item.id));
   if (!list.some((entry) => String(entry.id) === String(item.id))) return mergeMessage(list, item);
   return sortMessages(list.map((entry) => (String(entry.id) === String(item.id) ? { ...entry, ...item } : entry)));
+}
+
+function getAuthorColorIndex(author) {
+  const source = String(author?.id || author?.username || author?.displayName || 'webcord');
+  let hash = 0;
+  for (let index = 0; index < source.length; index += 1) {
+    hash = ((hash << 5) - hash + source.charCodeAt(index)) | 0;
+  }
+  return Math.abs(hash) % 12;
 }
 
 function areMessageListsEqual(left = [], right = []) {
@@ -1501,8 +1513,15 @@ function CustomAudioPlayer({ src, title = 'Audio', variant = 'voice' }) {
       <button className="media-round-btn" type="button" aria-label={playing ? `Pause ${title}` : `Play ${title}`} title={playing ? 'Pause' : 'Play'} onClick={togglePlayback}>
         <AppIcon name={playing ? 'pause' : 'play'} size={16} />
       </button>
-      <span className="media-time">{formatMediaDuration(current)}</span>
-      <input className="media-range" type="range" min="0" max={safeDuration || 0} step="0.01" value={Math.min(current, safeDuration || current)} aria-label={`Seek ${title}`} onChange={seek} />
+      <div className="voice-waveform-wrap">
+        <span className="voice-waveform" aria-hidden="true">
+          {Array.from({ length: 24 }, (_, index) => (
+            <i key={index} style={{ '--wave-height': `${24 + ((index * 17) % 58)}%` }} />
+          ))}
+        </span>
+        <input className="media-range" type="range" min="0" max={safeDuration || 0} step="0.01" value={Math.min(current, safeDuration || current)} aria-label={`Seek ${title}`} onChange={seek} />
+      </div>
+      <span className="media-time">{formatMediaDuration(current)} / {formatMediaDuration(safeDuration)}</span>
       <button className="media-speaker-btn" type="button" aria-label={muted ? `Unmute ${title}` : `Mute ${title}`} title={muted ? 'Unmute' : 'Mute'} onClick={() => setMuted((value) => !value)}>
         <AppIcon name={muted ? 'volumeOff' : 'volume'} size={17} />
       </button>
@@ -1652,9 +1671,13 @@ function StreamPreviewVideo({ stream, className = '' }) {
   const videoRef = useRef(null);
 
   useEffect(() => {
-    if (videoRef.current && stream && videoRef.current.srcObject !== stream) {
-      videoRef.current.srcObject = stream;
+    const node = videoRef.current;
+    if (node && stream && node.srcObject !== stream) {
+      node.srcObject = stream;
     }
+    return () => {
+      if (node?.srcObject === stream) node.srcObject = null;
+    };
   }, [stream]);
 
   return <video ref={videoRef} className={className} autoPlay playsInline muted />;
@@ -1736,6 +1759,8 @@ async function createSwitchableCircleRecorder({ micDeviceId = '', cameraDeviceId
       const nextVideo = await createPreviewVideoElement(nextPreviewStream);
 
       activePreviewStream.getVideoTracks().forEach((track) => track.stop());
+      activeVideo.pause?.();
+      activeVideo.srcObject = null;
       activePreviewStream = nextPreviewStream;
       activeVideo = nextVideo;
       return activePreviewStream;
@@ -1745,12 +1770,15 @@ async function createSwitchableCircleRecorder({ micDeviceId = '', cameraDeviceId
       if (rafId) window.cancelAnimationFrame(rafId);
       activePreviewStream.getTracks().forEach((track) => track.stop());
       recordStream.getTracks().forEach((track) => track.stop());
+      activeVideo.pause?.();
+      activeVideo.srcObject = null;
     }
   };
 }
 
 function CircleRecordingOverlay({
   stream,
+  phase,
   elapsed,
   paused,
   torchEnabled,
@@ -1762,22 +1790,42 @@ function CircleRecordingOverlay({
   onTorchToggle,
   onSwitchCamera
 }) {
+  const onCancelRef = useRef(onCancel);
+
+  useEffect(() => {
+    onCancelRef.current = onCancel;
+  }, [onCancel]);
+
   useEffect(() => {
     const previousBodyOverflow = document.body.style.overflow;
     const previousHtmlOverflow = document.documentElement.style.overflow;
+    const historyMarker = `circle-recording-${Date.now()}`;
+    const previousHistoryState = window.history.state;
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') onCancelRef.current();
+    };
+    const handlePopState = () => onCancelRef.current();
+
     document.body.style.overflow = 'hidden';
     document.documentElement.style.overflow = 'hidden';
+    window.history.pushState({ ...(previousHistoryState || {}), webcordOverlay: historyMarker }, '', window.location.href);
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('popstate', handlePopState, { once: true });
+
     return () => {
       document.body.style.overflow = previousBodyOverflow;
       document.documentElement.style.overflow = previousHtmlOverflow;
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('popstate', handlePopState);
+      if (window.history.state?.webcordOverlay === historyMarker) {
+        window.history.back();
+      }
     };
   }, []);
 
-  return (
+  return createPortal((
     <div className="circle-recording-overlay" role="dialog" aria-modal="true">
-      <div className="circle-recording-backdrop" aria-hidden="true">
-        {stream ? <StreamPreviewVideo stream={stream} /> : null}
-      </div>
+      <div className="circle-recording-backdrop" aria-hidden="true" />
       <div className="circle-recording-stage">
         <span className="circle-recording-grabber" aria-hidden="true" />
         <div className="circle-recording-preview">
@@ -1799,16 +1847,16 @@ function CircleRecordingOverlay({
         <div className="circle-recording-bottom">
           <div className="circle-recording-timer">
             <span className="recording-dot" />
-            <strong>{formatShortDuration(elapsed)}</strong>
+            <strong>{phase === 'requesting' ? 'Preparing camera' : formatShortDuration(elapsed)}</strong>
           </div>
           <button className="circle-recording-cancel" type="button" onClick={onCancel}>Cancel</button>
-          <button className="circle-recording-send" type="button" aria-label="Attach video circle" title="Attach video circle" onClick={onSend}>
+          <button className="circle-recording-send" type="button" aria-label="Attach video circle" title="Attach video circle" onClick={onSend} disabled={phase !== 'recording'}>
             <AppIcon name="send" size={34} />
           </button>
         </div>
       </div>
     </div>
-  );
+  ), document.body);
 }
 
 function MobileHomePanel({
@@ -2147,15 +2195,45 @@ function MediaViewer({ message, onClose }) {
   );
 }
 
-function MessageItem({ message, currentUserId, workspace, grouped = false, showDateDivider = false, canModerateMessages = false, onAvatarClick, onReply, onEdit, onDelete, onReport, onOpenMedia }) {
+function MessageItem({ message, currentUserId, workspace, grouped = false, groupedWithNext = false, showDateDivider = false, showUnreadDivider = false, canModerateMessages = false, onAvatarClick, onReply, onEdit, onDelete, onReport, onOpenMedia, onToggleReaction }) {
   const isOwn = String(message.author?.id) === String(currentUserId);
-  const isDeleted = Boolean(message.deletedAt);
-  const canDelete = (isOwn || canModerateMessages) && !isDeleted;
-  const statusText = workspace === 'dm' && isOwn
-    ? message.readAt
-      ? 'Read'
-      : 'Delivered'
-    : '';
+  const canDelete = isOwn || canModerateMessages;
+  const pointerStartRef = useRef(null);
+  const [swipeOffset, setSwipeOffset] = useState(0);
+  const authorColorClass = `author-color-${getAuthorColorIndex(message.author)}`;
+  const timeLabel = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' }).format(new Date(message.createdAt));
+  const reactions = Object.values((message.reactions || []).reduce((groups, reaction) => {
+    const emoji = String(reaction?.emoji || '');
+    if (!emoji) return groups;
+    groups[emoji] ||= { emoji, userIds: [] };
+    groups[emoji].userIds.push(reaction.userId);
+    return groups;
+  }, {}));
+
+  function handlePointerDown(event) {
+    if (event.pointerType !== 'touch' || event.target.closest('button, a, input, video')) return;
+    pointerStartRef.current = { id: event.pointerId, x: event.clientX };
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  }
+
+  function handlePointerMove(event) {
+    const start = pointerStartRef.current;
+    if (!start || start.id !== event.pointerId) return;
+    setSwipeOffset(Math.min(72, Math.max(0, event.clientX - start.x)));
+  }
+
+  function handlePointerEnd(event) {
+    const start = pointerStartRef.current;
+    if (!start || start.id !== event.pointerId) return;
+    pointerStartRef.current = null;
+    if (swipeOffset >= 52) onReply?.(message);
+    setSwipeOffset(0);
+  }
+
+  function handleDoubleClick(event) {
+    if (event.target.closest('button, a, input, video, audio')) return;
+    onToggleReaction?.(message, '❤️');
+  }
 
   return (
     <>
@@ -2164,30 +2242,74 @@ function MessageItem({ message, currentUserId, workspace, grouped = false, showD
           {new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'long' }).format(new Date(message.createdAt))}
         </div>
       ) : null}
-      <div className={`${isOwn ? 'message-card own' : 'message-card incoming'}${grouped ? ' grouped' : ''}`}>
-      <div className="message-meta">
-        <button className="avatar-chip avatar-button" type="button" style={getProfileStyle(message.author)} onClick={() => onAvatarClick?.(message.author)}>
-          {message.author?.avatarUrl ? <img src={getAttachmentUrl(message.author.avatarUrl)} alt={getDisplayName(message.author)} /> : getDisplayName(message.author).slice(0, 1).toUpperCase()}
-        </button>
-        <strong>{getDisplayName(message.author)}</strong>
-        <span>{new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' }).format(new Date(message.createdAt))}{message.editedAt ? ' · edited' : ''}</span>
-        {statusText ? <span className={`message-delivery-status ${message.readAt ? 'is-read' : 'is-delivered'}`}>{statusText}</span> : null}
-        <div className="message-actions">
-          {!isDeleted ? <button type="button" onClick={() => onReply?.(message)}>Reply</button> : null}
-          {!isOwn && !isDeleted ? <button type="button" onClick={() => onReport?.(message)}>Report</button> : null}
-          {isOwn && !isDeleted && message.content ? <button type="button" onClick={() => onEdit?.(message)}>Edit</button> : null}
-          {canDelete ? <button className="danger-text" type="button" onClick={() => onDelete?.(message)}>Delete</button> : null}
+      {showUnreadDivider ? <div className="message-unread-divider"><span>Unread messages</span></div> : null}
+      <article
+        className={`${isOwn ? 'message-card own' : 'message-card incoming'} ${authorColorClass}${grouped ? ' grouped' : ''}${groupedWithNext ? ' grouped-next' : ''}`}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerEnd}
+        onPointerCancel={handlePointerEnd}
+        onDoubleClick={handleDoubleClick}
+      >
+        <span className="message-swipe-reply" aria-hidden="true" style={{ opacity: swipeOffset / 52 }}>
+          <AppIcon name="arrowLeft" size={18} />
+        </span>
+        {!isOwn && !groupedWithNext ? (
+          <button className="avatar-chip avatar-button message-avatar" type="button" style={getProfileStyle(message.author)} onClick={() => onAvatarClick?.(message.author)}>
+            {message.author?.avatarUrl ? <img src={getAttachmentUrl(message.author.avatarUrl)} alt={getDisplayName(message.author)} /> : getDisplayName(message.author).slice(0, 1).toUpperCase()}
+          </button>
+        ) : !isOwn ? <span className="message-avatar-spacer" aria-hidden="true" /> : null}
+        <div className="message-bubble" style={{ transform: swipeOffset ? `translateX(${swipeOffset}px)` : undefined }}>
+          {!isOwn && !grouped ? (
+            <button className="message-author" type="button" onClick={() => onAvatarClick?.(message.author)}>
+              {getDisplayName(message.author)}
+            </button>
+          ) : null}
+          {message.replyTo && !message.replyTo.deletedAt ? (
+            <button className="reply-snippet" type="button" onClick={() => onReply?.(message.replyTo)}>
+              <strong>{getDisplayName(message.replyTo.author) || 'Reply'}</strong>
+              <span>{message.replyTo.content || message.replyTo.attachmentName || 'Attachment'}</span>
+            </button>
+          ) : null}
+          {message.content ? <p>{message.content}</p> : null}
+          <MessageAttachment message={message} onOpenMedia={onOpenMedia} />
+          {reactions.length > 0 ? (
+            <div className="message-reactions" aria-label="Message reactions">
+              {reactions.map((reaction) => {
+                const reacted = reaction.userIds.some((id) => String(id) === String(currentUserId));
+                return (
+                  <button
+                    className={reacted ? 'message-reaction reacted' : 'message-reaction'}
+                    type="button"
+                    key={reaction.emoji}
+                    aria-label={`${reaction.emoji} reaction, ${reaction.userIds.length}`}
+                    onClick={() => onToggleReaction?.(message, reaction.emoji)}
+                  >
+                    <span>{reaction.emoji}</span>
+                    <strong>{reaction.userIds.length}</strong>
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
+          <div className="message-footer">
+            {message.editedAt ? <span>edited</span> : null}
+            <time dateTime={message.createdAt}>{timeLabel}</time>
+            {workspace === 'dm' && isOwn ? (
+              <span className={`message-delivery-check ${message.readAt ? 'is-read' : 'is-delivered'}`} aria-label={message.readAt ? 'Read' : 'Delivered'}>
+                {message.readAt ? '✓✓' : '✓'}
+              </span>
+            ) : null}
+          </div>
+          <div className="message-actions">
+            <button type="button" aria-label="React with heart" title="React with heart" onClick={() => onToggleReaction?.(message, '❤️')}>❤️</button>
+            <button type="button" onClick={() => onReply?.(message)}>Reply</button>
+            {!isOwn ? <button type="button" onClick={() => onReport?.(message)}>Report</button> : null}
+            {isOwn && message.content ? <button type="button" onClick={() => onEdit?.(message)}>Edit</button> : null}
+            {canDelete ? <button className="danger-text" type="button" onClick={() => onDelete?.(message)}>Delete</button> : null}
+          </div>
         </div>
-      </div>
-      {message.replyTo ? (
-        <button className="reply-snippet" type="button" onClick={() => onReply?.(message.replyTo)}>
-          <strong>{getDisplayName(message.replyTo.author) || 'Reply'}</strong>
-          <span>{message.replyTo.deletedAt ? 'Deleted message' : message.replyTo.content || message.replyTo.attachmentName || 'Attachment'}</span>
-        </button>
-      ) : null}
-      {isDeleted ? <p className="muted deleted-message">Message deleted</p> : message.content ? <p>{message.content}</p> : null}
-      {!isDeleted ? <MessageAttachment message={message} onOpenMedia={onOpenMedia} /> : null}
-      </div>
+      </article>
     </>
   );
 }
@@ -3201,6 +3323,7 @@ export default function App() {
   });
   const [voiceRecording, setVoiceRecording] = useState(false);
   const [circleRecording, setCircleRecording] = useState(false);
+  const [recordingPhase, setRecordingPhase] = useState('idle');
   const [recordingElapsed, setRecordingElapsed] = useState(0);
   const [recordingPreviewStream, setRecordingPreviewStream] = useState(null);
   const [recordingPaused, setRecordingPaused] = useState(false);
@@ -3223,6 +3346,8 @@ export default function App() {
   const [clientSettings, setClientSettings] = useState(() => readClientSettings());
   const [toasts, setToasts] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [unreadAnchorId, setUnreadAnchorId] = useState(null);
+  const [showScrollToLatest, setShowScrollToLatest] = useState(false);
   const [participantVolumes, setParticipantVolumes] = useState({});
   const [voiceParticipants, setVoiceParticipants] = useState({});
   const [remoteStreams, setRemoteStreams] = useState({});
@@ -3277,6 +3402,9 @@ export default function App() {
   const messageRecordingKindRef = useRef('');
   const messageRecordingCancelledRef = useRef(false);
   const messageRecordingTimerRef = useRef(null);
+  const messageRecordingStopWatchdogRef = useRef(null);
+  const messageRecordingFinalizedRef = useRef(false);
+  const messageRecordingRequestIdRef = useRef(0);
   const remoteAudioRef = useRef({});
   const remoteStreamsRef = useRef({});
   const cameraPreviewStreamRef = useRef(null);
@@ -3536,11 +3664,17 @@ export default function App() {
         ? { type: 'channel', id: String(channelId || '') }
         : { type: 'none', id: '' };
   }, [workspace, channelId, dmConversationId]);
-  useEffect(() => { shouldStickToBottomRef.current = true; }, [workspace, channelId, dmConversationId]);
+  useEffect(() => {
+    shouldStickToBottomRef.current = true;
+    setUnreadAnchorId(null);
+    setShowScrollToLatest(false);
+  }, [workspace, channelId, dmConversationId]);
   useEffect(() => {
     if (!shouldStickToBottomRef.current) return;
     window.requestAnimationFrame(() => {
       endRef.current?.scrollIntoView({ block: 'end', behavior: 'smooth' });
+      setShowScrollToLatest(false);
+      setUnreadAnchorId(null);
     });
   }, [messages.length, workspace, channelId, dmConversationId]);
   useEffect(() => {
@@ -3655,7 +3789,7 @@ export default function App() {
     const scopeKey = workspace === 'dm' ? getScopeKey('dm', dmConversationId) : getScopeKey('channel', channelId);
     const cachedMessages = readMessageCache()[scopeKey];
     if (Array.isArray(cachedMessages) && cachedMessages.length > 0) {
-      setMessages(cachedMessages);
+      setMessages(sortMessages(cachedMessages));
     }
     refreshCurrentMessages().catch((err) => setError(err.message));
   }, [isAuthed, isAdminRoute, workspace, channelId, dmConversationId, token]);
@@ -3715,6 +3849,10 @@ export default function App() {
     socket.on('new-message', (message) => {
       const scope = scopeRef.current;
       if (scope.type === 'channel' && String(message.channelId) === scope.id) {
+        if (!shouldStickToBottomRef.current && String(message.author?.id) !== String(user?.id)) {
+          setUnreadAnchorId((current) => current || message.id);
+          setShowScrollToLatest(true);
+        }
         setMessages((prev) => mergeMessage(prev, message));
         if (String(message.author?.id) !== String(user?.id)) {
           showClientNotification(getDisplayName(message.author), message.content || message.attachmentName || 'New message');
@@ -3724,12 +3862,30 @@ export default function App() {
     socket.on('message:updated', (message) => {
       const scope = scopeRef.current;
       if (scope.type === 'channel' && String(message.channelId) === scope.id) {
+        if (message.deletedAt) {
+          setReplyTarget((current) => String(current?.id) === String(message.id) ? null : current);
+          setEditingMessage((current) => String(current?.id) === String(message.id) ? null : current);
+        }
         setMessages((prev) => replaceMessage(prev, message));
+      }
+    });
+    socket.on('message:reaction', (payload) => {
+      const scope = scopeRef.current;
+      if (scope.type === 'channel' && String(payload?.channelId) === scope.id) {
+        setMessages((prev) => prev.map((message) => (
+          String(message.id) === String(payload.messageId)
+            ? { ...message, reactions: payload.reactions || [] }
+            : message
+        )));
       }
     });
     socket.on('direct-message:new', (message) => {
       const scope = scopeRef.current;
       if (scope.type === 'dm' && String(message.conversationId) === scope.id) {
+        if (!shouldStickToBottomRef.current && String(message.author?.id) !== String(user?.id)) {
+          setUnreadAnchorId((current) => current || message.id);
+          setShowScrollToLatest(true);
+        }
         setMessages((prev) => mergeMessage(prev, message));
         if (String(message.author?.id) !== String(user?.id)) {
           if (document.hidden || workspaceRef.current !== 'dm') setUnreadCount((count) => count + 1);
@@ -3740,7 +3896,21 @@ export default function App() {
     socket.on('direct-message:updated', (message) => {
       const scope = scopeRef.current;
       if (scope.type === 'dm' && String(message.conversationId) === scope.id) {
+        if (message.deletedAt) {
+          setReplyTarget((current) => String(current?.id) === String(message.id) ? null : current);
+          setEditingMessage((current) => String(current?.id) === String(message.id) ? null : current);
+        }
         setMessages((prev) => replaceMessage(prev, message));
+      }
+    });
+    socket.on('direct-message:reaction', (payload) => {
+      const scope = scopeRef.current;
+      if (scope.type === 'dm' && String(payload?.conversationId) === scope.id) {
+        setMessages((prev) => prev.map((message) => (
+          String(message.id) === String(payload.messageId)
+            ? { ...message, reactions: payload.reactions || [] }
+            : message
+        )));
       }
     });
     socket.on('channel-created', (channel) => {
@@ -4202,7 +4372,17 @@ export default function App() {
   function handleMessagesScroll() {
     const node = messagesRef.current;
     if (!node) return;
-    shouldStickToBottomRef.current = node.scrollHeight - node.scrollTop - node.clientHeight < 120;
+    const nearBottom = node.scrollHeight - node.scrollTop - node.clientHeight < 120;
+    shouldStickToBottomRef.current = nearBottom;
+    setShowScrollToLatest(!nearBottom);
+    if (nearBottom) setUnreadAnchorId(null);
+  }
+
+  function scrollToLatestMessages() {
+    shouldStickToBottomRef.current = true;
+    setShowScrollToLatest(false);
+    setUnreadAnchorId(null);
+    endRef.current?.scrollIntoView({ block: 'end', behavior: 'smooth' });
   }
 
   async function refreshCurrentMessages({ silent = false } = {}) {
@@ -4719,6 +4899,13 @@ export default function App() {
     }
   }
 
+  function stopMessageRecordingWatchdog() {
+    if (messageRecordingStopWatchdogRef.current) {
+      window.clearTimeout(messageRecordingStopWatchdogRef.current);
+      messageRecordingStopWatchdogRef.current = null;
+    }
+  }
+
   function stopMessageRecordingStream() {
     if (messageRecordingCircleSessionRef.current) {
       messageRecordingCircleSessionRef.current.stop();
@@ -4737,24 +4924,71 @@ export default function App() {
     setCircleCameraSwitching(false);
   }
 
-  function cleanupMessageRecording({ cancel = false } = {}) {
-    messageRecordingCancelledRef.current = cancel;
-    const recorder = messageRecorderRef.current;
-
-    if (recorder && recorder.state !== 'inactive') {
-      recorder.stop();
-      return;
-    }
-
+  function resetMessageRecordingUi(phase = 'idle') {
     stopMessageRecordingTimer();
-    stopMessageRecordingStream();
-    messageRecorderRef.current = null;
-    messageRecordingChunksRef.current = [];
-    messageRecordingKindRef.current = '';
     setVoiceRecording(false);
     setCircleRecording(false);
     setRecordingElapsed(0);
     setRecordingPaused(false);
+    setCircleTorchEnabled(false);
+    setCircleCameraSwitching(false);
+    setRecordingPhase(phase);
+  }
+
+  async function finalizeMessageRecording(recorder) {
+    if (messageRecordingFinalizedRef.current) return;
+    messageRecordingFinalizedRef.current = true;
+    stopMessageRecordingWatchdog();
+
+    const chunks = [...messageRecordingChunksRef.current];
+    const cancelled = messageRecordingCancelledRef.current;
+    const recordedKind = messageRecordingKindRef.current;
+    const type = recorder?.mimeType || (recordedKind === 'circle' ? 'video/webm' : 'audio/webm');
+
+    stopMessageRecordingStream();
+    messageRecorderRef.current = null;
+    messageRecordingChunksRef.current = [];
+    messageRecordingKindRef.current = '';
+    resetMessageRecordingUi('idle');
+
+    if (!cancelled && chunks.length > 0) {
+      await uploadRecordedAttachment(new Blob(chunks, { type }), recordedKind);
+    }
+  }
+
+  function cleanupMessageRecording({ cancel = false } = {}) {
+    messageRecordingRequestIdRef.current += 1;
+    messageRecordingCancelledRef.current = cancel;
+    const recorder = messageRecorderRef.current;
+
+    resetMessageRecordingUi(cancel ? 'idle' : 'finalizing');
+
+    if (!recorder || recorder.state === 'inactive') {
+      stopMessageRecordingStream();
+      stopMessageRecordingWatchdog();
+      messageRecorderRef.current = null;
+      messageRecordingChunksRef.current = [];
+      messageRecordingKindRef.current = '';
+      setRecordingPhase('idle');
+      return;
+    }
+
+    if (cancel) stopMessageRecordingStream();
+
+    try {
+      if (!cancel && recorder.state === 'recording' && typeof recorder.requestData === 'function') {
+        recorder.requestData();
+      }
+      recorder.stop();
+    } catch {
+      finalizeMessageRecording(recorder).catch(() => {});
+      return;
+    }
+
+    stopMessageRecordingWatchdog();
+    messageRecordingStopWatchdogRef.current = window.setTimeout(() => {
+      finalizeMessageRecording(recorder).catch(() => {});
+    }, 2500);
   }
 
   function toggleMessageRecordingPause() {
@@ -4864,8 +5098,17 @@ export default function App() {
       return;
     }
 
+    const requestId = messageRecordingRequestIdRef.current + 1;
+    messageRecordingRequestIdRef.current = requestId;
+    messageRecordingCancelledRef.current = false;
+    messageRecordingFinalizedRef.current = false;
+
     try {
       setError('');
+      if (kind === 'circle') {
+        setCircleRecording(true);
+        setRecordingPhase('requesting');
+      }
       let stream;
       let previewStream = null;
       if (kind === 'circle') {
@@ -4874,11 +5117,19 @@ export default function App() {
           cameraDeviceId: clientSettings.cameraDeviceId,
           facingMode: circleFacingMode
         });
+        if (requestId !== messageRecordingRequestIdRef.current || messageRecordingCancelledRef.current) {
+          circleSession.stop();
+          return;
+        }
         messageRecordingCircleSessionRef.current = circleSession;
         stream = circleSession.recordStream;
         previewStream = circleSession.previewStream;
       } else {
         stream = await requestVoiceAudioStream(clientSettings.micDeviceId);
+        if (requestId !== messageRecordingRequestIdRef.current || messageRecordingCancelledRef.current) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
       }
       const mimeType = kind === 'circle'
         ? getSupportedRecorderMimeType(VIDEO_RECORDER_MIME_TYPES)
@@ -4891,32 +5142,19 @@ export default function App() {
       messageRecorderRef.current = recorder;
       messageRecordingKindRef.current = kind;
       messageRecordingCancelledRef.current = false;
+      messageRecordingFinalizedRef.current = false;
 
       recorder.ondataavailable = (event) => {
         if (event.data?.size) messageRecordingChunksRef.current.push(event.data);
       };
 
-      recorder.onstop = async () => {
-        const chunks = messageRecordingChunksRef.current;
-        const cancelled = messageRecordingCancelledRef.current;
-        const recordedKind = messageRecordingKindRef.current;
-        const type = recorder.mimeType || (recordedKind === 'circle' ? 'video/webm' : 'audio/webm');
-
-        stopMessageRecordingTimer();
-        stopMessageRecordingStream();
-        messageRecorderRef.current = null;
-        messageRecordingChunksRef.current = [];
-        messageRecordingKindRef.current = '';
-        setVoiceRecording(false);
-        setCircleRecording(false);
-        setRecordingPaused(false);
-        setCircleTorchEnabled(false);
-
-        if (!cancelled && chunks.length > 0) {
-          await uploadRecordedAttachment(new Blob(chunks, { type }), recordedKind);
-        }
-
-        setRecordingElapsed(0);
+      recorder.onstop = () => {
+        finalizeMessageRecording(recorder).catch((err) => reportError(err, 'Could not finish media recording'));
+      };
+      recorder.onerror = () => {
+        messageRecordingCancelledRef.current = true;
+        finalizeMessageRecording(recorder).catch(() => {});
+        reportError(new Error('The browser stopped the media recorder'), 'Could not record media');
       };
 
       recorder.start(1000);
@@ -4924,6 +5162,7 @@ export default function App() {
       setRecordingPaused(false);
       setVoiceRecording(kind === 'voice');
       setCircleRecording(kind === 'circle');
+      setRecordingPhase('recording');
       messageRecordingTimerRef.current = window.setInterval(() => {
         setRecordingElapsed((value) => value + 1);
       }, 1000);
@@ -5074,11 +5313,32 @@ export default function App() {
       const path = workspace === 'dm'
         ? `/dms/${dmConversationId}/messages/${message.id}`
         : `/messages/${message.id}`;
-      const updatedMessage = await apiFetch(path, { method: 'DELETE' }, token);
-      setMessages((prev) => replaceMessage(prev, updatedMessage));
-      pushToast('Message deleted');
+      await apiFetch(path, { method: 'DELETE' }, token);
+      setMessages((prev) => prev.filter((entry) => String(entry.id) !== String(message.id)));
+      setReplyTarget((current) => String(current?.id) === String(message.id) ? null : current);
+      setEditingMessage((current) => String(current?.id) === String(message.id) ? null : current);
     } catch (err) {
       reportError(err, 'Failed to delete message');
+    }
+  }
+
+  async function toggleMessageReaction(message, emoji = '❤️') {
+    if (!message?.id || !token) return;
+    try {
+      const path = workspace === 'dm'
+        ? `/dms/${dmConversationId}/messages/${message.id}/reactions`
+        : `/messages/${message.id}/reactions`;
+      const payload = await apiFetch(path, {
+        method: 'PUT',
+        body: JSON.stringify({ emoji })
+      }, token);
+      setMessages((prev) => prev.map((entry) => (
+        String(entry.id) === String(message.id)
+          ? { ...entry, reactions: payload.reactions || [] }
+          : entry
+      )));
+    } catch (err) {
+      reportError(err, 'Failed to update reaction');
     }
   }
 
@@ -6199,15 +6459,28 @@ export default function App() {
               <div className="messages" ref={messagesRef} style={chatWallpaperStyle} onScroll={handleMessagesScroll}>
                 {messages.length === 0 ? <div className="empty-state"><h3>{workspace === 'dm' ? 'No direct messages yet' : 'No messages yet'}</h3><p className="muted">{workspace === 'dm' ? 'This thread is ready.' : 'Start the conversation in this channel.'}</p></div> : messages.map((message, index) => {
                   const previous = index > 0 ? messages[index - 1] : null;
+                  const next = index < messages.length - 1 ? messages[index + 1] : null;
                   const grouped = Boolean(
                     previous &&
                     String(previous.author?.id) === String(message.author?.id) &&
                     Math.abs(new Date(message.createdAt) - new Date(previous.createdAt)) < 5 * 60 * 1000
                   );
-                  return <MessageItem key={message.id} message={message} workspace={workspace} currentUserId={user?.id} grouped={grouped} showDateDivider={index === 0} canModerateMessages={userCanModerateMessages} onAvatarClick={setViewedProfile} onReply={beginReply} onEdit={beginEdit} onDelete={deleteMessage} onReport={openReportForMessage} onOpenMedia={setViewedMedia} />;
+                  const groupedWithNext = Boolean(
+                    next &&
+                    String(next.author?.id) === String(message.author?.id) &&
+                    Math.abs(new Date(next.createdAt) - new Date(message.createdAt)) < 5 * 60 * 1000
+                  );
+                  const showDateDivider = !previous || new Date(previous.createdAt).toDateString() !== new Date(message.createdAt).toDateString();
+                  return <MessageItem key={message.id} message={message} workspace={workspace} currentUserId={user?.id} grouped={grouped} groupedWithNext={groupedWithNext} showDateDivider={showDateDivider} showUnreadDivider={String(unreadAnchorId) === String(message.id)} canModerateMessages={userCanModerateMessages} onAvatarClick={setViewedProfile} onReply={beginReply} onEdit={beginEdit} onDelete={deleteMessage} onReport={openReportForMessage} onOpenMedia={setViewedMedia} onToggleReaction={toggleMessageReaction} />;
                 })}
                 <div ref={endRef} />
               </div>
+              {showScrollToLatest ? (
+                <button className="scroll-to-latest" type="button" aria-label="Scroll to latest messages" title="Scroll to latest messages" onClick={scrollToLatestMessages}>
+                  <AppIcon name="arrowLeft" size={20} />
+                  {unreadAnchorId ? <span>New</span> : null}
+                </button>
+              ) : null}
               <form className={`message-form composer composer-${composerPhase}`} onSubmit={sendMessage}>
                 {replyTarget || editingMessage ? (
                   <div className="composer-context">
@@ -6320,6 +6593,7 @@ export default function App() {
         {circleRecording ? (
           <CircleRecordingOverlay
             stream={recordingPreviewStream}
+            phase={recordingPhase}
             elapsed={recordingElapsed}
             paused={recordingPaused}
             torchEnabled={circleTorchEnabled}

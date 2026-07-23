@@ -2073,13 +2073,19 @@ class MessageList extends StatelessWidget {
         body: 'Start the conversation in this room.',
       );
     }
+    final mobile = MediaQuery.sizeOf(context).width < 640;
     final extraTopItems = state.hasOlderMessages ? 1 : 0;
     return ListView.builder(
       keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
       physics: const BouncingScrollPhysics(
         parent: AlwaysScrollableScrollPhysics(),
       ),
-      padding: EdgeInsets.fromLTRB(18, state.compactMessages ? 10 : 14, 18, 18),
+      padding: EdgeInsets.fromLTRB(
+        18,
+        state.compactMessages ? 10 : 14,
+        18,
+        mobile ? 92 : 24,
+      ),
       itemCount: state.messages.length + extraTopItems,
       itemBuilder: (context, index) {
         if (state.hasOlderMessages && index == 0) {
@@ -2111,17 +2117,30 @@ class MessageList extends StatelessWidget {
         final previous = previousIndex >= 0
             ? state.messages[previousIndex]
             : null;
+        final nextIndex = index - extraTopItems + 1;
+        final next = nextIndex < state.messages.length
+            ? state.messages[nextIndex]
+            : null;
         final groupedWithPrevious =
             previous != null &&
             previous.author.id == message.author.id &&
             message.createdAt.difference(previous.createdAt).inMinutes.abs() <
                 5;
+        final groupedWithNext =
+            next != null &&
+            next.author.id == message.author.id &&
+            next.createdAt.difference(message.createdAt).inMinutes.abs() < 5;
         return MessageTile(
           message: message,
           own: message.author.id == state.user?.id,
           state: state,
           groupedWithPrevious: groupedWithPrevious,
-          showDateDivider: previous == null,
+          groupedWithNext: groupedWithNext,
+          showDateDivider:
+              previous == null ||
+              previous.createdAt.year != message.createdAt.year ||
+              previous.createdAt.month != message.createdAt.month ||
+              previous.createdAt.day != message.createdAt.day,
         );
       },
     );
@@ -2233,6 +2252,7 @@ class MessageTile extends StatefulWidget {
     required this.own,
     required this.state,
     this.groupedWithPrevious = false,
+    this.groupedWithNext = false,
     this.showDateDivider = false,
     super.key,
   });
@@ -2241,6 +2261,7 @@ class MessageTile extends StatefulWidget {
   final bool own;
   final WebCordState state;
   final bool groupedWithPrevious;
+  final bool groupedWithNext;
   final bool showDateDivider;
 
   @override
@@ -2258,14 +2279,24 @@ class _MessageTileState extends State<MessageTile> {
     final compact = state.compactMessages;
     final palette = WebCordPalette.of(context);
     final themeSystem = WebCordThemeSystem.of(context);
+    final authorColor = _authorColor(themeSystem.mode, message.author);
     final screenWidth = MediaQuery.sizeOf(context).width;
     final mobile = screenWidth < 640;
     final bubbleRadius = themeSystem.bubbleRadius;
+    final reactionGroups = <String, List<MessageReaction>>{};
+    for (final reaction in message.reactions) {
+      if (reaction.emoji.isEmpty) continue;
+      reactionGroups.putIfAbsent(reaction.emoji, () => []).add(reaction);
+    }
     final radius = BorderRadius.only(
       topLeft: Radius.circular(bubbleRadius),
       topRight: Radius.circular(bubbleRadius),
-      bottomLeft: Radius.circular(bubbleRadius),
-      bottomRight: Radius.circular(own ? 6 : bubbleRadius),
+      bottomLeft: Radius.circular(
+        !own && !widget.groupedWithNext ? 6 : bubbleRadius,
+      ),
+      bottomRight: Radius.circular(
+        own && !widget.groupedWithNext ? 6 : bubbleRadius,
+      ),
     );
 
     return LayoutBuilder(
@@ -2313,272 +2344,358 @@ class _MessageTileState extends State<MessageTile> {
                       ),
                     ),
                   ),
-                Padding(
-                  padding: EdgeInsets.only(
-                    bottom: widget.groupedWithPrevious
-                        ? 4
-                        : compact
-                        ? 10
-                        : 18,
-                  ),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    mainAxisAlignment: own
-                        ? MainAxisAlignment.end
-                        : MainAxisAlignment.start,
-                    children: [
-                      if (!own)
-                        widget.groupedWithPrevious
-                            ? SizedBox(width: mobile ? 44 : 40)
-                            : UserAvatar(
-                                user: message.author,
-                                size: mobile ? 44 : 40,
+                GestureDetector(
+                  onDoubleTap: () => state.toggleMessageReaction(message),
+                  child: Dismissible(
+                    key: ValueKey('reply-swipe-${message.id}'),
+                    direction: DismissDirection.startToEnd,
+                    confirmDismiss: (_) async {
+                      state.beginReply(message);
+                      return false;
+                    },
+                    background: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Padding(
+                        padding: const EdgeInsets.only(left: 12),
+                        child: Icon(Icons.reply_rounded, color: authorColor),
+                      ),
+                    ),
+                    child: Padding(
+                      padding: EdgeInsets.only(
+                        bottom: widget.groupedWithNext
+                            ? 4
+                            : compact
+                            ? 10
+                            : 18,
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        mainAxisAlignment: own
+                            ? MainAxisAlignment.end
+                            : MainAxisAlignment.start,
+                        children: [
+                          if (!own)
+                            widget.groupedWithNext
+                                ? SizedBox(width: mobile ? 44 : 40)
+                                : UserAvatar(
+                                    user: message.author,
+                                    size: mobile ? 44 : 40,
+                                  ),
+                          if (!own) const SizedBox(width: 12),
+                          Flexible(
+                            child: ConstrainedBox(
+                              constraints: BoxConstraints(
+                                maxWidth: maxBubbleWidth,
                               ),
-                      if (!own) const SizedBox(width: 12),
-                      Flexible(
-                        child: ConstrainedBox(
-                          constraints: BoxConstraints(maxWidth: maxBubbleWidth),
-                          child: Stack(
-                            clipBehavior: Clip.none,
-                            children: [
-                              Column(
-                                crossAxisAlignment: own
-                                    ? CrossAxisAlignment.end
-                                    : CrossAxisAlignment.start,
+                              child: Stack(
+                                clipBehavior: Clip.none,
                                 children: [
-                                  if (!own && !widget.groupedWithPrevious)
-                                    Padding(
-                                      padding: const EdgeInsets.only(
-                                        left: 2,
-                                        bottom: 7,
-                                      ),
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Text(
-                                            message.author.displayLabel,
-                                            style: TextStyle(
-                                              color: palette.accentHot,
-                                              fontSize: 14,
-                                              fontWeight: FontWeight.w900,
-                                            ),
+                                  Column(
+                                    crossAxisAlignment: own
+                                        ? CrossAxisAlignment.end
+                                        : CrossAxisAlignment.start,
+                                    children: [
+                                      if (!own && !widget.groupedWithPrevious)
+                                        Padding(
+                                          padding: const EdgeInsets.only(
+                                            left: 2,
+                                            bottom: 7,
                                           ),
-                                          const SizedBox(width: 9),
-                                          Text(
-                                            _timeLabel(message.createdAt),
-                                            style: TextStyle(
-                                              color: palette.muted,
-                                              fontSize: 11,
-                                              fontWeight: FontWeight.w600,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  DecoratedBox(
-                                    decoration: BoxDecoration(
-                                      color: own ? null : Colors.transparent,
-                                      gradient: own
-                                          ? LinearGradient(
-                                              begin: Alignment.topLeft,
-                                              end: Alignment.bottomRight,
-                                              colors: [
-                                                palette.accent.withAlpha(220),
-                                                palette.accentHot.withAlpha(
-                                                  178,
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Text(
+                                                message.author.displayLabel,
+                                                style: TextStyle(
+                                                  color: authorColor,
+                                                  fontSize: 14,
+                                                  fontWeight: FontWeight.w900,
                                                 ),
-                                              ],
-                                            )
-                                          : null,
-                                      borderRadius: radius,
-                                      border: own
-                                          ? Border.all(
-                                              color: Colors.white.withAlpha(24),
-                                            )
-                                          : null,
-                                      boxShadow: const [],
-                                    ),
-                                    child: Padding(
-                                      padding: own
-                                          ? const EdgeInsets.fromLTRB(
-                                              17,
-                                              12,
-                                              14,
-                                              9,
-                                            )
-                                          : EdgeInsets.zero,
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          if (message.replyTo != null)
-                                            Padding(
-                                              padding: const EdgeInsets.only(
-                                                bottom: 8,
                                               ),
-                                              child: DecoratedBox(
-                                                decoration: BoxDecoration(
-                                                  color: Colors.black.withAlpha(
-                                                    35,
-                                                  ),
-                                                  borderRadius:
-                                                      BorderRadius.circular(11),
+                                            ],
+                                          ),
+                                        ),
+                                      DecoratedBox(
+                                        decoration: BoxDecoration(
+                                          color: own
+                                              ? null
+                                              : palette.panelSoft.withAlpha(
+                                                  236,
                                                 ),
-                                                child: Padding(
+                                          gradient: own
+                                              ? LinearGradient(
+                                                  begin: Alignment.topLeft,
+                                                  end: Alignment.bottomRight,
+                                                  colors: [
+                                                    palette.accent.withAlpha(
+                                                      220,
+                                                    ),
+                                                    palette.accentHot.withAlpha(
+                                                      178,
+                                                    ),
+                                                  ],
+                                                )
+                                              : null,
+                                          borderRadius: radius,
+                                          border: Border.all(
+                                            color: own
+                                                ? Colors.white.withAlpha(24)
+                                                : palette.border.withAlpha(110),
+                                          ),
+                                          boxShadow: [
+                                            BoxShadow(
+                                              color: Colors.black.withAlpha(28),
+                                              blurRadius: 16,
+                                              offset: const Offset(0, 7),
+                                            ),
+                                          ],
+                                        ),
+                                        child: Padding(
+                                          padding: const EdgeInsets.fromLTRB(
+                                            13,
+                                            9,
+                                            11,
+                                            6,
+                                          ),
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              if (message.replyTo != null &&
+                                                  !message.replyTo!.isDeleted)
+                                                Padding(
                                                   padding:
-                                                      const EdgeInsets.fromLTRB(
-                                                        10,
-                                                        7,
-                                                        11,
-                                                        7,
+                                                      const EdgeInsets.only(
+                                                        bottom: 8,
                                                       ),
-                                                  child: Text(
-                                                    '${message.replyTo!.author.displayLabel}: ${message.replyTo!.content}',
-                                                    maxLines: 1,
-                                                    overflow:
-                                                        TextOverflow.ellipsis,
-                                                    style: TextStyle(
-                                                      color: own
-                                                          ? Colors.white
-                                                                .withAlpha(220)
-                                                          : palette.muted,
-                                                      fontSize: 12,
+                                                  child: DecoratedBox(
+                                                    decoration: BoxDecoration(
+                                                      color: Colors.black
+                                                          .withAlpha(35),
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                            11,
+                                                          ),
+                                                    ),
+                                                    child: Padding(
+                                                      padding:
+                                                          const EdgeInsets.fromLTRB(
+                                                            10,
+                                                            7,
+                                                            11,
+                                                            7,
+                                                          ),
+                                                      child: Text(
+                                                        '${message.replyTo!.author.displayLabel}: ${message.replyTo!.content}',
+                                                        maxLines: 1,
+                                                        overflow: TextOverflow
+                                                            .ellipsis,
+                                                        style: TextStyle(
+                                                          color: own
+                                                              ? Colors.white
+                                                                    .withAlpha(
+                                                                      220,
+                                                                    )
+                                                              : palette.muted,
+                                                          fontSize: 12,
+                                                        ),
+                                                      ),
                                                     ),
                                                   ),
                                                 ),
-                                              ),
-                                            ),
-                                          if (message.isDeleted)
-                                            Text(
-                                              'Message deleted',
-                                              style: TextStyle(
-                                                color: palette.muted,
-                                                fontStyle: FontStyle.italic,
-                                              ),
-                                            )
-                                          else if (message.content.isNotEmpty)
-                                            Text(
-                                              message.content,
-                                              style: TextStyle(
-                                                color: own
-                                                    ? Colors.white
-                                                    : palette.text,
-                                                fontSize: mobile ? 15 : 15.5,
-                                                height: 1.42,
-                                                fontWeight: FontWeight.w400,
-                                              ),
-                                            ),
-                                          if (!message.isDeleted &&
-                                              message.hasAttachment)
-                                            Padding(
-                                              padding: const EdgeInsets.only(
-                                                top: 10,
-                                              ),
-                                              child: AttachmentChip(
-                                                message: message,
-                                                state: state,
-                                              ),
-                                            ),
-                                          if (own)
-                                            Padding(
-                                              padding: const EdgeInsets.only(
-                                                top: 5,
-                                              ),
-                                              child: Row(
-                                                mainAxisSize: MainAxisSize.min,
-                                                children: [
-                                                  Text(
-                                                    _timeLabel(
-                                                      message.createdAt,
-                                                    ),
-                                                    style: TextStyle(
-                                                      color: Colors.white
-                                                          .withAlpha(185),
-                                                      fontSize: 10.5,
-                                                    ),
+                                              if (message.content.isNotEmpty)
+                                                Text(
+                                                  message.content,
+                                                  style: TextStyle(
+                                                    color: own
+                                                        ? Colors.white
+                                                        : palette.text,
+                                                    fontSize: mobile
+                                                        ? 15
+                                                        : 15.5,
+                                                    height: 1.42,
+                                                    fontWeight: FontWeight.w400,
                                                   ),
-                                                  if (message.editedAt != null)
+                                                ),
+                                              if (message.hasAttachment)
+                                                Padding(
+                                                  padding:
+                                                      const EdgeInsets.only(
+                                                        top: 10,
+                                                      ),
+                                                  child: AttachmentChip(
+                                                    message: message,
+                                                    state: state,
+                                                  ),
+                                                ),
+                                              if (reactionGroups.isNotEmpty)
+                                                Padding(
+                                                  padding:
+                                                      const EdgeInsets.only(
+                                                        top: 7,
+                                                      ),
+                                                  child: Wrap(
+                                                    spacing: 5,
+                                                    runSpacing: 5,
+                                                    children: [
+                                                      for (final entry
+                                                          in reactionGroups
+                                                              .entries)
+                                                        _MessageReactionChip(
+                                                          emoji: entry.key,
+                                                          count: entry
+                                                              .value
+                                                              .length,
+                                                          reacted: entry.value
+                                                              .any(
+                                                                (reaction) =>
+                                                                    reaction
+                                                                        .userId ==
+                                                                    state
+                                                                        .user
+                                                                        ?.id,
+                                                              ),
+                                                          own: own,
+                                                          onPressed: () => state
+                                                              .toggleMessageReaction(
+                                                                message,
+                                                                emoji:
+                                                                    entry.key,
+                                                              ),
+                                                        ),
+                                                    ],
+                                                  ),
+                                                ),
+                                              Padding(
+                                                padding: const EdgeInsets.only(
+                                                  top: 5,
+                                                ),
+                                                child: Row(
+                                                  mainAxisSize:
+                                                      MainAxisSize.min,
+                                                  children: [
                                                     Text(
-                                                      ' · edited',
+                                                      _timeLabel(
+                                                        message.createdAt,
+                                                      ),
                                                       style: TextStyle(
-                                                        color: Colors.white
-                                                            .withAlpha(165),
+                                                        color: own
+                                                            ? Colors.white
+                                                                  .withAlpha(
+                                                                    185,
+                                                                  )
+                                                            : palette.muted,
                                                         fontSize: 10.5,
                                                       ),
                                                     ),
-                                                  const SizedBox(width: 5),
-                                                  Icon(
-                                                    Icons.done_all_rounded,
-                                                    size: 14,
-                                                    color: palette.cyan,
-                                                  ),
-                                                ],
+                                                    if (message.editedAt !=
+                                                        null)
+                                                      Text(
+                                                        ' · edited',
+                                                        style: TextStyle(
+                                                          color: own
+                                                              ? Colors.white
+                                                                    .withAlpha(
+                                                                      165,
+                                                                    )
+                                                              : palette.muted,
+                                                          fontSize: 10.5,
+                                                        ),
+                                                      ),
+                                                    if (own) ...[
+                                                      const SizedBox(width: 5),
+                                                      Icon(
+                                                        message.readAt != null
+                                                            ? Icons
+                                                                  .done_all_rounded
+                                                            : Icons
+                                                                  .done_rounded,
+                                                        size: 14,
+                                                        color:
+                                                            message.readAt !=
+                                                                null
+                                                            ? palette.cyan
+                                                            : Colors.white
+                                                                  .withAlpha(
+                                                                    185,
+                                                                  ),
+                                                      ),
+                                                    ],
+                                                  ],
+                                                ),
                                               ),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  if (!message.isDeleted)
+                                    Positioned(
+                                      top: -10,
+                                      right: own ? null : -34,
+                                      left: own ? -34 : null,
+                                      child: IgnorePointer(
+                                        ignoring: !_hovered,
+                                        child: AnimatedOpacity(
+                                          opacity: _hovered ? 1 : 0,
+                                          duration: themeSystem.fastMotion,
+                                          child: PopupMenuButton<String>(
+                                            tooltip: 'Message actions',
+                                            padding: EdgeInsets.zero,
+                                            icon: Icon(
+                                              Icons.more_horiz_rounded,
+                                              size: 19,
+                                              color: palette.muted,
                                             ),
-                                        ],
+                                            color: palette.panelStrong,
+                                            onSelected: (value) {
+                                              if (value == 'reply') {
+                                                state.beginReply(message);
+                                              } else if (value == 'edit') {
+                                                showEditMessageDialog(
+                                                  context,
+                                                  state,
+                                                  message,
+                                                );
+                                              } else if (value == 'delete') {
+                                                state.deleteMessage(message);
+                                              } else if (value == 'report') {
+                                                state.reportMessage(message);
+                                              }
+                                            },
+                                            itemBuilder: (context) => [
+                                              const PopupMenuItem(
+                                                value: 'reply',
+                                                child: Text('Reply'),
+                                              ),
+                                              if (own)
+                                                const PopupMenuItem(
+                                                  value: 'edit',
+                                                  child: Text('Edit'),
+                                                ),
+                                              if (own)
+                                                const PopupMenuItem(
+                                                  value: 'delete',
+                                                  child: Text('Delete'),
+                                                ),
+                                              if (!own)
+                                                const PopupMenuItem(
+                                                  value: 'report',
+                                                  child: Text('Report'),
+                                                ),
+                                            ],
+                                          ),
+                                        ),
                                       ),
                                     ),
-                                  ),
                                 ],
                               ),
-                              if (!message.isDeleted)
-                                Positioned(
-                                  top: -10,
-                                  right: own ? null : -34,
-                                  left: own ? -34 : null,
-                                  child: IgnorePointer(
-                                    ignoring: !_hovered,
-                                    child: AnimatedOpacity(
-                                      opacity: _hovered ? 1 : 0,
-                                      duration: themeSystem.fastMotion,
-                                      child: PopupMenuButton<String>(
-                                        tooltip: 'Message actions',
-                                        padding: EdgeInsets.zero,
-                                        icon: Icon(
-                                          Icons.more_horiz_rounded,
-                                          size: 19,
-                                          color: palette.muted,
-                                        ),
-                                        color: palette.panelStrong,
-                                        onSelected: (value) {
-                                          if (value == 'edit') {
-                                            showEditMessageDialog(
-                                              context,
-                                              state,
-                                              message,
-                                            );
-                                          } else if (value == 'delete') {
-                                            state.deleteMessage(message);
-                                          } else if (value == 'report') {
-                                            state.reportMessage(message);
-                                          }
-                                        },
-                                        itemBuilder: (context) => [
-                                          if (own)
-                                            const PopupMenuItem(
-                                              value: 'edit',
-                                              child: Text('Edit'),
-                                            ),
-                                          if (own)
-                                            const PopupMenuItem(
-                                              value: 'delete',
-                                              child: Text('Delete'),
-                                            ),
-                                          if (!own)
-                                            const PopupMenuItem(
-                                              value: 'report',
-                                              child: Text('Report'),
-                                            ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                            ],
+                            ),
                           ),
-                        ),
+                        ],
                       ),
-                    ],
+                    ),
                   ),
                 ),
               ],
@@ -2586,6 +2703,65 @@ class _MessageTileState extends State<MessageTile> {
           ),
         );
       },
+    );
+  }
+}
+
+class _MessageReactionChip extends StatelessWidget {
+  const _MessageReactionChip({
+    required this.emoji,
+    required this.count,
+    required this.reacted,
+    required this.own,
+    required this.onPressed,
+  });
+
+  final String emoji;
+  final int count;
+  final bool reacted;
+  final bool own;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = WebCordPalette.of(context);
+    return Material(
+      color: reacted
+          ? palette.cyan.withAlpha(52)
+          : own
+          ? Colors.black.withAlpha(34)
+          : palette.panel.withAlpha(152),
+      shape: StadiumBorder(
+        side: BorderSide(
+          color: reacted
+              ? palette.cyan.withAlpha(178)
+              : own
+              ? Colors.white.withAlpha(48)
+              : palette.border,
+        ),
+      ),
+      child: InkWell(
+        customBorder: const StadiumBorder(),
+        onTap: onPressed,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(emoji, style: const TextStyle(fontSize: 14)),
+              const SizedBox(width: 5),
+              Text(
+                '$count',
+                style: TextStyle(
+                  color: own ? Colors.white.withAlpha(220) : palette.text,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
@@ -2636,6 +2812,58 @@ class _ComposerState extends State<Composer> {
           constraints: BoxConstraints(maxWidth: mobile ? double.infinity : 720),
           child: Column(
             children: [
+              if (state.replyingTo != null)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: palette.panelStrong.withAlpha(220),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border(
+                        left: BorderSide(color: palette.accent, width: 3),
+                      ),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(11, 7, 4, 7),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Replying to ${state.replyingTo!.author.displayLabel}',
+                                  style: TextStyle(
+                                    color: palette.accent,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                                Text(
+                                  state.replyingTo!.content.isNotEmpty
+                                      ? state.replyingTo!.content
+                                      : state.replyingTo!.attachmentName ??
+                                            'Attachment',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: palette.muted,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          IconButton(
+                            tooltip: 'Cancel reply',
+                            onPressed: state.cancelReply,
+                            icon: const Icon(Icons.close_rounded),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
               AnimatedSwitcher(
                 duration: themeSystem.baseMotion,
                 switchInCurve: themeSystem.curve,
@@ -2795,15 +3023,13 @@ class _ComposerState extends State<Composer> {
                                       ),
                               ),
                       ),
-                      if (!mobile)
-                        IconButton(
-                          tooltip: 'Record video circle',
-                          onPressed:
-                              state.canRecordMedia && !state.recordingVoice
-                              ? () => showCircleRecorder(context, state)
-                              : null,
-                          icon: Icon(themeSystem.icon(WebCordIconRole.video)),
-                        ),
+                      IconButton(
+                        tooltip: 'Record video circle',
+                        onPressed: state.canRecordMedia && !state.recordingVoice
+                            ? () => showCircleRecorder(context, state)
+                            : null,
+                        icon: Icon(themeSystem.icon(WebCordIconRole.video)),
+                      ),
                       Expanded(
                         child: TextField(
                           controller: _controller,
@@ -8706,6 +8932,39 @@ String _dateLabel(DateTime value) {
     'Dec',
   ];
   return '${value.day} ${months[value.month - 1]}';
+}
+
+Color _authorColor(AppThemeMode mode, PublicUser author) {
+  const telegram = <Color>[
+    Color(0xFF68B7FF),
+    Color(0xFFFF8AB3),
+    Color(0xFF73D6B0),
+    Color(0xFFC39BFF),
+    Color(0xFFF5B66F),
+    Color(0xFF79D4E7),
+    Color(0xFFA8CE6D),
+    Color(0xFFFF9A87),
+    Color(0xFF8FAEFF),
+    Color(0xFFE19EE8),
+    Color(0xFF5FD0C8),
+    Color(0xFFD7BA67),
+  ];
+  const material = <Color>[
+    Color(0xFFA8C7FA),
+    Color(0xFFF4B8C8),
+    Color(0xFF92D5B5),
+    Color(0xFFD2B6FF),
+    Color(0xFFEFBD85),
+    Color(0xFF84D3E4),
+    Color(0xFFBBD58B),
+    Color(0xFFF0A99A),
+    Color(0xFFAEBFFA),
+    Color(0xFFDDB4E4),
+    Color(0xFF83CEC7),
+    Color(0xFFD9C083),
+  ];
+  final colors = mode == AppThemeMode.material ? material : telegram;
+  return colors[author.id.abs() % colors.length];
 }
 
 String _durationLabel(Duration value) {

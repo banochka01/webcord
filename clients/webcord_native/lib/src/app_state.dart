@@ -165,6 +165,7 @@ class WebCordState extends ChangeNotifier {
   List<Channel> channels = [];
   SocialSnapshot social = const SocialSnapshot();
   List<ChatMessage> messages = [];
+  ChatMessage? replyingTo;
   List<VoiceParticipant> voiceParticipants = [];
   List<StoryItem> stories = [];
   List<ClientMediaDevice> mediaDevices = [];
@@ -541,7 +542,7 @@ class WebCordState extends ChangeNotifier {
       channelId,
       limit: _messagePageSize,
     );
-    messages = next;
+    messages = next.where((message) => !message.isDeleted).toList();
     hasOlderMessages = next.length >= _messagePageSize;
     unreadChannelIds.remove(channelId);
     notifyListeners();
@@ -555,7 +556,7 @@ class WebCordState extends ChangeNotifier {
       conversationId,
       limit: _messagePageSize,
     );
-    messages = next;
+    messages = next.where((message) => !message.isDeleted).toList();
     hasOlderMessages = next.length >= _messagePageSize;
     unreadConversationIds.remove(conversationId);
     notifyListeners();
@@ -592,7 +593,9 @@ class WebCordState extends ChangeNotifier {
           : const <ChatMessage>[];
       final existingIds = messages.map((message) => message.id).toSet();
       messages = [
-        ...older.where((message) => !existingIds.contains(message.id)),
+        ...older.where(
+          (message) => !message.isDeleted && !existingIds.contains(message.id),
+        ),
         ...messages,
       ];
       hasOlderMessages = older.length >= _messagePageSize;
@@ -606,6 +609,7 @@ class WebCordState extends ChangeNotifier {
 
   Future<void> selectWorkspace(WorkspaceKind next) async {
     workspace = next;
+    replyingTo = null;
     if (next == WorkspaceKind.server) {
       await _loadCurrentChatWallpaper();
       await loadChannelMessages(selectedTextChannelId);
@@ -634,6 +638,7 @@ class WebCordState extends ChangeNotifier {
 
   Future<void> selectTextChannel(int channelId) async {
     workspace = WorkspaceKind.server;
+    replyingTo = null;
     selectedTextChannelId = channelId;
     await _store?.setInt(_textChannelKey, channelId);
     await _loadCurrentChatWallpaper();
@@ -653,6 +658,7 @@ class WebCordState extends ChangeNotifier {
 
   Future<void> selectConversation(int conversationId) async {
     workspace = WorkspaceKind.direct;
+    replyingTo = null;
     selectedConversationId = conversationId;
     await _store?.setInt(_conversationKey, conversationId);
     await _loadCurrentChatWallpaper();
@@ -676,6 +682,7 @@ class WebCordState extends ChangeNotifier {
           conversationId: selectedConversationId!,
           content: trimmed,
           attachment: attachmentToSend,
+          replyToId: replyingTo?.id,
         );
         _upsertMessage(message);
       } else if (selectedTextChannelId != null) {
@@ -684,11 +691,25 @@ class WebCordState extends ChangeNotifier {
           channelId: selectedTextChannelId!,
           content: trimmed,
           attachment: attachmentToSend,
+          replyToId: replyingTo?.id,
         );
         _upsertMessage(message);
       }
       pendingAttachment = null;
+      replyingTo = null;
     });
+  }
+
+  void beginReply(ChatMessage message) {
+    if (message.isDeleted) return;
+    replyingTo = message;
+    notifyListeners();
+  }
+
+  void cancelReply() {
+    if (replyingTo == null) return;
+    replyingTo = null;
+    notifyListeners();
   }
 
   Future<void> editMessage(ChatMessage message, String content) async {
@@ -716,19 +737,49 @@ class WebCordState extends ChangeNotifier {
     final currentToken = token;
     if (currentToken == null) return;
     await _runBusy(() async {
-      final updated =
+      if (workspace == WorkspaceKind.direct && selectedConversationId != null) {
+        await api.deleteDirectMessage(
+          token: currentToken,
+          conversationId: selectedConversationId!,
+          messageId: message.id,
+        );
+      } else {
+        await api.deleteChannelMessage(
+          token: currentToken,
+          messageId: message.id,
+        );
+      }
+      messages = messages.where((item) => item.id != message.id).toList();
+      if (replyingTo?.id == message.id) replyingTo = null;
+      notifyListeners();
+    });
+  }
+
+  Future<void> toggleMessageReaction(
+    ChatMessage message, {
+    String emoji = '❤️',
+  }) async {
+    final currentToken = token;
+    if (currentToken == null || message.isDeleted) return;
+    try {
+      final reactions =
           workspace == WorkspaceKind.direct && selectedConversationId != null
-          ? await api.deleteDirectMessage(
+          ? await api.toggleDirectMessageReaction(
               token: currentToken,
               conversationId: selectedConversationId!,
               messageId: message.id,
+              emoji: emoji,
             )
-          : await api.deleteChannelMessage(
+          : await api.toggleChannelMessageReaction(
               token: currentToken,
               messageId: message.id,
+              emoji: emoji,
             );
-      _upsertMessage(updated);
-    });
+      _replaceMessageReactions(message.id, reactions);
+    } catch (exception) {
+      error = '$exception';
+      notifyListeners();
+    }
   }
 
   Future<void> pickAttachment() async {
@@ -2598,6 +2649,10 @@ class WebCordState extends ChangeNotifier {
         (payload) => _handleSocketMessage(payload, direct: false),
       )
       ..on(
+        'message:reaction',
+        (payload) => _handleSocketReaction(payload, direct: false),
+      )
+      ..on(
         'direct-message:new',
         (payload) => _handleSocketMessage(payload, direct: true),
       )
@@ -2608,6 +2663,10 @@ class WebCordState extends ChangeNotifier {
       ..on(
         'direct-message:updated',
         (payload) => _handleSocketMessage(payload, direct: true),
+      )
+      ..on(
+        'direct-message:reaction',
+        (payload) => _handleSocketReaction(payload, direct: true),
       )
       ..on('channel-created', (payload) {
         if (payload is Map) {
@@ -2862,6 +2921,13 @@ class WebCordState extends ChangeNotifier {
   void _handleSocketMessage(dynamic payload, {required bool direct}) {
     if (payload is! Map) return;
     final message = ChatMessage.fromJson(Map<String, dynamic>.from(payload));
+    if (message.isDeleted) {
+      messages = messages.where((item) => item.id != message.id).toList();
+      if (replyingTo?.id == message.id) replyingTo = null;
+      notifyListeners();
+      if (direct) unawaited(refreshSocial());
+      return;
+    }
     final belongs = direct
         ? workspace == WorkspaceKind.direct &&
               message.conversationId == selectedConversationId
@@ -2888,6 +2954,12 @@ class WebCordState extends ChangeNotifier {
   }
 
   void _upsertMessage(ChatMessage message) {
+    if (message.isDeleted) {
+      messages = messages.where((item) => item.id != message.id).toList();
+      if (replyingTo?.id == message.id) replyingTo = null;
+      notifyListeners();
+      return;
+    }
     final next = [...messages];
     final index = next.indexWhere((item) => item.id == message.id);
     if (index >= 0) {
@@ -2896,6 +2968,43 @@ class WebCordState extends ChangeNotifier {
       next.add(message);
       next.sort((left, right) => left.id.compareTo(right.id));
     }
+    messages = next;
+    notifyListeners();
+  }
+
+  void _handleSocketReaction(dynamic payload, {required bool direct}) {
+    if (payload is! Map) return;
+    final data = Map<String, dynamic>.from(payload);
+    final messageId = int.tryParse('${data['messageId'] ?? ''}');
+    if (messageId == null) return;
+    final belongs = direct
+        ? workspace == WorkspaceKind.direct &&
+              int.tryParse('${data['conversationId'] ?? ''}') ==
+                  selectedConversationId
+        : workspace == WorkspaceKind.server &&
+              int.tryParse('${data['channelId'] ?? ''}') ==
+                  selectedTextChannelId;
+    if (!belongs) return;
+    final reactions = data['reactions'] is List
+        ? (data['reactions'] as List)
+              .whereType<Map>()
+              .map(
+                (item) =>
+                    MessageReaction.fromJson(Map<String, dynamic>.from(item)),
+              )
+              .toList()
+        : const <MessageReaction>[];
+    _replaceMessageReactions(messageId, reactions);
+  }
+
+  void _replaceMessageReactions(
+    int messageId,
+    List<MessageReaction> reactions,
+  ) {
+    final index = messages.indexWhere((message) => message.id == messageId);
+    if (index < 0) return;
+    final next = [...messages];
+    next[index] = next[index].copyWith(reactions: reactions);
     messages = next;
     notifyListeners();
   }

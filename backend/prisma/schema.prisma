@@ -83,6 +83,8 @@ model User {
   bannedUntil             DateTime?
   messages                Message[]
   directMessages          DirectMessage[]
+  messageReactions        MessageReaction[]
+  directMessageReactions  DirectMessageReaction[]
   sentFriendRequests      FriendRequest[]     @relation("FriendRequestSender")
   receivedFriendRequests  FriendRequest[]     @relation("FriendRequestReceiver")
   friendshipsLeft         Friendship[]        @relation("FriendshipLeftUser")
@@ -142,10 +144,24 @@ model Message {
   author         User            @relation(fields: [authorId], references: [id], onDelete: Cascade)
   replyTo        Message?        @relation("MessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
   replies        Message[]       @relation("MessageReplies")
+  reactions      MessageReaction[]
   reports        ModerationReport[]
 
   @@index([channelId, createdAt])
   @@index([authorId])
+}
+
+model MessageReaction {
+  id        Int      @id @default(autoincrement())
+  emoji     String
+  messageId Int
+  userId    Int
+  createdAt DateTime @default(now())
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId, emoji])
+  @@index([messageId])
 }
 
 model FriendRequest {
@@ -228,11 +244,25 @@ model DirectMessage {
   author         User            @relation(fields: [authorId], references: [id], onDelete: Cascade)
   replyTo        DirectMessage?   @relation("DirectMessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
   replies        DirectMessage[]  @relation("DirectMessageReplies")
+  reactions      DirectMessageReaction[]
   reports        ModerationReport[]
 
   @@index([conversationId, createdAt])
   @@index([authorId])
   @@index([conversationId, readAt])
+}
+
+model DirectMessageReaction {
+  id              Int           @id @default(autoincrement())
+  emoji           String
+  directMessageId Int
+  userId          Int
+  createdAt       DateTime      @default(now())
+  directMessage   DirectMessage @relation(fields: [directMessageId], references: [id], onDelete: Cascade)
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([directMessageId, userId, emoji])
+  @@index([directMessageId])
 }
 
 model UserBlock {

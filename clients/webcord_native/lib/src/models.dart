@@ -162,6 +162,7 @@ class ChatMessage {
     this.editedAt,
     this.deletedAt,
     this.readAt,
+    this.reactions = const [],
   });
 
   final int id;
@@ -177,9 +178,29 @@ class ChatMessage {
   final DateTime? editedAt;
   final DateTime? deletedAt;
   final DateTime? readAt;
+  final List<MessageReaction> reactions;
 
   bool get isDeleted => deletedAt != null;
   bool get hasAttachment => attachmentUrl != null && attachmentUrl!.isNotEmpty;
+
+  ChatMessage copyWith({List<MessageReaction>? reactions}) {
+    return ChatMessage(
+      id: id,
+      content: content,
+      author: author,
+      createdAt: createdAt,
+      channelId: channelId,
+      conversationId: conversationId,
+      attachmentUrl: attachmentUrl,
+      attachmentType: attachmentType,
+      attachmentName: attachmentName,
+      replyTo: replyTo,
+      editedAt: editedAt,
+      deletedAt: deletedAt,
+      readAt: readAt,
+      reactions: reactions ?? this.reactions,
+    );
+  }
 
   factory ChatMessage.fromJson(Map<String, dynamic> json) {
     return ChatMessage(
@@ -198,6 +219,23 @@ class ChatMessage {
       editedAt: _asNullableDate(json['editedAt']),
       deletedAt: _asNullableDate(json['deletedAt']),
       readAt: _asNullableDate(json['readAt']),
+      reactions: _asList(
+        json['reactions'],
+      ).map(MessageReaction.fromJson).toList(),
+    );
+  }
+}
+
+class MessageReaction {
+  const MessageReaction({required this.emoji, required this.userId});
+
+  final String emoji;
+  final int userId;
+
+  factory MessageReaction.fromJson(Map<String, dynamic> json) {
+    return MessageReaction(
+      emoji: '${json['emoji'] ?? ''}',
+      userId: _asInt(json['userId']),
     );
   }
 }
