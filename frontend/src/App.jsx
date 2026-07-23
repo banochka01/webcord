@@ -7,7 +7,7 @@ import {
   TbArrowLeft, TbArrowsMaximize, TbArrowsMinimize, TbBolt, TbBrowser, TbCameraRotate,
   TbCircleCheck, TbCircleDashed, TbDotsVertical, TbHash, TbMenu2, TbMicrophone, TbMicrophoneOff,
   TbMinus, TbMoodSmile, TbMusic, TbPalette, TbPaperclip, TbPhone, TbPhoneOff, TbPlayerPause,
-  TbPlayerPlay, TbPlayerStop, TbPlus, TbScreenShare, TbSearch, TbSend2, TbSettings,
+  TbPlayerPlay, TbPlayerStop, TbPlus, TbPinned, TbScreenShare, TbSearch, TbSend2, TbSettings,
   TbSun, TbMoon, TbVideo, TbVideoOff, TbVolume, TbVolumeOff, TbWaveSine, TbX
 } from 'react-icons/tb';
 import {
@@ -19,14 +19,14 @@ import {
   MdOutlineSearch, MdOutlineSend, MdOutlineSentimentSatisfiedAlt,
   MdOutlineSettings, MdOutlineTag, MdOutlineVideocam, MdOutlineVideocamOff,
   MdOutlineVolumeOff, MdOutlineVolumeUp, MdOutlineWallpaper, MdPause,
-  MdPlayArrow, MdRemove, MdStop
+  MdOutlinePushPin, MdPlayArrow, MdRemove, MdStop
 } from 'react-icons/md';
 import {
   PiArrowLeft, PiBrowser, PiCameraRotate, PiChatCircleDots, PiCheckCircle,
   PiCornersIn, PiCornersOut, PiDotsThreeVertical, PiGear, PiHash, PiImageSquare,
   PiImagesSquare, PiList, PiMagnifyingGlass, PiMicrophone, PiMicrophoneSlash, PiMoon,
   PiMinus, PiMonitorArrowUp, PiMusicNotes, PiPalette, PiPaperPlaneTilt,
-  PiPaperclip, PiPause, PiPhoneCall, PiPhoneSlash, PiPlay, PiPlus, PiSignOut,
+  PiPaperclip, PiPause, PiPhoneCall, PiPhoneSlash, PiPlay, PiPlus, PiPushPin, PiSignOut,
   PiSmiley, PiSpeakerHigh, PiSpeakerSlash, PiStop, PiSun, PiUserCircle, PiUsersThree,
   PiVideoCamera, PiVideoCameraSlash, PiWaveform, PiX
 } from 'react-icons/pi';
@@ -561,6 +561,59 @@ function writeMessageCache(scopeKey, nextMessages) {
   localStorage.setItem(KEYS.messages, JSON.stringify(cache));
 }
 
+function openRecordingDraftStore() {
+  return new Promise((resolve, reject) => {
+    if (!window.indexedDB) {
+      resolve(null);
+      return;
+    }
+    const request = window.indexedDB.open('webcord-recording-drafts', 1);
+    request.onupgradeneeded = () => {
+      if (!request.result.objectStoreNames.contains('drafts')) {
+        request.result.createObjectStore('drafts', { keyPath: 'id' });
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function writeRecordingDraft(draft) {
+  const db = await openRecordingDraftStore();
+  if (!db) return;
+  await new Promise((resolve, reject) => {
+    const transaction = db.transaction('drafts', 'readwrite');
+    transaction.objectStore('drafts').put({ id: 'latest', ...draft });
+    transaction.oncomplete = resolve;
+    transaction.onerror = () => reject(transaction.error);
+  });
+  db.close();
+}
+
+async function readRecordingDraft() {
+  const db = await openRecordingDraftStore();
+  if (!db) return null;
+  const draft = await new Promise((resolve, reject) => {
+    const request = db.transaction('drafts', 'readonly').objectStore('drafts').get('latest');
+    request.onsuccess = () => resolve(request.result || null);
+    request.onerror = () => reject(request.error);
+  });
+  db.close();
+  return draft;
+}
+
+async function clearRecordingDraft() {
+  const db = await openRecordingDraftStore();
+  if (!db) return;
+  await new Promise((resolve, reject) => {
+    const transaction = db.transaction('drafts', 'readwrite');
+    transaction.objectStore('drafts').delete('latest');
+    transaction.oncomplete = resolve;
+    transaction.onerror = () => reject(transaction.error);
+  });
+  db.close();
+}
+
 async function apiFetch(path, options = {}, token) {
   const isFormData = options.body instanceof FormData;
   const res = await fetch(`${API_URL}${path}`, {
@@ -580,6 +633,37 @@ async function apiFetch(path, options = {}, token) {
     throw error;
   }
   return payload;
+}
+
+function uploadFormDataWithProgress(path, formData, token, onProgress) {
+  return new Promise((resolve, reject) => {
+    const request = new XMLHttpRequest();
+    request.open('POST', `${API_URL}${path}`);
+    if (token) request.setRequestHeader('Authorization', `Bearer ${token}`);
+    request.upload.addEventListener('progress', (event) => {
+      if (event.lengthComputable) onProgress?.(Math.round((event.loaded / event.total) * 100));
+    });
+    request.addEventListener('load', () => {
+      let payload = null;
+      try {
+        payload = JSON.parse(request.responseText || 'null');
+      } catch {
+        // A non-JSON response is handled as a regular upload failure below.
+      }
+      if (request.status >= 200 && request.status < 300) {
+        onProgress?.(100);
+        resolve(payload);
+        return;
+      }
+      const error = new Error(payload?.error || 'Upload failed');
+      error.status = request.status;
+      error.code = payload?.code || '';
+      reject(error);
+    });
+    request.addEventListener('error', () => reject(new Error('Upload failed because the network connection was interrupted')));
+    request.addEventListener('abort', () => reject(new Error('Upload was cancelled')));
+    request.send(formData);
+  });
 }
 
 function normalizeAppPath(pathname = window.location.pathname) {
@@ -654,6 +738,30 @@ function getAuthorColorIndex(author) {
     hash = ((hash << 5) - hash + source.charCodeAt(index)) | 0;
   }
   return Math.abs(hash) % 12;
+}
+
+const QUICK_REACTIONS = ['❤️', '👍', '😂', '🔥', '👏', '😮'];
+
+function isEmojiOnlyMessage(content = '') {
+  const value = String(content).trim();
+  if (!value || value.length > 24 || /\s/.test(value)) return false;
+  return /^(?:\p{Extended_Pictographic}|\p{Emoji_Presentation}|\uFE0F|\u200D)+$/u.test(value);
+}
+
+function getFirstMessageUrl(content = '') {
+  const match = String(content).match(/https?:\/\/[^\s<>"']+/i);
+  if (!match) return null;
+  try {
+    return new URL(match[0]);
+  } catch {
+    return null;
+  }
+}
+
+function getMessageCopyText(message) {
+  return [message?.content, message?.transcript, message?.attachmentUrl]
+    .filter(Boolean)
+    .join('\n');
 }
 
 function areMessageListsEqual(left = [], right = []) {
@@ -1038,7 +1146,7 @@ const ICON_FAMILIES = {
     close: TbX, expand: TbArrowsMaximize, hash: TbHash, menu: TbMenu2, more: TbDotsVertical,
     mic: TbMicrophone, micOff: TbMicrophoneOff, minus: TbMinus, music: TbMusic,
     paperclip: TbPaperclip, pause: TbPlayerPause, phone: TbPhone, phoneOff: TbPhoneOff,
-    play: TbPlayerPlay, plus: TbPlus, screen: TbScreenShare, send: TbSend2,
+    pin: TbPinned, play: TbPlayerPlay, plus: TbPlus, screen: TbScreenShare, send: TbSend2,
     settings: TbSettings, search: TbSearch, shrink: TbArrowsMinimize, smile: TbMoodSmile,
     stop: TbPlayerStop, story: TbCircleDashed, switchCamera: TbCameraRotate,
     volume: TbVolume, volumeOff: TbVolumeOff, wave: TbWaveSine, zap: TbBolt,
@@ -1050,7 +1158,7 @@ const ICON_FAMILIES = {
     expand: MdFullscreen, hash: MdOutlineTag, menu: MdMenu, more: MdMoreVert,
     mic: MdOutlineMic, micOff: MdOutlineMicOff, minus: MdRemove,
     music: MdOutlineMusicNote, paperclip: MdOutlineAttachFile, pause: MdPause,
-    phone: MdOutlineCall, phoneOff: MdOutlineCallEnd, play: MdPlayArrow,
+    phone: MdOutlineCall, phoneOff: MdOutlineCallEnd, pin: MdOutlinePushPin, play: MdPlayArrow,
     plus: MdAdd, screen: MdOutlineScreenShare, send: MdOutlineSend,
     settings: MdOutlineSettings, search: MdOutlineSearch, shrink: MdFullscreenExit,
     smile: MdOutlineSentimentSatisfiedAlt, stop: MdStop, story: MdOutlineAutoStories,
@@ -1064,7 +1172,7 @@ const ICON_FAMILIES = {
     check: PiCheckCircle, cameraOff: PiVideoCameraSlash, close: PiX,
     expand: PiCornersOut, hash: PiHash, menu: PiList, more: PiDotsThreeVertical,
     mic: PiMicrophone, micOff: PiMicrophoneSlash, minus: PiMinus,
-    music: PiMusicNotes, paperclip: PiPaperclip, pause: PiPause,
+    music: PiMusicNotes, paperclip: PiPaperclip, pause: PiPause, pin: PiPushPin,
     phone: PiPhoneCall, phoneOff: PiPhoneSlash, play: PiPlay, plus: PiPlus,
     screen: PiMonitorArrowUp, send: PiPaperPlaneTilt, settings: PiGear,
     search: PiMagnifyingGlass, shrink: PiCornersIn, smile: PiSmiley, stop: PiStop,
@@ -1454,11 +1562,13 @@ function CustomAudioPlayer({ src, title = 'Audio', variant = 'voice' }) {
   const [muted, setMuted] = useState(false);
   const [duration, setDuration] = useState(0);
   const [current, setCurrent] = useState(0);
+  const [playbackRate, setPlaybackRate] = useState(1);
 
   useEffect(() => {
     setPlaying(false);
     setCurrent(0);
     setDuration(0);
+    setPlaybackRate(1);
   }, [src]);
 
   useEffect(() => {
@@ -1489,6 +1599,12 @@ function CustomAudioPlayer({ src, title = 'Audio', variant = 'voice' }) {
     const nextTime = Number(event.target.value) || 0;
     node.currentTime = nextTime;
     setCurrent(nextTime);
+  }
+
+  function cyclePlaybackRate() {
+    const next = playbackRate === 1 ? 1.5 : playbackRate === 1.5 ? 2 : 1;
+    setPlaybackRate(next);
+    if (audioRef.current) audioRef.current.playbackRate = next;
   }
 
   const safeDuration = Number.isFinite(duration) && duration > 0 ? duration : 0;
@@ -1522,6 +1638,9 @@ function CustomAudioPlayer({ src, title = 'Audio', variant = 'voice' }) {
         <input className="media-range" type="range" min="0" max={safeDuration || 0} step="0.01" value={Math.min(current, safeDuration || current)} aria-label={`Seek ${title}`} onChange={seek} />
       </div>
       <span className="media-time">{formatMediaDuration(current)} / {formatMediaDuration(safeDuration)}</span>
+      <button className="media-speed-btn" type="button" aria-label={`Playback speed ${playbackRate}x`} title="Playback speed" onClick={cyclePlaybackRate}>
+        {playbackRate}×
+      </button>
       <button className="media-speaker-btn" type="button" aria-label={muted ? `Unmute ${title}` : `Mute ${title}`} title={muted ? 'Unmute' : 'Mute'} onClick={() => setMuted((value) => !value)}>
         <AppIcon name={muted ? 'volumeOff' : 'volume'} size={17} />
       </button>
@@ -1627,6 +1746,17 @@ function CircleVideoPlayer({ src, title = 'Video circle', onOpen, large = false 
     }
   }
 
+  async function holdToPreview() {
+    const node = videoRef.current;
+    if (!node || !node.paused) return;
+    window.dispatchEvent(new CustomEvent(MEDIA_PLAY_EVENT, { detail: { id: idRef.current } }));
+    await node.play().catch(() => {});
+  }
+
+  function releasePreview() {
+    videoRef.current?.pause();
+  }
+
   const safeDuration = Number.isFinite(duration) && duration > 0 ? duration : 0;
   const progress = safeDuration ? Math.min(100, Math.max(0, (current / safeDuration) * 100)) : 0;
 
@@ -1638,7 +1768,12 @@ function CircleVideoPlayer({ src, title = 'Video circle', onOpen, large = false 
         preload="metadata"
         src={src}
         muted={muted}
-        onClick={togglePlayback}
+        onPointerDown={holdToPreview}
+        onPointerUp={releasePreview}
+        onPointerCancel={releasePreview}
+        onPointerLeave={(event) => {
+          if (event.buttons) releasePreview();
+        }}
         onLoadedMetadata={(event) => setDuration(event.currentTarget.duration || 0)}
         onTimeUpdate={(event) => setCurrent(event.currentTarget.currentTime || 0)}
         onPlay={() => setPlaying(true)}
@@ -1780,6 +1915,8 @@ function CircleRecordingOverlay({
   stream,
   phase,
   elapsed,
+  countdown,
+  uploadProgress,
   paused,
   torchEnabled,
   facingMode,
@@ -1830,6 +1967,14 @@ function CircleRecordingOverlay({
         <span className="circle-recording-grabber" aria-hidden="true" />
         <div className="circle-recording-preview">
           {stream ? <StreamPreviewVideo stream={stream} /> : <span className="circle-recording-empty"><AppIcon name="camera" size={42} /></span>}
+          {countdown > 0 ? <strong className="circle-recording-countdown" aria-live="assertive">{countdown}</strong> : null}
+          {phase === 'uploading' ? (
+            <div className="circle-recording-upload" aria-live="polite">
+              <span>Uploading circle</span>
+              <strong>{uploadProgress}%</strong>
+              <progress max="100" value={uploadProgress} />
+            </div>
+          ) : null}
         </div>
         <div className="circle-recording-side-actions">
           <button type="button" aria-label="Pause recording" title={paused ? 'Resume recording' : 'Pause recording'} onClick={onPauseToggle}>
@@ -1847,10 +1992,10 @@ function CircleRecordingOverlay({
         <div className="circle-recording-bottom">
           <div className="circle-recording-timer">
             <span className="recording-dot" />
-            <strong>{phase === 'requesting' ? 'Preparing camera' : formatShortDuration(elapsed)}</strong>
+            <strong>{phase === 'requesting' ? 'Checking camera' : phase === 'countdown' ? 'Get ready' : phase === 'uploading' ? 'Securing draft' : formatShortDuration(elapsed)}</strong>
           </div>
           <button className="circle-recording-cancel" type="button" onClick={onCancel}>Cancel</button>
-          <button className="circle-recording-send" type="button" aria-label="Attach video circle" title="Attach video circle" onClick={onSend} disabled={phase !== 'recording'}>
+          <button className="circle-recording-send" type="button" aria-label="Attach video circle" title="Attach video circle" onClick={onSend} disabled={phase !== 'recording' && phase !== 'paused'}>
             <AppIcon name="send" size={34} />
           </button>
         </div>
@@ -2195,13 +2340,17 @@ function MediaViewer({ message, onClose }) {
   );
 }
 
-function MessageItem({ message, currentUserId, workspace, grouped = false, groupedWithNext = false, showDateDivider = false, showUnreadDivider = false, canModerateMessages = false, onAvatarClick, onReply, onEdit, onDelete, onReport, onOpenMedia, onToggleReaction }) {
+function MessageItem({ message, currentUserId, workspace, grouped = false, groupedWithNext = false, showDateDivider = false, showUnreadDivider = false, canModerateMessages = false, selected = false, highlighted = false, onAvatarClick, onReply, onNavigateToReply, onEdit, onDelete, onReport, onOpenMedia, onToggleReaction, onCopy, onPin, onForward, onSelect }) {
   const isOwn = String(message.author?.id) === String(currentUserId);
   const canDelete = isOwn || canModerateMessages;
   const pointerStartRef = useRef(null);
+  const longPressTimerRef = useRef(null);
   const [swipeOffset, setSwipeOffset] = useState(0);
+  const [contextOpen, setContextOpen] = useState(false);
   const authorColorClass = `author-color-${getAuthorColorIndex(message.author)}`;
   const timeLabel = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' }).format(new Date(message.createdAt));
+  const emojiOnly = isEmojiOnlyMessage(message.content) && !message.attachmentUrl;
+  const firstUrl = getFirstMessageUrl(message.content);
   const reactions = Object.values((message.reactions || []).reduce((groups, reaction) => {
     const emoji = String(reaction?.emoji || '');
     if (!emoji) return groups;
@@ -2210,21 +2359,47 @@ function MessageItem({ message, currentUserId, workspace, grouped = false, group
     return groups;
   }, {}));
 
+  useEffect(() => {
+    if (!contextOpen) return undefined;
+    const close = (event) => {
+      if (event.type === 'keydown' && event.key !== 'Escape') return;
+      if (event.type === 'pointerdown' && event.target.closest?.('.message-context-menu')) return;
+      setContextOpen(false);
+    };
+    window.addEventListener('pointerdown', close);
+    window.addEventListener('keydown', close);
+    return () => {
+      window.removeEventListener('pointerdown', close);
+      window.removeEventListener('keydown', close);
+    };
+  }, [contextOpen]);
+
+  useEffect(() => () => window.clearTimeout(longPressTimerRef.current), []);
+
   function handlePointerDown(event) {
     if (event.pointerType !== 'touch' || event.target.closest('button, a, input, video')) return;
-    pointerStartRef.current = { id: event.pointerId, x: event.clientX };
+    pointerStartRef.current = { id: event.pointerId, x: event.clientX, y: event.clientY };
+    window.clearTimeout(longPressTimerRef.current);
+    longPressTimerRef.current = window.setTimeout(() => {
+      setContextOpen(true);
+      navigator.vibrate?.(14);
+    }, 440);
     event.currentTarget.setPointerCapture?.(event.pointerId);
   }
 
   function handlePointerMove(event) {
     const start = pointerStartRef.current;
     if (!start || start.id !== event.pointerId) return;
+    if (Math.abs(event.clientX - start.x) > 12 || Math.abs(event.clientY - start.y) > 12) {
+      window.clearTimeout(longPressTimerRef.current);
+    }
     setSwipeOffset(Math.min(72, Math.max(0, event.clientX - start.x)));
   }
 
   function handlePointerEnd(event) {
     const start = pointerStartRef.current;
     if (!start || start.id !== event.pointerId) return;
+    window.clearTimeout(longPressTimerRef.current);
     pointerStartRef.current = null;
     if (swipeOffset >= 52) onReply?.(message);
     setSwipeOffset(0);
@@ -2233,6 +2408,11 @@ function MessageItem({ message, currentUserId, workspace, grouped = false, group
   function handleDoubleClick(event) {
     if (event.target.closest('button, a, input, video, audio')) return;
     onToggleReaction?.(message, '❤️');
+  }
+
+  function runContextAction(action) {
+    setContextOpen(false);
+    action?.();
   }
 
   return (
@@ -2244,12 +2424,17 @@ function MessageItem({ message, currentUserId, workspace, grouped = false, group
       ) : null}
       {showUnreadDivider ? <div className="message-unread-divider"><span>Unread messages</span></div> : null}
       <article
-        className={`${isOwn ? 'message-card own' : 'message-card incoming'} ${authorColorClass}${grouped ? ' grouped' : ''}${groupedWithNext ? ' grouped-next' : ''}`}
+        className={`${isOwn ? 'message-card own' : 'message-card incoming'} ${authorColorClass}${grouped ? ' grouped' : ''}${groupedWithNext ? ' grouped-next' : ''}${selected ? ' selected' : ''}${highlighted ? ' highlighted' : ''}${emojiOnly ? ' emoji-only' : ''}${message.pinnedAt ? ' pinned' : ''}`}
+        data-message-id={message.id}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerEnd}
         onPointerCancel={handlePointerEnd}
         onDoubleClick={handleDoubleClick}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          setContextOpen(true);
+        }}
       >
         <span className="message-swipe-reply" aria-hidden="true" style={{ opacity: swipeOffset / 52 }}>
           <AppIcon name="arrowLeft" size={18} />
@@ -2260,19 +2445,39 @@ function MessageItem({ message, currentUserId, workspace, grouped = false, group
           </button>
         ) : !isOwn ? <span className="message-avatar-spacer" aria-hidden="true" /> : null}
         <div className="message-bubble" style={{ transform: swipeOffset ? `translateX(${swipeOffset}px)` : undefined }}>
+          {selected ? <span className="message-selected-check" aria-label="Selected">✓</span> : null}
           {!isOwn && !grouped ? (
             <button className="message-author" type="button" onClick={() => onAvatarClick?.(message.author)}>
               {getDisplayName(message.author)}
             </button>
           ) : null}
+          {message.forwardedFromName ? (
+            <div className="forwarded-label">
+              <AppIcon name="arrowLeft" size={13} />
+              Forwarded from {message.forwardedFromName}
+            </div>
+          ) : null}
           {message.replyTo && !message.replyTo.deletedAt ? (
-            <button className="reply-snippet" type="button" onClick={() => onReply?.(message.replyTo)}>
+            <button className="reply-snippet" type="button" onClick={() => onNavigateToReply?.(message.replyTo)}>
               <strong>{getDisplayName(message.replyTo.author) || 'Reply'}</strong>
               <span>{message.replyTo.content || message.replyTo.attachmentName || 'Attachment'}</span>
             </button>
           ) : null}
           {message.content ? <p>{message.content}</p> : null}
+          {firstUrl ? (
+            <a className="message-link-preview" href={firstUrl.href} target="_blank" rel="noreferrer">
+              <span>{firstUrl.hostname.replace(/^www\./, '')}</span>
+              <strong>{firstUrl.pathname === '/' ? firstUrl.hostname : decodeURIComponent(firstUrl.pathname).slice(0, 90)}</strong>
+              <small>{firstUrl.href}</small>
+            </a>
+          ) : null}
           <MessageAttachment message={message} onOpenMedia={onOpenMedia} />
+          {message.transcript ? (
+            <details className="message-transcript">
+              <summary>Transcript</summary>
+              <p>{message.transcript}</p>
+            </details>
+          ) : null}
           {reactions.length > 0 ? (
             <div className="message-reactions" aria-label="Message reactions">
               {reactions.map((reaction) => {
@@ -2293,6 +2498,7 @@ function MessageItem({ message, currentUserId, workspace, grouped = false, group
             </div>
           ) : null}
           <div className="message-footer">
+            {message.pinnedAt ? <span className="message-pinned-mark" title="Pinned">◆</span> : null}
             {message.editedAt ? <span>edited</span> : null}
             <time dateTime={message.createdAt}>{timeLabel}</time>
             {workspace === 'dm' && isOwn ? (
@@ -2303,14 +2509,61 @@ function MessageItem({ message, currentUserId, workspace, grouped = false, group
           </div>
           <div className="message-actions">
             <button type="button" aria-label="React with heart" title="React with heart" onClick={() => onToggleReaction?.(message, '❤️')}>❤️</button>
-            <button type="button" onClick={() => onReply?.(message)}>Reply</button>
-            {!isOwn ? <button type="button" onClick={() => onReport?.(message)}>Report</button> : null}
-            {isOwn && message.content ? <button type="button" onClick={() => onEdit?.(message)}>Edit</button> : null}
-            {canDelete ? <button className="danger-text" type="button" onClick={() => onDelete?.(message)}>Delete</button> : null}
+            <button type="button" aria-label="Message menu" title="Message menu" onClick={() => setContextOpen((value) => !value)}><AppIcon name="more" size={16} /></button>
           </div>
+          {contextOpen ? (
+            <div className="message-context-menu" role="menu">
+              <div className="message-context-reactions">
+                {QUICK_REACTIONS.map((emoji) => (
+                  <button type="button" key={emoji} aria-label={`React ${emoji}`} onClick={() => runContextAction(() => onToggleReaction?.(message, emoji))}>{emoji}</button>
+                ))}
+              </div>
+              <button type="button" role="menuitem" onClick={() => runContextAction(() => onReply?.(message))}>Reply</button>
+              <button type="button" role="menuitem" onClick={() => runContextAction(() => onCopy?.(message))}>Copy</button>
+              <button type="button" role="menuitem" onClick={() => runContextAction(() => onForward?.(message))}>Forward</button>
+              <button type="button" role="menuitem" onClick={() => runContextAction(() => onPin?.(message))}>{message.pinnedAt ? 'Unpin' : 'Pin'}</button>
+              <button type="button" role="menuitem" onClick={() => runContextAction(() => onSelect?.(message))}>{selected ? 'Unselect' : 'Select'}</button>
+              {isOwn && message.content ? <button type="button" role="menuitem" onClick={() => runContextAction(() => onEdit?.(message))}>Edit</button> : null}
+              {!isOwn ? <button type="button" role="menuitem" onClick={() => runContextAction(() => onReport?.(message))}>Report</button> : null}
+              {canDelete ? <button className="danger-text" type="button" role="menuitem" onClick={() => runContextAction(() => onDelete?.(message))}>Delete</button> : null}
+            </div>
+          ) : null}
         </div>
       </article>
     </>
+  );
+}
+
+function ForwardMessagesModal({ messages, channels, conversations, onSend, onClose }) {
+  if (!messages?.length) return null;
+  return (
+    <div className="modal-backdrop" role="dialog" aria-modal="true" onClick={onClose}>
+      <div className="modal-card forward-modal" onClick={(event) => event.stopPropagation()}>
+        <div className="modal-header">
+          <div>
+            <h3>Forward {messages.length === 1 ? 'message' : `${messages.length} messages`}</h3>
+            <p className="muted">Choose a destination. Attachments and attribution will be preserved.</p>
+          </div>
+          <button className="icon-btn" type="button" aria-label="Close" onClick={onClose}><AppIcon name="close" /></button>
+        </div>
+        <div className="forward-targets">
+          <p className="section-label">Channels</p>
+          {channels.map((channel) => (
+            <button type="button" key={`channel-${channel.id}`} onClick={() => onSend({ type: 'channel', id: channel.id })}>
+              <AppIcon name="hash" size={17} />
+              <span>{channel.name}</span>
+            </button>
+          ))}
+          <p className="section-label">Direct messages</p>
+          {conversations.map((conversation) => (
+            <button type="button" key={`dm-${conversation.id}`} onClick={() => onSend({ type: 'dm', id: conversation.id })}>
+              <AppIcon name="hash" size={17} />
+              <span>{getConversationTitle(conversation)}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -3348,6 +3601,18 @@ export default function App() {
   const [unreadCount, setUnreadCount] = useState(0);
   const [unreadAnchorId, setUnreadAnchorId] = useState(null);
   const [showScrollToLatest, setShowScrollToLatest] = useState(false);
+  const [messageSearchOpen, setMessageSearchOpen] = useState(false);
+  const [messageSearchQuery, setMessageSearchQuery] = useState('');
+  const [messageSearchResults, setMessageSearchResults] = useState([]);
+  const [messageSearchLoading, setMessageSearchLoading] = useState(false);
+  const [pinnedPanelOpen, setPinnedPanelOpen] = useState(false);
+  const [pinnedMessages, setPinnedMessages] = useState([]);
+  const [selectedMessageIds, setSelectedMessageIds] = useState([]);
+  const [forwardingMessages, setForwardingMessages] = useState([]);
+  const [highlightedMessageId, setHighlightedMessageId] = useState(null);
+  const [recordingCountdown, setRecordingCountdown] = useState(0);
+  const [recordingUploadProgress, setRecordingUploadProgress] = useState(0);
+  const [recordingTranscript, setRecordingTranscript] = useState('');
   const [participantVolumes, setParticipantVolumes] = useState({});
   const [voiceParticipants, setVoiceParticipants] = useState({});
   const [remoteStreams, setRemoteStreams] = useState({});
@@ -3426,6 +3691,11 @@ export default function App() {
   const micMutedRef = useRef(false);
   const appShellRef = useRef(null);
   const composerPhaseTimerRef = useRef(null);
+  const messageSearchTimerRef = useRef(null);
+  const highlightTimerRef = useRef(null);
+  const speechRecognitionRef = useRef(null);
+  const recordingTranscriptRef = useRef('');
+  const recordingRecoveryAttemptedRef = useRef(false);
 
   const isAdminRoute = ADMIN_PATHS.has(currentPath);
   const isAuthed = Boolean(token && user);
@@ -3434,6 +3704,9 @@ export default function App() {
   const activeTextChannel = textChannels.find((item) => String(item.id) === String(channelId));
   const activeVoiceChannel = voiceChannels.find((item) => String(item.id) === String(voiceChannelId));
   const activeConversation = social.conversations.find((item) => String(item.id) === String(dmConversationId));
+  const visibleMessages = messageSearchOpen && messageSearchQuery.trim()
+    ? messageSearchResults
+    : messages;
   const selectedMobileFolder = customFolders.find((folder) => String(folder.id) === String(activeMobileFolderId)) || null;
   const selectedMobileChannelIds = new Set(selectedMobileFolder?.channelIds || []);
   const selectedMobileFriendIds = new Set(selectedMobileFolder?.friendIds || []);
@@ -3781,6 +4054,19 @@ export default function App() {
   }, [isAuthed, isAdminRoute, networkOnline]);
 
   useEffect(() => {
+    if (!isAuthed || !token || recordingRecoveryAttemptedRef.current) return;
+    recordingRecoveryAttemptedRef.current = true;
+    readRecordingDraft().then((draft) => {
+      if (!draft?.blob || Date.now() - Number(draft.createdAt || 0) > 24 * 60 * 60 * 1000) {
+        if (draft) clearRecordingDraft().catch(() => {});
+        return;
+      }
+      pushToast('Recovering an unfinished recording');
+      uploadRecordedAttachment(draft.blob, draft.kind, draft.transcript, { preserveDraft: true });
+    }).catch(() => {});
+  }, [isAuthed, token]);
+
+  useEffect(() => {
     if (!isAuthed || isAdminRoute) return;
     if (!getCurrentMessagePath()) {
       setMessages([]);
@@ -3793,6 +4079,32 @@ export default function App() {
     }
     refreshCurrentMessages().catch((err) => setError(err.message));
   }, [isAuthed, isAdminRoute, workspace, channelId, dmConversationId, token]);
+
+  useEffect(() => {
+    setMessageSearchOpen(false);
+    setMessageSearchQuery('');
+    setMessageSearchResults([]);
+    setPinnedPanelOpen(false);
+    setPinnedMessages([]);
+    setSelectedMessageIds([]);
+    setForwardingMessages([]);
+  }, [workspace, channelId, dmConversationId]);
+
+  useEffect(() => {
+    window.clearTimeout(messageSearchTimerRef.current);
+    if (!messageSearchOpen || !messageSearchQuery.trim()) {
+      setMessageSearchResults([]);
+      return undefined;
+    }
+    messageSearchTimerRef.current = window.setTimeout(() => {
+      searchCurrentMessages(messageSearchQuery);
+    }, 260);
+    return () => window.clearTimeout(messageSearchTimerRef.current);
+  }, [messageSearchOpen, messageSearchQuery, workspace, channelId, dmConversationId]);
+
+  useEffect(() => {
+    if (pinnedPanelOpen) refreshPinnedMessages();
+  }, [pinnedPanelOpen, workspace, channelId, dmConversationId]);
 
   useEffect(() => {
     if (!isAuthed || isAdminRoute) return undefined;
@@ -4400,6 +4712,135 @@ export default function App() {
     }
   }
 
+  async function searchCurrentMessages(query) {
+    const path = getCurrentMessagePath();
+    const value = query.trim();
+    if (!path || !value) {
+      setMessageSearchResults([]);
+      return;
+    }
+    setMessageSearchLoading(true);
+    try {
+      const separator = path.includes('?') ? '&' : '?';
+      const results = await apiFetch(`${path}${separator}search=${encodeURIComponent(value)}&limit=100`, {}, token);
+      setMessageSearchResults(sortMessages(results));
+    } catch (err) {
+      reportError(err, 'Could not search messages');
+    } finally {
+      setMessageSearchLoading(false);
+    }
+  }
+
+  async function refreshPinnedMessages() {
+    const path = getCurrentMessagePath();
+    if (!path) return;
+    try {
+      const separator = path.includes('?') ? '&' : '?';
+      const results = await apiFetch(`${path}${separator}pinned=true&limit=100`, {}, token);
+      setPinnedMessages(sortMessages(results));
+    } catch (err) {
+      reportError(err, 'Could not load pinned messages');
+    }
+  }
+
+  async function scrollToMessage(target) {
+    if (!target?.id) return;
+    let node = document.querySelector(`[data-message-id="${target.id}"]`);
+    if (!node && target.content) {
+      const path = getCurrentMessagePath();
+      if (path) {
+        try {
+          const results = await apiFetch(`${path}?search=${encodeURIComponent(target.content.slice(0, 80))}&limit=100`, {}, token);
+          setMessages((current) => sortMessages([...current, ...results.filter((item) => !current.some((entry) => String(entry.id) === String(item.id)))]));
+          await new Promise((resolve) => window.requestAnimationFrame(resolve));
+          node = document.querySelector(`[data-message-id="${target.id}"]`);
+        } catch {
+          // The reply still remains readable even if older history cannot be fetched.
+        }
+      }
+    }
+    if (!node) {
+      pushToast('Original message is outside the loaded history', 'error');
+      return;
+    }
+    node.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    setHighlightedMessageId(String(target.id));
+    window.clearTimeout(highlightTimerRef.current);
+    highlightTimerRef.current = window.setTimeout(() => setHighlightedMessageId(null), 1800);
+  }
+
+  async function copyMessage(message) {
+    const text = getMessageCopyText(message);
+    if (!text) return;
+    await navigator.clipboard.writeText(text);
+    pushToast('Message copied');
+  }
+
+  async function toggleMessagePin(message) {
+    const path = workspace === 'dm'
+      ? `/dms/${dmConversationId}/messages/${message.id}/pin`
+      : `/messages/${message.id}/pin`;
+    try {
+      const updated = await apiFetch(path, { method: 'PUT' }, token);
+      setMessages((current) => replaceMessage(current, updated));
+      setMessageSearchResults((current) => replaceMessage(current, updated));
+      setPinnedMessages((current) => updated.pinnedAt
+        ? replaceMessage(current, updated)
+        : current.filter((entry) => String(entry.id) !== String(updated.id)));
+      pushToast(updated.pinnedAt ? 'Message pinned' : 'Message unpinned');
+    } catch (err) {
+      reportError(err, 'Could not update pin');
+    }
+  }
+
+  function toggleMessageSelection(message) {
+    setSelectedMessageIds((current) => current.includes(String(message.id))
+      ? current.filter((id) => id !== String(message.id))
+      : [...current, String(message.id)]);
+  }
+
+  function beginForwardMessages(message) {
+    const selected = selectedMessageIds.length
+      ? messages.filter((entry) => selectedMessageIds.includes(String(entry.id)))
+      : [message];
+    setForwardingMessages(selected);
+  }
+
+  async function forwardMessagesTo(target) {
+    if (!target || forwardingMessages.length === 0) return;
+    try {
+      for (const message of forwardingMessages) {
+        const body = {
+          content: message.content || '',
+          attachmentUrl: message.attachmentUrl,
+          attachmentType: message.attachmentType,
+          attachmentName: message.attachmentName,
+          transcript: message.transcript,
+          forwardedFromName: getDisplayName(message.author)
+        };
+        const created = target.type === 'channel'
+          ? await apiFetch('/messages', { method: 'POST', body: JSON.stringify({ ...body, channelId: Number(target.id) }) }, token)
+          : await apiFetch(`/dms/${target.id}/messages`, { method: 'POST', body: JSON.stringify(body) }, token);
+        const isCurrent = (target.type === 'channel' && workspace === 'server' && String(target.id) === String(channelId))
+          || (target.type === 'dm' && workspace === 'dm' && String(target.id) === String(dmConversationId));
+        if (isCurrent) setMessages((current) => mergeMessage(current, created));
+      }
+      pushToast(`${forwardingMessages.length} message${forwardingMessages.length === 1 ? '' : 's'} forwarded`);
+      setForwardingMessages([]);
+      setSelectedMessageIds([]);
+    } catch (err) {
+      reportError(err, 'Could not forward messages');
+    }
+  }
+
+  async function deleteSelectedMessages() {
+    const selected = messages.filter((message) => selectedMessageIds.includes(String(message.id)));
+    for (const message of selected) {
+      await deleteMessage(message);
+    }
+    setSelectedMessageIds([]);
+  }
+
   function rejoinRealtimeRooms(socket = socketRef.current) {
     if (!socket?.connected) return;
 
@@ -4926,9 +5367,12 @@ export default function App() {
 
   function resetMessageRecordingUi(phase = 'idle') {
     stopMessageRecordingTimer();
+    speechRecognitionRef.current?.stop?.();
+    speechRecognitionRef.current = null;
     setVoiceRecording(false);
     setCircleRecording(false);
     setRecordingElapsed(0);
+    setRecordingCountdown(0);
     setRecordingPaused(false);
     setCircleTorchEnabled(false);
     setCircleCameraSwitching(false);
@@ -4943,6 +5387,7 @@ export default function App() {
     const chunks = [...messageRecordingChunksRef.current];
     const cancelled = messageRecordingCancelledRef.current;
     const recordedKind = messageRecordingKindRef.current;
+    const transcript = recordedKind === 'voice' ? recordingTranscriptRef.current.trim() : '';
     const type = recorder?.mimeType || (recordedKind === 'circle' ? 'video/webm' : 'audio/webm');
 
     stopMessageRecordingStream();
@@ -4952,8 +5397,43 @@ export default function App() {
     resetMessageRecordingUi('idle');
 
     if (!cancelled && chunks.length > 0) {
-      await uploadRecordedAttachment(new Blob(chunks, { type }), recordedKind);
+      await uploadRecordedAttachment(new Blob(chunks, { type }), recordedKind, transcript);
     }
+  }
+
+  function startVoiceTranscription() {
+    const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    recordingTranscriptRef.current = '';
+    setRecordingTranscript('');
+    if (!Recognition) return;
+    try {
+      const recognition = new Recognition();
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = navigator.language || 'ru-RU';
+      recognition.onresult = (event) => {
+        const text = Array.from(event.results).map((result) => result[0]?.transcript || '').join(' ').trim();
+        recordingTranscriptRef.current = text;
+        setRecordingTranscript(text);
+      };
+      recognition.onerror = () => {};
+      recognition.start();
+      speechRecognitionRef.current = recognition;
+    } catch {
+      // Transcription is an enhancement; recording remains available without it.
+    }
+  }
+
+  async function runCircleCountdown(requestId) {
+    setRecordingPhase('countdown');
+    for (const value of [3, 2, 1]) {
+      if (requestId !== messageRecordingRequestIdRef.current || messageRecordingCancelledRef.current) return false;
+      setRecordingCountdown(value);
+      navigator.vibrate?.(value === 1 ? 24 : 10);
+      await new Promise((resolve) => window.setTimeout(resolve, 650));
+    }
+    setRecordingCountdown(0);
+    return requestId === messageRecordingRequestIdRef.current && !messageRecordingCancelledRef.current;
   }
 
   function cleanupMessageRecording({ cancel = false } = {}) {
@@ -5054,7 +5534,7 @@ export default function App() {
     }
   }
 
-  async function uploadRecordedAttachment(blob, kind) {
+  async function uploadRecordedAttachment(blob, kind, transcript = '', { preserveDraft = false } = {}) {
     if (!blob?.size) {
       setError('Recorded media was empty');
       return;
@@ -5065,15 +5545,28 @@ export default function App() {
       : `webcord-voice-message-${Date.now()}.webm`;
 
     try {
+      if (!preserveDraft) {
+        await writeRecordingDraft({ blob, kind, transcript, createdAt: Date.now() }).catch(() => {});
+      }
       setUploading(true);
+      setRecordingUploadProgress(0);
+      if (kind === 'circle') {
+        setCircleRecording(true);
+        setRecordingPhase('uploading');
+      }
       const formData = new FormData();
       formData.append('file', blob, fileName);
-      setPendingAttachment(await apiFetch('/upload', { method: 'POST', body: formData }, token));
+      const uploaded = await uploadFormDataWithProgress('/upload', formData, token, setRecordingUploadProgress);
+      setPendingAttachment({ ...uploaded, transcript: transcript || undefined });
+      await clearRecordingDraft();
       pushToast(kind === 'circle' ? 'Video circle attached' : 'Voice message attached');
     } catch (err) {
       reportError(err, 'Could not upload recorded media');
     } finally {
       setUploading(false);
+      setRecordingUploadProgress(0);
+      setCircleRecording(false);
+      setRecordingPhase('idle');
     }
   }
 
@@ -5157,6 +5650,11 @@ export default function App() {
         reportError(new Error('The browser stopped the media recorder'), 'Could not record media');
       };
 
+      if (kind === 'circle' && !(await runCircleCountdown(requestId))) {
+        cleanupMessageRecording({ cancel: true });
+        return;
+      }
+      if (kind === 'voice') startVoiceTranscription();
       recorder.start(1000);
       setRecordingElapsed(0);
       setRecordingPaused(false);
@@ -5223,6 +5721,7 @@ export default function App() {
       return;
     }
 
+    let optimisticId = null;
     try {
       announceComposerPhase(editingMessage ? 'saving' : 'sending');
       shouldStickToBottomRef.current = true;
@@ -5245,6 +5744,24 @@ export default function App() {
         return;
       }
 
+      optimisticId = -Date.now();
+      const optimisticMessage = {
+        id: optimisticId,
+        channelId: workspace === 'server' ? Number(channelId) : undefined,
+        conversationId: workspace === 'dm' ? Number(dmConversationId) : undefined,
+        content,
+        attachmentUrl: pendingAttachment?.url,
+        attachmentType: pendingAttachment?.type,
+        attachmentName: pendingAttachment?.name,
+        transcript: pendingAttachment?.transcript,
+        replyTo: replyTarget || null,
+        author: user,
+        createdAt: new Date().toISOString(),
+        optimistic: true,
+        reactions: []
+      };
+      setMessages((current) => mergeMessage(current, optimisticMessage));
+
       if (workspace === 'server' && channelId) {
         createdMessage = await apiFetch(
           '/messages',
@@ -5256,6 +5773,7 @@ export default function App() {
               attachmentUrl: pendingAttachment?.url,
               attachmentType: pendingAttachment?.type,
               attachmentName: pendingAttachment?.name,
+              transcript: pendingAttachment?.transcript,
               replyToId: replyTarget?.id
             })
           },
@@ -5273,6 +5791,7 @@ export default function App() {
               attachmentUrl: pendingAttachment?.url,
               attachmentType: pendingAttachment?.type,
               attachmentName: pendingAttachment?.name,
+              transcript: pendingAttachment?.transcript,
               replyToId: replyTarget?.id
             })
           },
@@ -5281,16 +5800,24 @@ export default function App() {
       }
 
       if (createdMessage) {
-        setMessages((prev) => mergeMessage(prev, createdMessage));
+        setMessages((prev) => mergeMessage(
+          prev.filter((message) => String(message.id) !== String(optimisticId)),
+          createdMessage
+        ));
       }
 
       setError('');
       setNewMessage('');
       setPendingAttachment(null);
+      setRecordingTranscript('');
+      recordingTranscriptRef.current = '';
       setReplyTarget(null);
       setShowEmojiPicker(false);
       announceComposerPhase('sent');
     } catch (err) {
+      if (optimisticId !== null) {
+        setMessages((current) => current.filter((message) => String(message.id) !== String(optimisticId)));
+      }
       announceComposerPhase('error');
       reportError(err, 'Failed to send message');
     }
@@ -6353,9 +6880,20 @@ export default function App() {
                     type="button"
                     title="Search"
                     aria-label="Search"
-                    onClick={() => document.querySelector('.desktop-sidebar-search input')?.focus()}
+                    aria-expanded={messageSearchOpen}
+                    onClick={() => setMessageSearchOpen((value) => !value)}
                   >
                     <AppIcon name="search" />
+                  </button>
+                  <button
+                    className="icon-btn"
+                    type="button"
+                    title="Pinned messages"
+                    aria-label="Pinned messages"
+                    aria-expanded={pinnedPanelOpen}
+                    onClick={() => setPinnedPanelOpen((value) => !value)}
+                  >
+                    <AppIcon name="pin" />
                   </button>
                   <button
                     className="icon-btn"
@@ -6405,6 +6943,35 @@ export default function App() {
                 ? 'Network is offline. Messages will refresh when connection returns.'
                 : 'Realtime connection is recovering. WebCord keeps polling until live sync resumes.'}
             </div>
+          ) : null}
+          {messageSearchOpen ? (
+            <div className="in-chat-search">
+              <AppIcon name="search" size={17} />
+              <input
+                autoFocus
+                value={messageSearchQuery}
+                onChange={(event) => setMessageSearchQuery(event.target.value)}
+                placeholder="Search this chat"
+                aria-label="Search messages in this chat"
+              />
+              {messageSearchLoading ? <span className="search-spinner" aria-label="Searching" /> : null}
+              <span>{messageSearchQuery.trim() ? `${messageSearchResults.length} found` : 'Type to search'}</span>
+              <button className="icon-btn" type="button" aria-label="Close search" onClick={() => setMessageSearchOpen(false)}><AppIcon name="close" /></button>
+            </div>
+          ) : null}
+          {pinnedPanelOpen ? (
+            <aside className="pinned-messages-panel" aria-label="Pinned messages">
+              <div className="pinned-panel-header">
+                <strong>Pinned messages</strong>
+                <button className="icon-btn" type="button" aria-label="Close pinned messages" onClick={() => setPinnedPanelOpen(false)}><AppIcon name="close" /></button>
+              </div>
+              {pinnedMessages.length === 0 ? <p className="muted">Nothing pinned in this chat.</p> : pinnedMessages.map((message) => (
+                <button type="button" key={message.id} onClick={() => { setPinnedPanelOpen(false); scrollToMessage(message); }}>
+                  <strong>{getDisplayName(message.author)}</strong>
+                  <span>{message.content || message.attachmentName || 'Attachment'}</span>
+                </button>
+              ))}
+            </aside>
           ) : null}
 
           {voiceJoined ? (
@@ -6456,10 +7023,18 @@ export default function App() {
             </div>
           ) : (
             <>
+              {selectedMessageIds.length > 0 ? (
+                <div className="message-selection-toolbar" role="toolbar" aria-label="Selected message actions">
+                  <strong>{selectedMessageIds.length} selected</strong>
+                  <button type="button" onClick={() => beginForwardMessages(messages.find((message) => selectedMessageIds.includes(String(message.id))))}>Forward</button>
+                  <button className="danger" type="button" onClick={deleteSelectedMessages}>Delete</button>
+                  <button className="icon-btn" type="button" aria-label="Clear selection" onClick={() => setSelectedMessageIds([])}><AppIcon name="close" /></button>
+                </div>
+              ) : null}
               <div className="messages" ref={messagesRef} style={chatWallpaperStyle} onScroll={handleMessagesScroll}>
-                {messages.length === 0 ? <div className="empty-state"><h3>{workspace === 'dm' ? 'No direct messages yet' : 'No messages yet'}</h3><p className="muted">{workspace === 'dm' ? 'This thread is ready.' : 'Start the conversation in this channel.'}</p></div> : messages.map((message, index) => {
-                  const previous = index > 0 ? messages[index - 1] : null;
-                  const next = index < messages.length - 1 ? messages[index + 1] : null;
+                {visibleMessages.length === 0 ? <div className="empty-state"><h3>{messageSearchQuery.trim() ? 'No matching messages' : workspace === 'dm' ? 'No direct messages yet' : 'No messages yet'}</h3><p className="muted">{messageSearchQuery.trim() ? 'Try another word or phrase.' : workspace === 'dm' ? 'This thread is ready.' : 'Start the conversation in this channel.'}</p></div> : visibleMessages.map((message, index) => {
+                  const previous = index > 0 ? visibleMessages[index - 1] : null;
+                  const next = index < visibleMessages.length - 1 ? visibleMessages[index + 1] : null;
                   const grouped = Boolean(
                     previous &&
                     String(previous.author?.id) === String(message.author?.id) &&
@@ -6471,7 +7046,7 @@ export default function App() {
                     Math.abs(new Date(next.createdAt) - new Date(message.createdAt)) < 5 * 60 * 1000
                   );
                   const showDateDivider = !previous || new Date(previous.createdAt).toDateString() !== new Date(message.createdAt).toDateString();
-                  return <MessageItem key={message.id} message={message} workspace={workspace} currentUserId={user?.id} grouped={grouped} groupedWithNext={groupedWithNext} showDateDivider={showDateDivider} showUnreadDivider={String(unreadAnchorId) === String(message.id)} canModerateMessages={userCanModerateMessages} onAvatarClick={setViewedProfile} onReply={beginReply} onEdit={beginEdit} onDelete={deleteMessage} onReport={openReportForMessage} onOpenMedia={setViewedMedia} onToggleReaction={toggleMessageReaction} />;
+                  return <MessageItem key={message.id} message={message} workspace={workspace} currentUserId={user?.id} grouped={grouped} groupedWithNext={groupedWithNext} showDateDivider={showDateDivider} showUnreadDivider={String(unreadAnchorId) === String(message.id)} selected={selectedMessageIds.includes(String(message.id))} highlighted={String(highlightedMessageId) === String(message.id)} canModerateMessages={userCanModerateMessages} onAvatarClick={setViewedProfile} onReply={beginReply} onNavigateToReply={scrollToMessage} onEdit={beginEdit} onDelete={deleteMessage} onReport={openReportForMessage} onOpenMedia={setViewedMedia} onToggleReaction={toggleMessageReaction} onCopy={copyMessage} onPin={toggleMessagePin} onForward={beginForwardMessages} onSelect={toggleMessageSelection} />;
                 })}
                 <div ref={endRef} />
               </div>
@@ -6595,6 +7170,8 @@ export default function App() {
             stream={recordingPreviewStream}
             phase={recordingPhase}
             elapsed={recordingElapsed}
+            countdown={recordingCountdown}
+            uploadProgress={recordingUploadProgress}
             paused={recordingPaused}
             torchEnabled={circleTorchEnabled}
             facingMode={circleFacingMode}
@@ -6694,6 +7271,13 @@ export default function App() {
         onBlock={() => blockProfile(viewedProfile)}
         onUnblock={() => unblockProfile(viewedProfile)}
         onClose={() => setViewedProfile(null)}
+      />
+      <ForwardMessagesModal
+        messages={forwardingMessages}
+        channels={textChannels}
+        conversations={social.conversations}
+        onSend={forwardMessagesTo}
+        onClose={() => setForwardingMessages([])}
       />
       <ReportModal target={reportTarget} onClose={() => setReportTarget(null)} onSubmit={(payload) => submitReport(payload)} />
       <MediaViewer message={viewedMedia} onClose={() => setViewedMedia(null)} />

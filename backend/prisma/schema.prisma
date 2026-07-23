@@ -134,6 +134,10 @@ model Message {
   attachmentUrl  String?
   attachmentType AttachmentType?
   attachmentName String?
+  transcript     String?
+  forwardedFromName String?
+  pinnedAt       DateTime?
+  pinnedById     Int?
   replyToId      Int?
   editedAt       DateTime?
   deletedAt      DateTime?
@@ -148,6 +152,7 @@ model Message {
   reports        ModerationReport[]
 
   @@index([channelId, createdAt])
+  @@index([channelId, pinnedAt])
   @@index([authorId])
 }
 
@@ -233,6 +238,10 @@ model DirectMessage {
   attachmentUrl  String?
   attachmentType AttachmentType?
   attachmentName String?
+  transcript     String?
+  forwardedFromName String?
+  pinnedAt       DateTime?
+  pinnedById     Int?
   replyToId      Int?
   editedAt       DateTime?
   deletedAt      DateTime?
@@ -248,6 +257,7 @@ model DirectMessage {
   reports        ModerationReport[]
 
   @@index([conversationId, createdAt])
+  @@index([conversationId, pinnedAt])
   @@index([authorId])
   @@index([conversationId, readAt])
 }

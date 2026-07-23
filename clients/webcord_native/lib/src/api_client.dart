@@ -121,10 +121,18 @@ class WebCordApi {
     int channelId, {
     int? beforeId,
     int limit = 100,
+    String? search,
+    bool pinned = false,
   }) async {
     final data = await _send(
       'GET',
-      _messagesPath('/messages/$channelId', beforeId: beforeId, limit: limit),
+      _messagesPath(
+        '/messages/$channelId',
+        beforeId: beforeId,
+        limit: limit,
+        search: search,
+        pinned: pinned,
+      ),
       token: token,
     );
     return _messageList(data);
@@ -135,6 +143,8 @@ class WebCordApi {
     int conversationId, {
     int? beforeId,
     int limit = 100,
+    String? search,
+    bool pinned = false,
   }) async {
     final data = await _send(
       'GET',
@@ -142,6 +152,8 @@ class WebCordApi {
         '/dms/$conversationId/messages',
         beforeId: beforeId,
         limit: limit,
+        search: search,
+        pinned: pinned,
       ),
       token: token,
     );
@@ -154,6 +166,8 @@ class WebCordApi {
     required String content,
     AttachmentUpload? attachment,
     int? replyToId,
+    String? transcript,
+    String? forwardedFromName,
   }) async {
     final json = await _send(
       'POST',
@@ -165,6 +179,10 @@ class WebCordApi {
         if (attachment != null) 'attachmentUrl': attachment.url,
         if (attachment != null) 'attachmentType': attachment.type,
         if (attachment != null) 'attachmentName': attachment.name,
+        if (transcript != null && transcript.isNotEmpty)
+          'transcript': transcript,
+        if (forwardedFromName != null && forwardedFromName.isNotEmpty)
+          'forwardedFromName': forwardedFromName,
         if (replyToId != null) 'replyToId': replyToId,
       },
     );
@@ -177,6 +195,8 @@ class WebCordApi {
     required String content,
     AttachmentUpload? attachment,
     int? replyToId,
+    String? transcript,
+    String? forwardedFromName,
   }) async {
     final json = await _send(
       'POST',
@@ -187,8 +207,33 @@ class WebCordApi {
         if (attachment != null) 'attachmentUrl': attachment.url,
         if (attachment != null) 'attachmentType': attachment.type,
         if (attachment != null) 'attachmentName': attachment.name,
+        if (transcript != null && transcript.isNotEmpty)
+          'transcript': transcript,
+        if (forwardedFromName != null && forwardedFromName.isNotEmpty)
+          'forwardedFromName': forwardedFromName,
         if (replyToId != null) 'replyToId': replyToId,
       },
+    );
+    return ChatMessage.fromJson(json);
+  }
+
+  Future<ChatMessage> toggleChannelMessagePin({
+    required String token,
+    required int messageId,
+  }) async {
+    final json = await _send('PUT', '/messages/$messageId/pin', token: token);
+    return ChatMessage.fromJson(json);
+  }
+
+  Future<ChatMessage> toggleDirectMessagePin({
+    required String token,
+    required int conversationId,
+    required int messageId,
+  }) async {
+    final json = await _send(
+      'PUT',
+      '/dms/$conversationId/messages/$messageId/pin',
+      token: token,
     );
     return ChatMessage.fromJson(json);
   }
@@ -483,9 +528,19 @@ class WebCordApi {
     return AttachmentUpload.fromJson(payload as Map<String, dynamic>);
   }
 
-  String _messagesPath(String path, {int? beforeId, int limit = 100}) {
+  String _messagesPath(
+    String path, {
+    int? beforeId,
+    int limit = 100,
+    String? search,
+    bool pinned = false,
+  }) {
     final params = <String, String>{'limit': '$limit'};
     if (beforeId != null && beforeId > 0) params['beforeId'] = '$beforeId';
+    if (search != null && search.trim().isNotEmpty) {
+      params['search'] = search.trim();
+    }
+    if (pinned) params['pinned'] = 'true';
     return '$path?${Uri(queryParameters: params).query}';
   }
 

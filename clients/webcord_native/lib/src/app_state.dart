@@ -165,6 +165,10 @@ class WebCordState extends ChangeNotifier {
   List<Channel> channels = [];
   SocialSnapshot social = const SocialSnapshot();
   List<ChatMessage> messages = [];
+  List<ChatMessage> messageSearchResults = [];
+  List<ChatMessage> pinnedMessages = [];
+  final Set<int> selectedMessageIds = {};
+  String messageSearchQuery = '';
   ChatMessage? replyingTo;
   List<VoiceParticipant> voiceParticipants = [];
   List<StoryItem> stories = [];
@@ -191,6 +195,8 @@ class WebCordState extends ChangeNotifier {
   bool uploading = false;
   bool loadingOlderMessages = false;
   bool hasOlderMessages = false;
+  bool messageSearchOpen = false;
+  bool pinnedMessagesOpen = false;
   bool profileSaving = false;
   bool profileAssetUploading = false;
   bool mediaBusy = false;
@@ -698,6 +704,169 @@ class WebCordState extends ChangeNotifier {
       pendingAttachment = null;
       replyingTo = null;
     });
+  }
+
+  List<ChatMessage> get visibleMessages =>
+      messageSearchOpen && messageSearchQuery.trim().isNotEmpty
+      ? messageSearchResults
+      : messages;
+
+  void toggleMessageSearch() {
+    messageSearchOpen = !messageSearchOpen;
+    if (!messageSearchOpen) {
+      messageSearchQuery = '';
+      messageSearchResults = [];
+    }
+    notifyListeners();
+  }
+
+  Future<void> searchMessages(String query) async {
+    final currentToken = token;
+    messageSearchQuery = query;
+    if (currentToken == null || query.trim().isEmpty) {
+      messageSearchResults = [];
+      notifyListeners();
+      return;
+    }
+    if (workspace != WorkspaceKind.direct && selectedTextChannelId == null) {
+      return;
+    }
+    try {
+      messageSearchResults =
+          workspace == WorkspaceKind.direct && selectedConversationId != null
+          ? await api.directMessages(
+              currentToken,
+              selectedConversationId!,
+              search: query,
+            )
+          : await api.channelMessages(
+              currentToken,
+              selectedTextChannelId!,
+              search: query,
+            );
+    } catch (exception) {
+      error = '$exception';
+    }
+    notifyListeners();
+  }
+
+  Future<void> togglePinnedMessages() async {
+    pinnedMessagesOpen = !pinnedMessagesOpen;
+    if (!pinnedMessagesOpen) {
+      notifyListeners();
+      return;
+    }
+    final currentToken = token;
+    if (currentToken == null) return;
+    if (workspace != WorkspaceKind.direct && selectedTextChannelId == null) {
+      return;
+    }
+    try {
+      pinnedMessages =
+          workspace == WorkspaceKind.direct && selectedConversationId != null
+          ? await api.directMessages(
+              currentToken,
+              selectedConversationId!,
+              pinned: true,
+            )
+          : await api.channelMessages(
+              currentToken,
+              selectedTextChannelId!,
+              pinned: true,
+            );
+    } catch (exception) {
+      error = '$exception';
+    }
+    notifyListeners();
+  }
+
+  Future<void> toggleMessagePin(ChatMessage message) async {
+    final currentToken = token;
+    if (currentToken == null) return;
+    try {
+      final updated =
+          workspace == WorkspaceKind.direct && selectedConversationId != null
+          ? await api.toggleDirectMessagePin(
+              token: currentToken,
+              conversationId: selectedConversationId!,
+              messageId: message.id,
+            )
+          : await api.toggleChannelMessagePin(
+              token: currentToken,
+              messageId: message.id,
+            );
+      _upsertMessage(updated);
+      pinnedMessages = updated.pinnedAt == null
+          ? pinnedMessages.where((item) => item.id != updated.id).toList()
+          : [...pinnedMessages.where((item) => item.id != updated.id), updated];
+      notifyListeners();
+    } catch (exception) {
+      error = '$exception';
+      notifyListeners();
+    }
+  }
+
+  void toggleMessageSelection(ChatMessage message) {
+    if (!selectedMessageIds.add(message.id)) {
+      selectedMessageIds.remove(message.id);
+    }
+    notifyListeners();
+  }
+
+  void clearMessageSelection() {
+    selectedMessageIds.clear();
+    notifyListeners();
+  }
+
+  Future<void> deleteSelectedMessages() async {
+    final selected = messages
+        .where((message) => selectedMessageIds.contains(message.id))
+        .toList();
+    for (final message in selected) {
+      if (message.author.id == user?.id) await deleteMessage(message);
+    }
+    selectedMessageIds.clear();
+    notifyListeners();
+  }
+
+  Future<void> forwardMessage(
+    ChatMessage message, {
+    int? channelId,
+    int? conversationId,
+  }) async {
+    final currentToken = token;
+    if (currentToken == null) return;
+    final attachment = message.hasAttachment
+        ? AttachmentUpload(
+            url: message.attachmentUrl!,
+            type: message.attachmentType ?? 'FILE',
+            name: message.attachmentName ?? 'Attachment',
+          )
+        : null;
+    try {
+      if (conversationId != null) {
+        await api.sendDirectMessage(
+          token: currentToken,
+          conversationId: conversationId,
+          content: message.content,
+          attachment: attachment,
+          transcript: message.transcript,
+          forwardedFromName: message.author.displayLabel,
+        );
+      } else if (channelId != null) {
+        await api.sendChannelMessage(
+          token: currentToken,
+          channelId: channelId,
+          content: message.content,
+          attachment: attachment,
+          transcript: message.transcript,
+          forwardedFromName: message.author.displayLabel,
+        );
+      }
+    } catch (exception) {
+      error = '$exception';
+      notifyListeners();
+    }
   }
 
   void beginReply(ChatMessage message) {

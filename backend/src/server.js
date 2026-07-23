@@ -516,6 +516,11 @@ function normalizeMessageReaction(value) {
   return MESSAGE_REACTIONS.has(emoji) ? emoji : null;
 }
 
+function normalizeMessageMetadata(value, maxLength) {
+  const text = String(value || '').trim();
+  return text ? text.slice(0, maxLength) : null;
+}
+
 function sendCaughtApiError(res, error, fallbackCode, fallbackMessage) {
   if (error?.status && error?.code) {
     return sendApiError(res, error.status, error.code, error.message || fallbackMessage);
@@ -1106,7 +1111,7 @@ function emitCallSignal(socket, eventName, { callId, targetSocketId, ...payload 
   socket.to(roomKey).emit(eventName, signalPayload);
 }
 
-async function createChannelMessage({ channelId, userId, content, attachmentUrl, attachmentType, attachmentName, replyToId }) {
+async function createChannelMessage({ channelId, userId, content, attachmentUrl, attachmentType, attachmentName, transcript, forwardedFromName, replyToId }) {
   await assertUserCanSend(userId);
 
   const channel = await prisma.channel.findUnique({
@@ -1137,6 +1142,8 @@ async function createChannelMessage({ channelId, userId, content, attachmentUrl,
       attachmentUrl,
       attachmentType,
       attachmentName,
+      transcript: normalizeMessageMetadata(transcript, 4_000),
+      forwardedFromName: normalizeMessageMetadata(forwardedFromName, 120),
       replyToId: replyToId || null
     },
     include: {
@@ -1153,7 +1160,7 @@ async function createChannelMessage({ channelId, userId, content, attachmentUrl,
   return { ...message, guildId: channel.guildId };
 }
 
-async function createDirectConversationMessage({ conversationId, userId, content, attachmentUrl, attachmentType, attachmentName, replyToId }) {
+async function createDirectConversationMessage({ conversationId, userId, content, attachmentUrl, attachmentType, attachmentName, transcript, forwardedFromName, replyToId }) {
   const conversation = await prisma.directConversation.findUnique({
     where: { id: conversationId },
     include: {
@@ -1197,6 +1204,8 @@ async function createDirectConversationMessage({ conversationId, userId, content
       attachmentUrl,
       attachmentType,
       attachmentName,
+      transcript: normalizeMessageMetadata(transcript, 4_000),
+      forwardedFromName: normalizeMessageMetadata(forwardedFromName, 120),
       replyToId: replyToId || null
     },
     include: {
@@ -2527,11 +2536,22 @@ app.get('/api/dms/:conversationId/messages', authMiddleware, async (req, res) =>
     });
 
     const { limit, beforeId } = parseMessagePagination(req.query);
+    const search = normalizeMessageMetadata(req.query.search, 120);
+    const pinnedOnly = String(req.query.pinned || '') === 'true';
     const blockedUserIds = await getBlockedUserIds(currentUserId);
     const messages = await prisma.directMessage.findMany({
       where: {
         conversationId,
         deletedAt: null,
+        ...(pinnedOnly ? { pinnedAt: { not: null } } : {}),
+        ...(search ? {
+          OR: [
+            { content: { contains: search } },
+            { attachmentName: { contains: search } },
+            { transcript: { contains: search } },
+            { forwardedFromName: { contains: search } }
+          ]
+        } : {}),
         ...(blockedUserIds.length > 0 ? { authorId: { notIn: blockedUserIds } } : {}),
         ...(beforeId ? { id: { lt: beforeId } } : {})
       },
@@ -2623,11 +2643,22 @@ app.get('/api/messages/:channelId', authMiddleware, async (req, res) => {
     }
 
     const { limit, beforeId } = parseMessagePagination(req.query);
+    const search = normalizeMessageMetadata(req.query.search, 120);
+    const pinnedOnly = String(req.query.pinned || '') === 'true';
     const blockedUserIds = await getBlockedUserIds(req.user.userId);
     const messages = await prisma.message.findMany({
       where: {
         channelId,
         deletedAt: null,
+        ...(pinnedOnly ? { pinnedAt: { not: null } } : {}),
+        ...(search ? {
+          OR: [
+            { content: { contains: search } },
+            { attachmentName: { contains: search } },
+            { transcript: { contains: search } },
+            { forwardedFromName: { contains: search } }
+          ]
+        } : {}),
         ...(blockedUserIds.length > 0 ? { authorId: { notIn: blockedUserIds } } : {}),
         ...(beforeId ? { id: { lt: beforeId } } : {})
       },
@@ -2658,6 +2689,8 @@ app.post('/api/messages', authMiddleware, messageRateLimit, async (req, res) => 
     const attachmentUrl = req.body.attachmentUrl || null;
     const attachmentType = normalizeAttachmentType(req.body.attachmentType);
     const attachmentName = req.body.attachmentName || null;
+    const transcript = req.body.transcript;
+    const forwardedFromName = req.body.forwardedFromName;
     const replyToId = parseOptionalPositiveInt(req.body.replyToId);
 
     if (!channelId || Number.isNaN(channelId)) {
@@ -2678,6 +2711,8 @@ app.post('/api/messages', authMiddleware, messageRateLimit, async (req, res) => 
       attachmentUrl,
       attachmentType,
       attachmentName,
+      transcript,
+      forwardedFromName,
       replyToId
     });
 
@@ -2700,6 +2735,8 @@ app.post('/api/dms/:conversationId/messages', authMiddleware, messageRateLimit, 
     const attachmentUrl = req.body.attachmentUrl || null;
     const attachmentType = normalizeAttachmentType(req.body.attachmentType);
     const attachmentName = req.body.attachmentName || null;
+    const transcript = req.body.transcript;
+    const forwardedFromName = req.body.forwardedFromName;
     const replyToId = parseOptionalPositiveInt(req.body.replyToId);
 
     if (!conversationId || Number.isNaN(conversationId)) {
@@ -2720,6 +2757,8 @@ app.post('/api/dms/:conversationId/messages', authMiddleware, messageRateLimit, 
       attachmentUrl,
       attachmentType,
       attachmentName,
+      transcript,
+      forwardedFromName,
       replyToId
     });
 
@@ -2776,6 +2815,35 @@ app.patch('/api/messages/:messageId', authMiddleware, messageRateLimit, async (r
   } catch (error) {
     console.error(error);
     return sendCaughtApiError(res, error, 'MESSAGE_EDIT_FAILED', 'Failed to edit message');
+  }
+});
+
+app.put('/api/messages/:messageId/pin', authMiddleware, messageRateLimit, async (req, res) => {
+  try {
+    const messageId = Number(req.params.messageId);
+    if (!messageId || Number.isNaN(messageId)) {
+      return sendApiError(res, 400, 'INVALID_MESSAGE_ID', 'Invalid message id');
+    }
+    const existing = await prisma.message.findUnique({ where: { id: messageId } });
+    if (!existing || existing.deletedAt) {
+      return sendApiError(res, 404, 'MESSAGE_NOT_FOUND', 'Message not found');
+    }
+    const message = await prisma.message.update({
+      where: { id: messageId },
+      data: existing.pinnedAt
+        ? { pinnedAt: null, pinnedById: null }
+        : { pinnedAt: new Date(), pinnedById: req.user.userId },
+      include: {
+        author: { select: publicUserSelect },
+        reactions: { select: { emoji: true, userId: true } },
+        replyTo: { include: { author: { select: publicUserSelect } } }
+      }
+    });
+    io.to(`channel:${message.channelId}`).emit('message:updated', message);
+    return res.json(message);
+  } catch (error) {
+    console.error(error);
+    return sendApiError(res, 500, 'MESSAGE_PIN_FAILED', 'Failed to update pin');
   }
 });
 
@@ -2844,6 +2912,10 @@ app.delete('/api/messages/:messageId', authMiddleware, messageRateLimit, async (
         attachmentUrl: null,
         attachmentType: null,
         attachmentName: null,
+        transcript: null,
+        forwardedFromName: null,
+        pinnedAt: null,
+        pinnedById: null,
         deletedAt: new Date()
       },
       include: {
@@ -2907,6 +2979,49 @@ app.patch('/api/dms/:conversationId/messages/:messageId', authMiddleware, messag
   } catch (error) {
     console.error(error);
     return sendCaughtApiError(res, error, 'MESSAGE_EDIT_FAILED', 'Failed to edit direct message');
+  }
+});
+
+app.put('/api/dms/:conversationId/messages/:messageId/pin', authMiddleware, messageRateLimit, async (req, res) => {
+  try {
+    const conversationId = Number(req.params.conversationId);
+    const messageId = Number(req.params.messageId);
+    if (!conversationId || Number.isNaN(conversationId) || !messageId || Number.isNaN(messageId)) {
+      return sendApiError(res, 400, 'INVALID_MESSAGE_ID', 'Invalid message id');
+    }
+    const [conversation, existing] = await Promise.all([
+      prisma.directConversation.findUnique({
+        where: { id: conversationId },
+        include: { members: true }
+      }),
+      prisma.directMessage.findUnique({ where: { id: messageId } })
+    ]);
+    if (
+      !conversation ||
+      !getConversationMemberIds(conversation).includes(req.user.userId) ||
+      !existing ||
+      existing.conversationId !== conversationId ||
+      existing.deletedAt
+    ) {
+      return sendApiError(res, 404, 'MESSAGE_NOT_FOUND', 'Message not found');
+    }
+    const message = await prisma.directMessage.update({
+      where: { id: messageId },
+      data: existing.pinnedAt
+        ? { pinnedAt: null, pinnedById: null }
+        : { pinnedAt: new Date(), pinnedById: req.user.userId },
+      include: {
+        author: { select: publicUserSelect },
+        reactions: { select: { emoji: true, userId: true } },
+        replyTo: { include: { author: { select: publicUserSelect } } }
+      }
+    });
+    const payload = { ...message, conversationId };
+    io.to(`dm:${conversationId}`).emit('direct-message:updated', payload);
+    return res.json(payload);
+  } catch (error) {
+    console.error(error);
+    return sendApiError(res, 500, 'MESSAGE_PIN_FAILED', 'Failed to update pin');
   }
 });
 
@@ -3001,6 +3116,10 @@ app.delete('/api/dms/:conversationId/messages/:messageId', authMiddleware, messa
         attachmentUrl: null,
         attachmentType: null,
         attachmentName: null,
+        transcript: null,
+        forwardedFromName: null,
+        pinnedAt: null,
+        pinnedById: null,
         deletedAt: new Date()
       },
       include: {
@@ -3218,6 +3337,8 @@ io.on('connection', (socket) => {
       const attachmentUrl = payload.attachmentUrl || null;
       const attachmentType = normalizeAttachmentType(payload.attachmentType);
       const attachmentName = payload.attachmentName || null;
+      const transcript = payload.transcript;
+      const forwardedFromName = payload.forwardedFromName;
       const replyToId = parseOptionalPositiveInt(payload.replyToId);
 
       if (!channelId || Number.isNaN(channelId)) return;
@@ -3234,6 +3355,8 @@ io.on('connection', (socket) => {
         attachmentUrl,
         attachmentType,
         attachmentName,
+        transcript,
+        forwardedFromName,
         replyToId
       });
 
@@ -3259,6 +3382,8 @@ io.on('connection', (socket) => {
       const attachmentUrl = payload.attachmentUrl || null;
       const attachmentType = normalizeAttachmentType(payload.attachmentType);
       const attachmentName = payload.attachmentName || null;
+      const transcript = payload.transcript;
+      const forwardedFromName = payload.forwardedFromName;
       const replyToId = parseOptionalPositiveInt(payload.replyToId);
 
       if (!conversationId || Number.isNaN(conversationId)) return;
@@ -3275,6 +3400,8 @@ io.on('connection', (socket) => {
         attachmentUrl,
         attachmentType,
         attachmentName,
+        transcript,
+        forwardedFromName,
         replyToId
       });
 

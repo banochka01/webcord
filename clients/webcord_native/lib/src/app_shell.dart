@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
@@ -1276,6 +1277,28 @@ class MainSurface extends StatelessWidget {
         child: Column(
           children: [
             ChatHeader(state: state),
+            if (state.selectedMessageIds.isNotEmpty)
+              Material(
+                color: palette.panelStrong.withAlpha(245),
+                child: ListTile(
+                  leading: Icon(themeSystem.icon(WebCordIconRole.selected)),
+                  title: Text('${state.selectedMessageIds.length} selected'),
+                  trailing: Wrap(
+                    children: [
+                      IconButton(
+                        tooltip: 'Delete your selected messages',
+                        onPressed: state.deleteSelectedMessages,
+                        icon: const Icon(Icons.delete_outline_rounded),
+                      ),
+                      IconButton(
+                        tooltip: 'Clear selection',
+                        onPressed: state.clearMessageSelection,
+                        icon: const Icon(Icons.close_rounded),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
             if (state.voiceJoined) VoiceCallBanner(state: state),
             if (state.voiceJoined) VoiceStage(state: state),
             Divider(height: 1, color: palette.border),
@@ -1360,6 +1383,11 @@ class ChatHeader extends StatelessWidget {
             tooltip: 'Search messages',
             onPressed: () => showMessageSearchDialog(context, state),
             icon: Icon(themeSystem.icon(WebCordIconRole.search)),
+          ),
+          IconButton(
+            tooltip: 'Pinned messages',
+            onPressed: () => showPinnedMessagesDialog(context, state),
+            icon: const Icon(Icons.push_pin_outlined),
           ),
           const SizedBox(width: 4),
           if (state.workspace == WorkspaceKind.server)
@@ -2066,15 +2094,22 @@ class MessageList extends StatelessWidget {
         body: 'Pick a channel or direct message to start talking.',
       );
     }
-    if (state.messages.isEmpty) {
-      return const EmptyState(
+    final visibleMessages = state.visibleMessages;
+    if (visibleMessages.isEmpty) {
+      return EmptyState(
         icon: Icons.auto_awesome_rounded,
-        title: 'No messages yet',
-        body: 'Start the conversation in this room.',
+        title: state.messageSearchQuery.trim().isNotEmpty
+            ? 'No matching messages'
+            : 'No messages yet',
+        body: state.messageSearchQuery.trim().isNotEmpty
+            ? 'Try a different word or phrase.'
+            : 'Start the conversation in this room.',
       );
     }
     final mobile = MediaQuery.sizeOf(context).width < 640;
-    final extraTopItems = state.hasOlderMessages ? 1 : 0;
+    final extraTopItems = state.hasOlderMessages && !state.messageSearchOpen
+        ? 1
+        : 0;
     return ListView.builder(
       keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
       physics: const BouncingScrollPhysics(
@@ -2086,7 +2121,7 @@ class MessageList extends StatelessWidget {
         18,
         mobile ? 92 : 24,
       ),
-      itemCount: state.messages.length + extraTopItems,
+      itemCount: visibleMessages.length + extraTopItems,
       itemBuilder: (context, index) {
         if (state.hasOlderMessages && index == 0) {
           return Padding(
@@ -2112,14 +2147,14 @@ class MessageList extends StatelessWidget {
             ),
           );
         }
-        final message = state.messages[index - extraTopItems];
+        final message = visibleMessages[index - extraTopItems];
         final previousIndex = index - extraTopItems - 1;
         final previous = previousIndex >= 0
-            ? state.messages[previousIndex]
+            ? visibleMessages[previousIndex]
             : null;
         final nextIndex = index - extraTopItems + 1;
-        final next = nextIndex < state.messages.length
-            ? state.messages[nextIndex]
+        final next = nextIndex < visibleMessages.length
+            ? visibleMessages[nextIndex]
             : null;
         final groupedWithPrevious =
             previous != null &&
@@ -2346,6 +2381,12 @@ class _MessageTileState extends State<MessageTile> {
                   ),
                 GestureDetector(
                   onDoubleTap: () => state.toggleMessageReaction(message),
+                  onLongPress: () => showMessageActionsSheet(
+                    context,
+                    state,
+                    message,
+                    own: own,
+                  ),
                   child: Dismissible(
                     key: ValueKey('reply-swipe-${message.id}'),
                     direction: DismissDirection.startToEnd,
@@ -2438,9 +2479,18 @@ class _MessageTileState extends State<MessageTile> {
                                               : null,
                                           borderRadius: radius,
                                           border: Border.all(
-                                            color: own
+                                            color:
+                                                state.selectedMessageIds
+                                                    .contains(message.id)
+                                                ? palette.accent
+                                                : own
                                                 ? Colors.white.withAlpha(24)
                                                 : palette.border.withAlpha(110),
+                                            width:
+                                                state.selectedMessageIds
+                                                    .contains(message.id)
+                                                ? 2
+                                                : 1,
                                           ),
                                           boxShadow: [
                                             BoxShadow(
@@ -2461,6 +2511,26 @@ class _MessageTileState extends State<MessageTile> {
                                             crossAxisAlignment:
                                                 CrossAxisAlignment.start,
                                             children: [
+                                              if (message.forwardedFromName !=
+                                                  null)
+                                                Padding(
+                                                  padding:
+                                                      const EdgeInsets.only(
+                                                        bottom: 5,
+                                                      ),
+                                                  child: Text(
+                                                    'Forwarded from ${message.forwardedFromName}',
+                                                    style: TextStyle(
+                                                      color: own
+                                                          ? Colors.white
+                                                                .withAlpha(220)
+                                                          : palette.accent,
+                                                      fontSize: 12,
+                                                      fontWeight:
+                                                          FontWeight.w800,
+                                                    ),
+                                                  ),
+                                                ),
                                               if (message.replyTo != null &&
                                                   !message.replyTo!.isDeleted)
                                                 Padding(
@@ -2511,8 +2581,16 @@ class _MessageTileState extends State<MessageTile> {
                                                         ? Colors.white
                                                         : palette.text,
                                                     fontSize: mobile
-                                                        ? 15
-                                                        : 15.5,
+                                                        ? (_isEmojiOnlyText(
+                                                                message.content,
+                                                              )
+                                                              ? 42
+                                                              : 15)
+                                                        : (_isEmojiOnlyText(
+                                                                message.content,
+                                                              )
+                                                              ? 50
+                                                              : 15.5),
                                                     height: 1.42,
                                                     fontWeight: FontWeight.w400,
                                                   ),
@@ -2527,6 +2605,44 @@ class _MessageTileState extends State<MessageTile> {
                                                     message: message,
                                                     state: state,
                                                   ),
+                                                ),
+                                              if (message.transcript != null &&
+                                                  message.transcript!
+                                                      .trim()
+                                                      .isNotEmpty)
+                                                ExpansionTile(
+                                                  tilePadding: EdgeInsets.zero,
+                                                  childrenPadding:
+                                                      const EdgeInsets.only(
+                                                        bottom: 4,
+                                                      ),
+                                                  dense: true,
+                                                  title: Text(
+                                                    'Transcript',
+                                                    style: TextStyle(
+                                                      color: own
+                                                          ? Colors.white
+                                                                .withAlpha(220)
+                                                          : palette.accent,
+                                                      fontSize: 12,
+                                                      fontWeight:
+                                                          FontWeight.w800,
+                                                    ),
+                                                  ),
+                                                  children: [
+                                                    Text(
+                                                      message.transcript!,
+                                                      style: TextStyle(
+                                                        color: own
+                                                            ? Colors.white
+                                                                  .withAlpha(
+                                                                    210,
+                                                                  )
+                                                            : palette.muted,
+                                                        fontSize: 12,
+                                                      ),
+                                                    ),
+                                                  ],
                                                 ),
                                               if (reactionGroups.isNotEmpty)
                                                 Padding(
@@ -2574,6 +2690,20 @@ class _MessageTileState extends State<MessageTile> {
                                                   mainAxisSize:
                                                       MainAxisSize.min,
                                                   children: [
+                                                    if (message.pinnedAt !=
+                                                        null) ...[
+                                                      Icon(
+                                                        Icons.push_pin_rounded,
+                                                        size: 12,
+                                                        color: own
+                                                            ? Colors.white
+                                                                  .withAlpha(
+                                                                    185,
+                                                                  )
+                                                            : palette.accent,
+                                                      ),
+                                                      const SizedBox(width: 4),
+                                                    ],
                                                     Text(
                                                       _timeLabel(
                                                         message.createdAt,
@@ -2652,6 +2782,30 @@ class _MessageTileState extends State<MessageTile> {
                                             onSelected: (value) {
                                               if (value == 'reply') {
                                                 state.beginReply(message);
+                                              } else if (value == 'copy') {
+                                                Clipboard.setData(
+                                                  ClipboardData(
+                                                    text:
+                                                        message
+                                                            .content
+                                                            .isNotEmpty
+                                                        ? message.content
+                                                        : message.attachmentUrl ??
+                                                              '',
+                                                  ),
+                                                );
+                                              } else if (value == 'pin') {
+                                                state.toggleMessagePin(message);
+                                              } else if (value == 'forward') {
+                                                showForwardMessageDialog(
+                                                  context,
+                                                  state,
+                                                  message,
+                                                );
+                                              } else if (value == 'select') {
+                                                state.toggleMessageSelection(
+                                                  message,
+                                                );
                                               } else if (value == 'edit') {
                                                 showEditMessageDialog(
                                                   context,
@@ -2668,6 +2822,26 @@ class _MessageTileState extends State<MessageTile> {
                                               const PopupMenuItem(
                                                 value: 'reply',
                                                 child: Text('Reply'),
+                                              ),
+                                              const PopupMenuItem(
+                                                value: 'copy',
+                                                child: Text('Copy'),
+                                              ),
+                                              const PopupMenuItem(
+                                                value: 'forward',
+                                                child: Text('Forward'),
+                                              ),
+                                              PopupMenuItem(
+                                                value: 'pin',
+                                                child: Text(
+                                                  message.pinnedAt == null
+                                                      ? 'Pin'
+                                                      : 'Unpin',
+                                                ),
+                                              ),
+                                              const PopupMenuItem(
+                                                value: 'select',
+                                                child: Text('Select'),
                                               ),
                                               if (own)
                                                 const PopupMenuItem(
@@ -5435,7 +5609,6 @@ class _InlineVideoAttachmentState extends State<InlineVideoAttachment> {
   int? _videoHeight;
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
-
   @override
   void initState() {
     super.initState();
@@ -5775,6 +5948,17 @@ class _VoiceMessagePlayerState extends State<VoiceMessagePlayer> {
   bool _ready = false;
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
+  double _rate = 1;
+
+  void _cycleRate() {
+    final next = _rate == 1
+        ? 1.5
+        : _rate == 1.5
+        ? 2.0
+        : 1.0;
+    _player.setRate(next);
+    setState(() => _rate = next);
+  }
 
   @override
   void initState() {
@@ -5857,6 +6041,12 @@ class _VoiceMessagePlayerState extends State<VoiceMessagePlayer> {
               ),
             ),
             const SizedBox(width: 9),
+            TextButton(
+              onPressed: _ready ? _cycleRate : null,
+              child: Text(
+                '${_rate == _rate.roundToDouble() ? _rate.toInt() : _rate}x',
+              ),
+            ),
             Flexible(
               child: Text(
                 'Voice',
@@ -6826,6 +7016,7 @@ class _CircleRecorderDialogState extends State<CircleRecorderDialog> {
   bool _recording = false;
   bool _sending = false;
   bool _switchingCamera = false;
+  int _countdown = 0;
   String? _error;
 
   @override
@@ -7014,13 +7205,22 @@ class _CircleRecorderDialogState extends State<CircleRecorderDialog> {
     if (controller == null ||
         !controller.value.isInitialized ||
         _recording ||
-        _sending) {
+        _sending ||
+        _countdown > 0) {
       return;
     }
 
     try {
       await _disposePreview();
       await _deleteRecordedFile();
+      for (final value in const [3, 2, 1]) {
+        if (!mounted) return;
+        setState(() => _countdown = value);
+        await HapticFeedback.selectionClick();
+        await Future<void>.delayed(const Duration(milliseconds: 650));
+      }
+      if (!mounted) return;
+      setState(() => _countdown = 0);
       await controller.startVideoRecording();
       _timer?.cancel();
       _timer = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -7035,7 +7235,10 @@ class _CircleRecorderDialogState extends State<CircleRecorderDialog> {
       });
     } catch (exception) {
       if (!mounted) return;
-      setState(() => _error = _friendlyCameraError(exception));
+      setState(() {
+        _countdown = 0;
+        _error = _friendlyCameraError(exception);
+      });
     }
   }
 
@@ -7296,6 +7499,25 @@ class _CircleRecorderDialogState extends State<CircleRecorderDialog> {
                                         ),
                                       ],
                                     ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          if (_countdown > 0)
+                            Positioned.fill(
+                              child: Center(
+                                child: Text(
+                                  '$_countdown',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 96,
+                                    fontWeight: FontWeight.w900,
+                                    shadows: [
+                                      Shadow(
+                                        color: Colors.black54,
+                                        blurRadius: 24,
+                                      ),
+                                    ],
                                   ),
                                 ),
                               ),
@@ -8377,20 +8599,12 @@ Future<void> showMessageSearchDialog(
   WebCordState state,
 ) async {
   var query = '';
+  if (!state.messageSearchOpen) state.toggleMessageSearch();
   await showDialog<void>(
     context: context,
     builder: (dialogContext) => StatefulBuilder(
       builder: (context, setDialogState) {
-        final matches = query.trim().isEmpty
-            ? const <ChatMessage>[]
-            : state.messages
-                  .where(
-                    (message) => message.content.toLowerCase().contains(
-                      query.trim().toLowerCase(),
-                    ),
-                  )
-                  .take(8)
-                  .toList();
+        final matches = state.messageSearchResults.take(30).toList();
         return AlertDialog(
           title: const Text('Search messages'),
           content: SizedBox(
@@ -8404,7 +8618,11 @@ Future<void> showMessageSearchDialog(
                     hintText: 'Type a name or phrase',
                     prefixIcon: Icon(Icons.search_rounded),
                   ),
-                  onChanged: (value) => setDialogState(() => query = value),
+                  onChanged: (value) async {
+                    setDialogState(() => query = value);
+                    await state.searchMessages(value);
+                    if (dialogContext.mounted) setDialogState(() {});
+                  },
                 ),
                 if (query.trim().isNotEmpty) ...[
                   const SizedBox(height: 12),
@@ -8450,6 +8668,220 @@ Future<void> showMessageSearchDialog(
           ],
         );
       },
+    ),
+  );
+  if (state.messageSearchOpen) state.toggleMessageSearch();
+}
+
+Future<void> showPinnedMessagesDialog(
+  BuildContext context,
+  WebCordState state,
+) async {
+  await state.togglePinnedMessages();
+  if (!context.mounted) return;
+  await showModalBottomSheet<void>(
+    context: context,
+    showDragHandle: true,
+    builder: (context) => SafeArea(
+      child: SizedBox(
+        height: 420,
+        child: Column(
+          children: [
+            const ListTile(
+              leading: Icon(Icons.push_pin_rounded),
+              title: Text(
+                'Pinned messages',
+                style: TextStyle(fontWeight: FontWeight.w900),
+              ),
+            ),
+            Expanded(
+              child: state.pinnedMessages.isEmpty
+                  ? const Center(child: Text('Nothing pinned in this chat.'))
+                  : ListView.builder(
+                      itemCount: state.pinnedMessages.length,
+                      itemBuilder: (context, index) {
+                        final message = state.pinnedMessages[index];
+                        return ListTile(
+                          leading: UserAvatar(user: message.author, size: 34),
+                          title: Text(message.author.displayLabel),
+                          subtitle: Text(
+                            message.content.isNotEmpty
+                                ? message.content
+                                : message.attachmentName ?? 'Attachment',
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          trailing: IconButton(
+                            tooltip: 'Unpin',
+                            onPressed: () {
+                              state.toggleMessagePin(message);
+                              Navigator.pop(context);
+                            },
+                            icon: const Icon(Icons.push_pin_rounded),
+                          ),
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+  if (state.pinnedMessagesOpen) state.togglePinnedMessages();
+}
+
+Future<void> showForwardMessageDialog(
+  BuildContext context,
+  WebCordState state,
+  ChatMessage message,
+) async {
+  await showModalBottomSheet<void>(
+    context: context,
+    showDragHandle: true,
+    builder: (context) => SafeArea(
+      child: SizedBox(
+        height: 520,
+        child: ListView(
+          children: [
+            const ListTile(
+              leading: Icon(Icons.forward_rounded),
+              title: Text(
+                'Forward message',
+                style: TextStyle(fontWeight: FontWeight.w900),
+              ),
+              subtitle: Text('Choose a destination'),
+            ),
+            for (final channel in state.textChannels)
+              ListTile(
+                leading: const Icon(Icons.tag_rounded),
+                title: Text(channel.name),
+                onTap: () {
+                  state.forwardMessage(message, channelId: channel.id);
+                  Navigator.pop(context);
+                },
+              ),
+            for (final conversation in state.social.conversations)
+              ListTile(
+                leading: UserAvatar(user: conversation.user, size: 34),
+                title: Text(
+                  conversation.user?.displayLabel ?? 'Direct message',
+                ),
+                onTap: () {
+                  state.forwardMessage(
+                    message,
+                    conversationId: conversation.id,
+                  );
+                  Navigator.pop(context);
+                },
+              ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+Future<void> showMessageActionsSheet(
+  BuildContext context,
+  WebCordState state,
+  ChatMessage message, {
+  required bool own,
+}) async {
+  HapticFeedback.mediumImpact();
+  await showModalBottomSheet<void>(
+    context: context,
+    showDragHandle: true,
+    builder: (sheetContext) => SafeArea(
+      child: Wrap(
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                for (final emoji in const ['❤️', '👍', '😂', '🔥', '😮', '😢'])
+                  IconButton(
+                    onPressed: () {
+                      state.toggleMessageReaction(message, emoji: emoji);
+                      Navigator.pop(sheetContext);
+                    },
+                    icon: Text(emoji, style: const TextStyle(fontSize: 23)),
+                  ),
+              ],
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.reply_rounded),
+            title: const Text('Reply'),
+            onTap: () {
+              state.beginReply(message);
+              Navigator.pop(sheetContext);
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.copy_rounded),
+            title: const Text('Copy'),
+            onTap: () {
+              Clipboard.setData(
+                ClipboardData(
+                  text: message.content.isNotEmpty
+                      ? message.content
+                      : message.attachmentUrl ?? '',
+                ),
+              );
+              Navigator.pop(sheetContext);
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.forward_rounded),
+            title: const Text('Forward'),
+            onTap: () {
+              Navigator.pop(sheetContext);
+              showForwardMessageDialog(context, state, message);
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.push_pin_outlined),
+            title: Text(message.pinnedAt == null ? 'Pin' : 'Unpin'),
+            onTap: () {
+              state.toggleMessagePin(message);
+              Navigator.pop(sheetContext);
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.check_circle_outline_rounded),
+            title: const Text('Select'),
+            onTap: () {
+              state.toggleMessageSelection(message);
+              Navigator.pop(sheetContext);
+            },
+          ),
+          if (own)
+            ListTile(
+              leading: const Icon(Icons.edit_rounded),
+              title: const Text('Edit'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                showEditMessageDialog(context, state, message);
+              },
+            ),
+          ListTile(
+            leading: Icon(
+              own ? Icons.delete_outline_rounded : Icons.flag_outlined,
+            ),
+            title: Text(own ? 'Delete' : 'Report'),
+            onTap: () {
+              if (own) {
+                state.deleteMessage(message);
+              } else {
+                state.reportMessage(message);
+              }
+              Navigator.pop(sheetContext);
+            },
+          ),
+        ],
+      ),
     ),
   );
 }
@@ -8987,6 +9419,12 @@ String _normalizeHexColor(String value) {
 }
 
 enum _AttachmentKind { image, video, voice, circleVideo, file }
+
+bool _isEmojiOnlyText(String value) {
+  final trimmed = value.trim();
+  if (trimmed.isEmpty || trimmed.runes.length > 12) return false;
+  return !RegExp(r'[A-Za-z0-9\u0400-\u04FF]').hasMatch(trimmed);
+}
 
 _AttachmentKind _attachmentKind(ChatMessage message) {
   final type = (message.attachmentType ?? '').toUpperCase();

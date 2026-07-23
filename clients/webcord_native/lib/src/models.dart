@@ -158,6 +158,10 @@ class ChatMessage {
     this.attachmentUrl,
     this.attachmentType,
     this.attachmentName,
+    this.transcript,
+    this.forwardedFromName,
+    this.pinnedAt,
+    this.pinnedById,
     this.replyTo,
     this.editedAt,
     this.deletedAt,
@@ -172,6 +176,10 @@ class ChatMessage {
   final String? attachmentUrl;
   final String? attachmentType;
   final String? attachmentName;
+  final String? transcript;
+  final String? forwardedFromName;
+  final DateTime? pinnedAt;
+  final int? pinnedById;
   final PublicUser author;
   final ChatMessage? replyTo;
   final DateTime createdAt;
@@ -194,6 +202,10 @@ class ChatMessage {
       attachmentUrl: attachmentUrl,
       attachmentType: attachmentType,
       attachmentName: attachmentName,
+      transcript: transcript,
+      forwardedFromName: forwardedFromName,
+      pinnedAt: pinnedAt,
+      pinnedById: pinnedById,
       replyTo: replyTo,
       editedAt: editedAt,
       deletedAt: deletedAt,
@@ -211,6 +223,10 @@ class ChatMessage {
       attachmentUrl: _asNullableString(json['attachmentUrl']),
       attachmentType: _asNullableString(json['attachmentType']),
       attachmentName: _asNullableString(json['attachmentName']),
+      transcript: _asNullableString(json['transcript']),
+      forwardedFromName: _asNullableString(json['forwardedFromName']),
+      pinnedAt: _asNullableDate(json['pinnedAt']),
+      pinnedById: _asNullableInt(json['pinnedById']),
       author: PublicUser.fromJson(json['author'] as Map<String, dynamic>?),
       replyTo: json['replyTo'] is Map<String, dynamic>
           ? ChatMessage.fromJson(json['replyTo'] as Map<String, dynamic>)
