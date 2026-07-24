@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -133,6 +134,8 @@ class WebCordState extends ChangeNotifier {
   static const _micDeviceKey = 'webcord_native_mic_device';
   static const _outputDeviceKey = 'webcord_native_output_device';
   static const _cameraDeviceKey = 'webcord_native_camera_device';
+  static const _chatPreferencesKey = 'webcord_native_chat_preferences_v2';
+  static const _chatDraftsKey = 'webcord_native_chat_drafts_v2';
   static const _messagePageSize = 100;
 
   final WebCordApi api;
@@ -175,6 +178,10 @@ class WebCordState extends ChangeNotifier {
   List<ClientMediaDevice> mediaDevices = [];
   final Set<int> unreadChannelIds = {};
   final Set<int> unreadConversationIds = {};
+  final Set<int> pinnedConversationIds = {};
+  final Set<int> archivedConversationIds = {};
+  final Set<int> mutedConversationIds = {};
+  final Map<String, String> chatDrafts = {};
 
   WorkspaceKind workspace = WorkspaceKind.server;
   int? selectedTextChannelId;
@@ -359,6 +366,8 @@ class WebCordState extends ChangeNotifier {
     selectedMicDeviceId = await _store?.getString(_micDeviceKey) ?? '';
     selectedOutputDeviceId = await _store?.getString(_outputDeviceKey) ?? '';
     selectedCameraDeviceId = await _store?.getString(_cameraDeviceKey) ?? '';
+    _restoreChatPreferences(await _store?.getString(_chatPreferencesKey));
+    _restoreChatDrafts(await _store?.getString(_chatDraftsKey));
     themeMode = AppThemeMode.fromName(await _store?.getString(_themeModeKey));
     brightnessMode = AppBrightnessMode.fromName(
       await _store?.getString(_brightnessModeKey),
@@ -670,6 +679,118 @@ class WebCordState extends ChangeNotifier {
     await _loadCurrentChatWallpaper();
     _joinRooms();
     await loadDirectMessages(conversationId);
+  }
+
+  List<DirectConversation> get visibleConversations {
+    final items = social.conversations
+        .where(
+          (conversation) => !archivedConversationIds.contains(conversation.id),
+        )
+        .toList();
+    items.sort((left, right) {
+      final leftPinned = pinnedConversationIds.contains(left.id);
+      final rightPinned = pinnedConversationIds.contains(right.id);
+      if (leftPinned != rightPinned) return rightPinned ? 1 : -1;
+      final leftAt =
+          left.lastMessage?.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+      final rightAt =
+          right.lastMessage?.createdAt ??
+          DateTime.fromMillisecondsSinceEpoch(0);
+      return rightAt.compareTo(leftAt);
+    });
+    return items;
+  }
+
+  String get activeChatDraft {
+    final key = workspace == WorkspaceKind.direct
+        ? 'dm:${selectedConversationId ?? 0}'
+        : 'channel:${selectedTextChannelId ?? 0}';
+    return chatDrafts[key] ?? '';
+  }
+
+  Future<void> setActiveChatDraft(String value) async {
+    final key = workspace == WorkspaceKind.direct
+        ? 'dm:${selectedConversationId ?? 0}'
+        : 'channel:${selectedTextChannelId ?? 0}';
+    if (value.trim().isEmpty) {
+      chatDrafts.remove(key);
+    } else {
+      chatDrafts[key] = value;
+    }
+    await _store?.setString(_chatDraftsKey, jsonEncode(chatDrafts));
+    notifyListeners();
+  }
+
+  Future<void> toggleConversationPinned(int conversationId) async {
+    if (!pinnedConversationIds.add(conversationId)) {
+      pinnedConversationIds.remove(conversationId);
+    }
+    await _persistChatPreferences();
+    notifyListeners();
+  }
+
+  Future<void> toggleConversationArchived(int conversationId) async {
+    if (!archivedConversationIds.add(conversationId)) {
+      archivedConversationIds.remove(conversationId);
+    }
+    await _persistChatPreferences();
+    notifyListeners();
+  }
+
+  Future<void> toggleConversationMuted(int conversationId) async {
+    if (!mutedConversationIds.add(conversationId)) {
+      mutedConversationIds.remove(conversationId);
+    }
+    await _persistChatPreferences();
+    notifyListeners();
+  }
+
+  void _restoreChatPreferences(String? raw) {
+    try {
+      final value = jsonDecode(raw ?? '{}') as Map<String, dynamic>;
+      pinnedConversationIds.addAll(
+        (value['pinned'] as List? ?? const [])
+            .map((id) => int.tryParse('$id'))
+            .whereType<int>(),
+      );
+      archivedConversationIds.addAll(
+        (value['archived'] as List? ?? const [])
+            .map((id) => int.tryParse('$id'))
+            .whereType<int>(),
+      );
+      mutedConversationIds.addAll(
+        (value['muted'] as List? ?? const [])
+            .map((id) => int.tryParse('$id'))
+            .whereType<int>(),
+      );
+    } catch (_) {
+      // Invalid local preferences are ignored.
+    }
+  }
+
+  void _restoreChatDrafts(String? raw) {
+    try {
+      final value = jsonDecode(raw ?? '{}') as Map<String, dynamic>;
+      for (final entry in value.entries) {
+        if (entry.value is String && (entry.value as String).isNotEmpty) {
+          chatDrafts[entry.key] = entry.value as String;
+        }
+      }
+    } catch (_) {
+      // Invalid local drafts are ignored.
+    }
+  }
+
+  Future<void> _persistChatPreferences() {
+    return _store?.setString(
+          _chatPreferencesKey,
+          jsonEncode({
+            'pinned': pinnedConversationIds.toList(),
+            'archived': archivedConversationIds.toList(),
+            'muted': mutedConversationIds.toList(),
+          }),
+        ) ??
+        Future.value();
   }
 
   Future<void> sendMessage(String content) async {

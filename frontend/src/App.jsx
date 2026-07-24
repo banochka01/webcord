@@ -69,6 +69,9 @@ const KEYS = {
   messages: 'webcord_message_cache_v1',
   settings: 'webcord_client_settings_v1',
   folders: 'webcord_custom_folders_v1',
+  chatPreferences: 'webcord_chat_preferences_v2',
+  chatDrafts: 'webcord_chat_drafts_v2',
+  outbox: 'webcord_message_outbox_v1',
   colorMode: 'webcord_color_mode'
 };
 const ADMIN_PATH = '/adminka';
@@ -545,6 +548,37 @@ function getIceServers() {
 
 function getScopeKey(type, id) {
   return `${type}:${id || 'none'}`;
+}
+
+function readStoredObject(key) {
+  try {
+    return JSON.parse(localStorage.getItem(key) || '{}') || {};
+  } catch {
+    return {};
+  }
+}
+
+function renderRichInline(value, keyPrefix = 'rich') {
+  return String(value || '').split(/(\*\*[^*]+\*\*|`[^`]+`|\|\|[^|]+\|\|)/g).filter(Boolean).map((part, index) => {
+    const key = `${keyPrefix}-${index}`;
+    if (part.startsWith('**') && part.endsWith('**')) return <strong key={key}>{part.slice(2, -2)}</strong>;
+    if (part.startsWith('`') && part.endsWith('`')) return <code key={key}>{part.slice(1, -1)}</code>;
+    if (part.startsWith('||') && part.endsWith('||')) return <span className="message-spoiler" tabIndex="0" key={key}>{part.slice(2, -2)}</span>;
+    return part;
+  });
+}
+
+function RichMessageText({ content }) {
+  const blocks = String(content || '').split(/```/);
+  return (
+    <div className="message-rich-text">
+      {blocks.map((block, index) => index % 2
+        ? <pre key={`code-${index}`}><code>{block.trim()}</code></pre>
+        : block.split('\n').map((line, lineIndex) => line.startsWith('>')
+          ? <blockquote key={`quote-${index}-${lineIndex}`}>{renderRichInline(line.replace(/^>\s?/, ''), `quote-${index}-${lineIndex}`)}</blockquote>
+          : <p key={`line-${index}-${lineIndex}`}>{renderRichInline(line, `line-${index}-${lineIndex}`)}</p>))}
+    </div>
+  );
 }
 
 function readMessageCache() {
@@ -2463,7 +2497,7 @@ function MessageItem({ message, currentUserId, workspace, grouped = false, group
               <span>{message.replyTo.content || message.replyTo.attachmentName || 'Attachment'}</span>
             </button>
           ) : null}
-          {message.content ? <p>{message.content}</p> : null}
+          {message.content ? <RichMessageText content={message.content} /> : null}
           {firstUrl ? (
             <a className="message-link-preview" href={firstUrl.href} target="_blank" rel="noreferrer">
               <span>{firstUrl.hostname.replace(/^www\./, '')}</span>
@@ -2498,6 +2532,7 @@ function MessageItem({ message, currentUserId, workspace, grouped = false, group
             </div>
           ) : null}
           <div className="message-footer">
+            {message.queued ? <span className="message-queued">queued</span> : message.optimistic ? <span>sending</span> : null}
             {message.pinnedAt ? <span className="message-pinned-mark" title="Pinned">◆</span> : null}
             {message.editedAt ? <span>edited</span> : null}
             <time dateTime={message.createdAt}>{timeLabel}</time>
@@ -2564,6 +2599,98 @@ function ForwardMessagesModal({ messages, channels, conversations, onSend, onClo
         </div>
       </div>
     </div>
+  );
+}
+
+function ChatListRow({ conversation, preference, draft, selected, unread, onSelect, onToggle }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const timerRef = useRef(null);
+  useEffect(() => () => window.clearTimeout(timerRef.current), []);
+  const preview = draft
+    ? <><strong className="chat-draft-label">Draft:</strong> {draft}</>
+    : conversation.lastMessage?.content || conversation.lastMessage?.attachmentName || getConversationSubtitle(conversation);
+  return (
+    <div className={`chat-list-row-wrap${menuOpen ? ' menu-open' : ''}`}>
+      <button
+        className={`${selected ? 'chat-list-row active' : 'chat-list-row'}${unread ? ' unread' : ''}`}
+        type="button"
+        onClick={onSelect}
+        onContextMenu={(event) => { event.preventDefault(); setMenuOpen(true); }}
+        onPointerDown={(event) => {
+          if (event.pointerType === 'touch') timerRef.current = window.setTimeout(() => setMenuOpen(true), 460);
+        }}
+        onPointerUp={() => window.clearTimeout(timerRef.current)}
+        onPointerCancel={() => window.clearTimeout(timerRef.current)}
+      >
+        <UserAvatar user={conversation.user} />
+        <span className="chat-list-copy">
+          <span className="chat-list-title">
+            <strong>{getConversationTitle(conversation)}</strong>
+            <time>{conversation.lastMessage?.createdAt ? new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' }).format(new Date(conversation.lastMessage.createdAt)) : ''}</time>
+          </span>
+          <span className="chat-list-preview">{preview}</span>
+        </span>
+        <span className="chat-list-flags">
+          {preference.muted ? <AppIcon name="volumeOff" size={14} /> : null}
+          {preference.pinned ? <AppIcon name="pin" size={14} /> : null}
+          {unread ? <b>{conversation.unreadCount || '•'}</b> : null}
+        </span>
+      </button>
+      {menuOpen ? (
+        <div className="chat-row-menu" role="menu">
+          <button type="button" onClick={() => { onToggle('pinned'); setMenuOpen(false); }}>{preference.pinned ? 'Unpin' : 'Pin'}</button>
+          <button type="button" onClick={() => { onToggle('muted'); setMenuOpen(false); }}>{preference.muted ? 'Unmute' : 'Mute'}</button>
+          <button type="button" onClick={() => { onToggle('archived'); setMenuOpen(false); }}>{preference.archived ? 'Restore' : 'Archive'}</button>
+          <button type="button" onClick={() => setMenuOpen(false)}>Close</button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function ChatInfoPanel({ open, conversation, channel, messages, pinnedMessages, muted, onToggleMute, onOpenMessage, onClose }) {
+  if (!open) return null;
+  const media = messages.filter((message) => /^(IMAGE|VIDEO|CIRCLE_VIDEO)$/i.test(message.attachmentType || ''));
+  const files = messages.filter((message) => message.attachmentUrl && !/^(IMAGE|VIDEO|CIRCLE_VIDEO)$/i.test(message.attachmentType || ''));
+  const links = messages.flatMap((message) => {
+    const match = String(message.content || '').match(/https?:\/\/[^\s]+/g) || [];
+    return match.map((url) => ({ url, message }));
+  });
+  return (
+    <aside className="chat-info-panel" aria-label="Chat information">
+      <div className="chat-info-header">
+        <strong>Chat info</strong>
+        <button className="icon-btn" type="button" aria-label="Close chat info" onClick={onClose}><AppIcon name="close" /></button>
+      </div>
+      <div className="chat-info-profile">
+        {conversation?.user ? <UserAvatar user={conversation.user} /> : <span className="channel-icon"><AppIcon name="hash" /></span>}
+        <h3>{conversation ? getConversationTitle(conversation) : channel?.name || 'Channel'}</h3>
+        <p>{conversation ? getConversationSubtitle(conversation) : 'Shared workspace channel'}</p>
+      </div>
+      <div className="chat-info-actions">
+        <button type="button" onClick={onToggleMute}><AppIcon name={muted ? 'volume' : 'volumeOff'} size={17} />{muted ? 'Unmute' : 'Mute'}</button>
+        <button type="button" onClick={() => document.querySelector('[aria-label="Search"]')?.click()}><AppIcon name="search" size={17} />Search</button>
+      </div>
+      <div className="chat-info-stats">
+        <span><strong>{media.length}</strong> media</span>
+        <span><strong>{files.length}</strong> files</span>
+        <span><strong>{links.length}</strong> links</span>
+        <span><strong>{pinnedMessages.length}</strong> pinned</span>
+      </div>
+      <section>
+        <p className="section-label">Shared media</p>
+        <div className="chat-media-grid">
+          {media.slice(-12).map((message) => <button type="button" key={message.id} onClick={() => onOpenMessage(message)}><img src={getAttachmentUrl(message.attachmentUrl)} alt={message.attachmentName || 'Shared media'} /></button>)}
+          {media.length === 0 ? <p className="muted">No shared media yet.</p> : null}
+        </div>
+      </section>
+      <section>
+        <p className="section-label">Recent links and files</p>
+        {[...links.slice(-4).map(({ url, message }) => ({ label: url, message })), ...files.slice(-4).map((message) => ({ label: message.attachmentName || 'Attachment', message }))].map((item, index) => (
+          <button className="chat-info-item" type="button" key={`${item.message.id}-${index}`} onClick={() => onOpenMessage(item.message)}>{item.label}</button>
+        ))}
+      </section>
+    </aside>
   );
 }
 
@@ -3547,6 +3674,14 @@ export default function App() {
   const [dmSearch, setDmSearch] = useState('');
   const [mobileChatSearch, setMobileChatSearch] = useState('');
   const [sidebarFilter, setSidebarFilter] = useState('all');
+  const [chatPreferences, setChatPreferences] = useState(() => readStoredObject(KEYS.chatPreferences));
+  const [chatDrafts, setChatDrafts] = useState(() => readStoredObject(KEYS.chatDrafts));
+  const [chatInfoOpen, setChatInfoOpen] = useState(false);
+  const [chatInfoTab, setChatInfoTab] = useState('media');
+  const [messageOutbox, setMessageOutbox] = useState(() => {
+    const value = readStoredObject(KEYS.outbox);
+    return Array.isArray(value.items) ? value.items : [];
+  });
   const [activeMobileFolderId, setActiveMobileFolderId] = useState('');
   const [customFolders, setCustomFolders] = useState(() => readCustomFolders(JSON.parse(localStorage.getItem('webcord_user') || 'null') || {}));
   const [customFoldersOwnerKey, setCustomFoldersOwnerKey] = useState(() => getFolderOwnerKey(user));
@@ -3704,6 +3839,8 @@ export default function App() {
   const activeTextChannel = textChannels.find((item) => String(item.id) === String(channelId));
   const activeVoiceChannel = voiceChannels.find((item) => String(item.id) === String(voiceChannelId));
   const activeConversation = social.conversations.find((item) => String(item.id) === String(dmConversationId));
+  const activeChatScopeKey = workspace === 'dm' ? `dm:${dmConversationId}` : `channel:${channelId}`;
+  const getChatPreference = (scopeKey) => chatPreferences[scopeKey] || {};
   const visibleMessages = messageSearchOpen && messageSearchQuery.trim()
     ? messageSearchResults
     : messages;
@@ -3725,8 +3862,15 @@ export default function App() {
   const filteredConversations = social.conversations.filter((conversation) => {
     const query = (isMobile ? mobileChatSearch : dmSearch).trim().toLowerCase();
     if (!friendMatchesMobileFolder(conversation.user?.id)) return false;
+    const archived = Boolean(getChatPreference(`dm:${conversation.id}`).archived);
+    if (sidebarFilter === 'archived' ? !archived : archived) return false;
     if (!query) return true;
     return `${getConversationTitle(conversation)} ${getConversationSubtitle(conversation)} ${conversation.user?.username || ''} ${conversation.user?.statusText || ''} ${conversation.lastMessage?.content || ''} ${conversation.lastMessage?.attachmentName || ''}`.toLowerCase().includes(query);
+  }).sort((left, right) => {
+    const leftPinned = Number(Boolean(getChatPreference(`dm:${left.id}`).pinned));
+    const rightPinned = Number(Boolean(getChatPreference(`dm:${right.id}`).pinned));
+    if (leftPinned !== rightPinned) return rightPinned - leftPinned;
+    return new Date(right.lastMessage?.createdAt || 0) - new Date(left.lastMessage?.createdAt || 0);
   });
   const activeStory = stories.find((story) => String(story.id) === String(activeStoryId)) || null;
   const chatWallpaperStyle = clientSettings.chatWallpaper
@@ -4088,7 +4232,57 @@ export default function App() {
     setPinnedMessages([]);
     setSelectedMessageIds([]);
     setForwardingMessages([]);
+    setChatInfoOpen(false);
   }, [workspace, channelId, dmConversationId]);
+
+  useEffect(() => {
+    localStorage.setItem(KEYS.chatPreferences, JSON.stringify(chatPreferences));
+  }, [chatPreferences]);
+
+  useEffect(() => {
+    localStorage.setItem(KEYS.chatDrafts, JSON.stringify(chatDrafts));
+  }, [chatDrafts]);
+
+  useEffect(() => {
+    localStorage.setItem(KEYS.outbox, JSON.stringify({ items: messageOutbox }));
+  }, [messageOutbox]);
+
+  useEffect(() => {
+    if (!networkOnline || !token || messageOutbox.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      for (const queued of messageOutbox) {
+        if (cancelled) break;
+        try {
+          const created = queued.workspace === 'dm'
+            ? await apiFetch(`/dms/${queued.scopeId}/messages`, { method: 'POST', body: JSON.stringify(queued.body) }, token)
+            : await apiFetch('/messages', { method: 'POST', body: JSON.stringify({ ...queued.body, channelId: Number(queued.scopeId) }) }, token);
+          setMessages((current) => mergeMessage(current.filter((message) => String(message.id) !== String(queued.clientId)), created));
+          setMessageOutbox((current) => current.filter((item) => item.clientId !== queued.clientId));
+        } catch {
+          break;
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [networkOnline, token, messageOutbox.length]);
+
+  useEffect(() => {
+    if (editingMessage) return;
+    setNewMessage(chatDrafts[activeChatScopeKey] || '');
+  }, [activeChatScopeKey]);
+
+  useEffect(() => {
+    if (!activeChatScopeKey || editingMessage) return;
+    const draft = newMessage.trim() ? newMessage : '';
+    setChatDrafts((current) => {
+      if ((current[activeChatScopeKey] || '') === draft) return current;
+      const next = { ...current };
+      if (draft) next[activeChatScopeKey] = draft;
+      else delete next[activeChatScopeKey];
+      return next;
+    });
+  }, [newMessage, activeChatScopeKey, editingMessage]);
 
   useEffect(() => {
     window.clearTimeout(messageSearchTimerRef.current);
@@ -5710,14 +5904,56 @@ export default function App() {
     if (isMobile) setMobileChatOpen(true);
   }
 
+  function updateChatPreference(scopeKey, patch) {
+    setChatPreferences((current) => ({
+      ...current,
+      [scopeKey]: { ...(current[scopeKey] || {}), ...patch }
+    }));
+  }
+
+  function toggleConversationPreference(conversationId, field) {
+    const scopeKey = `dm:${conversationId}`;
+    updateChatPreference(scopeKey, { [field]: !getChatPreference(scopeKey)[field] });
+    navigator.vibrate?.(10);
+  }
+
   async function sendMessage(event) {
     event.preventDefault();
     const content = newMessage.trim();
     if ((!content && !pendingAttachment) || !token) return;
     if (!networkOnline) {
-      setError('You are offline. Reconnect before sending.');
+      if (editingMessage) {
+        setError('Reconnect before editing this message.');
+        announceComposerPhase('error');
+        return;
+      }
+      const clientId = -Date.now();
+      const body = {
+        content,
+        attachmentUrl: pendingAttachment?.url,
+        attachmentType: pendingAttachment?.type,
+        attachmentName: pendingAttachment?.name,
+        transcript: pendingAttachment?.transcript,
+        replyToId: replyTarget?.id
+      };
+      setMessages((current) => mergeMessage(current, {
+        id: clientId,
+        channelId: workspace === 'server' ? Number(channelId) : undefined,
+        conversationId: workspace === 'dm' ? Number(dmConversationId) : undefined,
+        ...body,
+        replyTo: replyTarget || null,
+        author: user,
+        createdAt: new Date().toISOString(),
+        queued: true,
+        reactions: []
+      }));
+      setMessageOutbox((current) => [...current, { clientId, workspace, scopeId: workspace === 'dm' ? dmConversationId : channelId, body }]);
+      setNewMessage('');
+      setPendingAttachment(null);
+      setReplyTarget(null);
+      pushToast('Message queued and will send when you reconnect');
       setSocketStatus('offline');
-      announceComposerPhase('error');
+      announceComposerPhase('sent');
       return;
     }
 
@@ -6692,7 +6928,8 @@ export default function App() {
                     ['all', 'All'],
                     ['channels', 'Channels'],
                     ['directs', 'Directs'],
-                    ['unread', 'Unread']
+                    ['unread', 'Unread'],
+                    ['archived', 'Archive']
                   ].map(([id, label]) => (
                     <button
                       key={id}
@@ -6750,19 +6987,17 @@ export default function App() {
                 <p className="section-label">Personal messages</p>
                 {social.conversations.length === 0 ? (
                   <p className="muted empty-copy">Your direct conversations will appear here.</p>
-                ) : social.conversations.slice(0, 6).map((conversation) => (
-                  <button
+                ) : filteredConversations.slice(0, 8).map((conversation) => (
+                  <ChatListRow
                     key={conversation.id}
-                    className="channel-btn conversation-btn concept-conversation-row"
-                    type="button"
-                    onClick={() => selectConversation(conversation.id)}
-                  >
-                    <UserAvatar user={conversation.user} />
-                    <span>
-                      <strong>{getConversationTitle(conversation)}</strong>
-                      <small>{conversation.lastMessage?.content || getConversationSubtitle(conversation)}</small>
-                    </span>
-                  </button>
+                    conversation={conversation}
+                    preference={getChatPreference(`dm:${conversation.id}`)}
+                    draft={chatDrafts[`dm:${conversation.id}`]}
+                    selected={workspace === 'dm' && String(conversation.id) === String(dmConversationId)}
+                    unread={Boolean(conversation.unreadCount)}
+                    onSelect={() => selectConversation(conversation.id)}
+                    onToggle={(field) => toggleConversationPreference(conversation.id, field)}
+                  />
                 ))}
               </section>
               <section className="sidebar-card create-channel-card channel-management">
@@ -6810,7 +7045,7 @@ export default function App() {
               <section className="sidebar-card">
                 <p className="section-label">Direct messages</p>
                 <input value={isMobile ? mobileChatSearch : dmSearch} onChange={(e) => (isMobile ? setMobileChatSearch(e.target.value) : setDmSearch(e.target.value))} placeholder="Search DMs" />
-                {social.conversations.length === 0 ? <p className="muted">Accept a friend request to unlock DMs.</p> : filteredConversations.map((conversation) => <button key={conversation.id} className={String(conversation.id) === String(dmConversationId) ? 'channel-btn active conversation-btn' : 'channel-btn conversation-btn'} type="button" onClick={() => selectConversation(conversation.id)}><strong>{getConversationTitle(conversation)}</strong><span>{getConversationSubtitle(conversation)} - {conversation.lastMessage?.content || conversation.lastMessage?.attachmentName || 'Start talking'}</span></button>)}
+                {social.conversations.length === 0 ? <p className="muted">Accept a friend request to unlock DMs.</p> : filteredConversations.map((conversation) => <ChatListRow key={conversation.id} conversation={conversation} preference={getChatPreference(`dm:${conversation.id}`)} draft={chatDrafts[`dm:${conversation.id}`]} selected={String(conversation.id) === String(dmConversationId)} unread={Boolean(conversation.unreadCount)} onSelect={() => selectConversation(conversation.id)} onToggle={(field) => toggleConversationPreference(conversation.id, field)} />)}
                 {social.conversations.length > 0 && filteredConversations.length === 0 ? <p className="muted">No DMs match this search.</p> : null}
               </section>
               <section className="sidebar-card">
@@ -6867,10 +7102,10 @@ export default function App() {
                 </button>
               )}
               {isMobile ? <UserAvatar user={chatHeaderAvatarUser} className="chat-title-avatar" /> : null}
-              <div className="chat-title-copy">
+              <button className="chat-title-copy chat-title-button" type="button" onClick={() => setChatInfoOpen(true)}>
                 <strong>{chatTitle}</strong>
                 <p className="muted">{workspace === 'friends' ? 'Requests, friends, and direct conversations.' : workspace === 'dm' ? (activeConversation?.user?.statusText || 'в сети') : workspace === 'stories' ? 'Image and video stories expire after 24 hours.' : 'Server chat synced through the backend.'}</p>
-              </div>
+              </button>
             </div>
             <div className="header-badges">
               {!isMobile ? (
@@ -6894,6 +7129,9 @@ export default function App() {
                     onClick={() => setPinnedPanelOpen((value) => !value)}
                   >
                     <AppIcon name="pin" />
+                  </button>
+                  <button className="icon-btn" type="button" title="Chat info" aria-label="Chat info" onClick={() => setChatInfoOpen((value) => !value)}>
+                    <AppIcon name="browser" />
                   </button>
                   <button
                     className="icon-btn"
@@ -6973,6 +7211,20 @@ export default function App() {
               ))}
             </aside>
           ) : null}
+          <ChatInfoPanel
+            open={chatInfoOpen && (workspace === 'server' || workspace === 'dm')}
+            conversation={workspace === 'dm' ? activeConversation : null}
+            channel={workspace === 'server' ? activeTextChannel : null}
+            messages={messages}
+            pinnedMessages={pinnedMessages}
+            muted={Boolean(getChatPreference(activeChatScopeKey).muted)}
+            onToggleMute={() => updateChatPreference(activeChatScopeKey, { muted: !getChatPreference(activeChatScopeKey).muted })}
+            onOpenMessage={(message) => {
+              setChatInfoOpen(false);
+              scrollToMessage(message);
+            }}
+            onClose={() => setChatInfoOpen(false)}
+          />
 
           {voiceJoined ? (
             <VoiceStage

@@ -810,13 +810,13 @@ class _SidebarState extends State<Sidebar> {
               .toList()
         : textChannels;
     final visibleConversations = showUnread
-        ? state.social.conversations
+        ? state.visibleConversations
               .where(
                 (conversation) =>
                     state.unreadConversationIds.contains(conversation.id),
               )
               .toList()
-        : state.social.conversations;
+        : state.visibleConversations;
     return ListView(
       padding: const EdgeInsets.only(top: 4, bottom: 18),
       children: [
@@ -889,6 +889,8 @@ class _SidebarState extends State<Sidebar> {
                   conversation.id == state.selectedConversationId,
               unread: state.unreadConversationIds.contains(conversation.id),
               onTap: () => state.selectConversation(conversation.id),
+              onLongPress: () =>
+                  showConversationActionsSheet(context, state, conversation),
             ),
         ],
       ],
@@ -945,7 +947,7 @@ class _SidebarState extends State<Sidebar> {
 
   Widget _directList(WebCordState state) {
     final query = _query.toLowerCase();
-    final conversations = state.social.conversations
+    final conversations = state.visibleConversations
         .where(
           (conversation) =>
               query.isEmpty ||
@@ -966,6 +968,11 @@ class _SidebarState extends State<Sidebar> {
               onPressed: () => showCreateGroupDialog(context, state),
               icon: const Icon(Icons.group_add_rounded, size: 19),
             ),
+            IconButton(
+              tooltip: 'Archived chats',
+              onPressed: () => showArchivedChatsSheet(context, state),
+              icon: const Icon(Icons.archive_outlined, size: 19),
+            ),
           ],
         ),
         if (conversations.isEmpty)
@@ -978,14 +985,27 @@ class _SidebarState extends State<Sidebar> {
                   ? Icons.groups_rounded
                   : Icons.alternate_email_rounded,
               title: conversation.displayTitle,
-              subtitle: conversation.lastMessage?.content.isNotEmpty == true
+              subtitle:
+                  state.chatDrafts['dm:${conversation.id}']?.isNotEmpty == true
+                  ? 'Draft: ${state.chatDrafts['dm:${conversation.id}']}'
+                  : conversation.lastMessage?.content.isNotEmpty == true
                   ? conversation.lastMessage!.content
                   : conversation.lastMessage?.attachmentName ??
                         conversation.subtitleLabel,
-              trailing: state.unreadConversationIds.contains(conversation.id)
-                  ? const UnreadDot()
-                  : null,
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (state.mutedConversationIds.contains(conversation.id))
+                    const Icon(Icons.volume_off_outlined, size: 15),
+                  if (state.pinnedConversationIds.contains(conversation.id))
+                    const Icon(Icons.push_pin_outlined, size: 15),
+                  if (state.unreadConversationIds.contains(conversation.id))
+                    const UnreadDot(),
+                ],
+              ),
               onTap: () => state.selectConversation(conversation.id),
+              onLongPress: () =>
+                  showConversationActionsSheet(context, state, conversation),
             ),
       ],
     );
@@ -1107,12 +1127,14 @@ class _ConversationSidebarRow extends StatelessWidget {
     required this.selected,
     required this.unread,
     required this.onTap,
+    required this.onLongPress,
   });
 
   final DirectConversation conversation;
   final bool selected;
   final bool unread;
   final VoidCallback onTap;
+  final VoidCallback onLongPress;
 
   @override
   Widget build(BuildContext context) {
@@ -1122,6 +1144,7 @@ class _ConversationSidebarRow extends StatelessWidget {
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
         onTap: onTap,
+        onLongPress: onLongPress,
         child: AnimatedContainer(
           duration: wcFastMotion,
           padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 8),
@@ -1360,23 +1383,27 @@ class ChatHeader extends StatelessWidget {
           ),
           const SizedBox(width: 14),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  state.title,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 19,
-                    fontWeight: FontWeight.w900,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(12),
+              onTap: () => showNativeChatInfo(context, state),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    state.title,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 19,
+                      fontWeight: FontWeight.w900,
+                    ),
                   ),
-                ),
-                Text(
-                  state.subtitle,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(color: palette.muted, fontSize: 12),
-                ),
-              ],
+                  Text(
+                    state.subtitle,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(color: palette.muted, fontSize: 12),
+                  ),
+                ],
+              ),
             ),
           ),
           IconButton(
@@ -1388,6 +1415,11 @@ class ChatHeader extends StatelessWidget {
             tooltip: 'Pinned messages',
             onPressed: () => showPinnedMessagesDialog(context, state),
             icon: const Icon(Icons.push_pin_outlined),
+          ),
+          IconButton(
+            tooltip: 'Chat information',
+            onPressed: () => showNativeChatInfo(context, state),
+            icon: const Icon(Icons.info_outline_rounded),
           ),
           const SizedBox(width: 4),
           if (state.workspace == WorkspaceKind.server)
@@ -2281,6 +2313,63 @@ class ChatWallpaper extends StatelessWidget {
   }
 }
 
+class RichMessageBody extends StatelessWidget {
+  const RichMessageBody({
+    required this.content,
+    required this.style,
+    super.key,
+  });
+
+  final String content;
+  final TextStyle style;
+
+  @override
+  Widget build(BuildContext context) {
+    final spans = <InlineSpan>[];
+    final expression = RegExp(r'(\*\*[^*]+\*\*|`[^`]+`|\|\|[^|]+\|\|)');
+    var cursor = 0;
+    for (final match in expression.allMatches(content)) {
+      if (match.start > cursor) {
+        spans.add(TextSpan(text: content.substring(cursor, match.start)));
+      }
+      final token = match.group(0)!;
+      if (token.startsWith('**')) {
+        spans.add(
+          TextSpan(
+            text: token.substring(2, token.length - 2),
+            style: const TextStyle(fontWeight: FontWeight.w900),
+          ),
+        );
+      } else if (token.startsWith('`')) {
+        spans.add(
+          TextSpan(
+            text: token.substring(1, token.length - 1),
+            style: TextStyle(
+              fontFamily: 'monospace',
+              backgroundColor: Colors.black.withAlpha(38),
+            ),
+          ),
+        );
+      } else {
+        spans.add(
+          TextSpan(
+            text: token.substring(2, token.length - 2),
+            style: TextStyle(
+              backgroundColor: Colors.black.withAlpha(95),
+              color: Colors.transparent,
+            ),
+          ),
+        );
+      }
+      cursor = match.end;
+    }
+    if (cursor < content.length) {
+      spans.add(TextSpan(text: content.substring(cursor)));
+    }
+    return SelectableText.rich(TextSpan(style: style, children: spans));
+  }
+}
+
 class MessageTile extends StatefulWidget {
   const MessageTile({
     required this.message,
@@ -2574,8 +2663,8 @@ class _MessageTileState extends State<MessageTile> {
                                                   ),
                                                 ),
                                               if (message.content.isNotEmpty)
-                                                Text(
-                                                  message.content,
+                                                RichMessageBody(
+                                                  content: message.content,
                                                   style: TextStyle(
                                                     color: own
                                                         ? Colors.white
@@ -2952,11 +3041,27 @@ class Composer extends StatefulWidget {
 class _ComposerState extends State<Composer> {
   final _controller = TextEditingController();
   bool _hasText = false;
+  String _scopeKey = '';
 
   @override
   void initState() {
     super.initState();
+    _scopeKey = _currentScopeKey();
+    _controller.text = widget.state.activeChatDraft;
     _controller.addListener(_syncTextState);
+  }
+
+  @override
+  void didUpdateWidget(covariant Composer oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final nextScope = _currentScopeKey();
+    if (nextScope != _scopeKey) {
+      _scopeKey = nextScope;
+      _controller.text = widget.state.activeChatDraft;
+      _controller.selection = TextSelection.collapsed(
+        offset: _controller.text.length,
+      );
+    }
   }
 
   @override
@@ -2969,7 +3074,12 @@ class _ComposerState extends State<Composer> {
   void _syncTextState() {
     final next = _controller.text.trim().isNotEmpty;
     if (next != _hasText) setState(() => _hasText = next);
+    widget.state.setActiveChatDraft(_controller.text);
   }
+
+  String _currentScopeKey() => widget.state.workspace == WorkspaceKind.direct
+      ? 'dm:${widget.state.selectedConversationId ?? 0}'
+      : 'channel:${widget.state.selectedTextChannelId ?? 0}';
 
   @override
   Widget build(BuildContext context) {
@@ -5088,6 +5198,7 @@ class MobileSheetRow extends StatelessWidget {
     required this.onTap,
     this.subtitle,
     this.trailing,
+    this.onLongPress,
     super.key,
   });
 
@@ -5097,6 +5208,7 @@ class MobileSheetRow extends StatelessWidget {
   final String? subtitle;
   final Widget? trailing;
   final VoidCallback onTap;
+  final VoidCallback? onLongPress;
 
   @override
   Widget build(BuildContext context) {
@@ -5220,6 +5332,7 @@ class NavRow extends StatelessWidget {
     required this.onTap,
     this.subtitle,
     this.trailing,
+    this.onLongPress,
     super.key,
   });
 
@@ -5229,6 +5342,7 @@ class NavRow extends StatelessWidget {
   final String? subtitle;
   final Widget? trailing;
   final VoidCallback onTap;
+  final VoidCallback? onLongPress;
 
   @override
   Widget build(BuildContext context) {
@@ -5241,6 +5355,7 @@ class NavRow extends StatelessWidget {
       child: InkWell(
         borderRadius: BorderRadius.circular(themeSystem.controlRadius),
         onTap: onTap,
+        onLongPress: onLongPress,
         child: AnimatedContainer(
           duration: themeSystem.fastMotion,
           curve: themeSystem.curve,
@@ -8671,6 +8786,280 @@ Future<void> showMessageSearchDialog(
     ),
   );
   if (state.messageSearchOpen) state.toggleMessageSearch();
+}
+
+Future<void> showConversationActionsSheet(
+  BuildContext context,
+  WebCordState state,
+  DirectConversation conversation,
+) async {
+  HapticFeedback.mediumImpact();
+  await showModalBottomSheet<void>(
+    context: context,
+    showDragHandle: true,
+    builder: (sheetContext) => SafeArea(
+      child: Wrap(
+        children: [
+          ListTile(
+            leading: const Icon(Icons.push_pin_outlined),
+            title: Text(
+              state.pinnedConversationIds.contains(conversation.id)
+                  ? 'Unpin chat'
+                  : 'Pin chat',
+            ),
+            onTap: () {
+              state.toggleConversationPinned(conversation.id);
+              Navigator.pop(sheetContext);
+            },
+          ),
+          ListTile(
+            leading: Icon(
+              state.mutedConversationIds.contains(conversation.id)
+                  ? Icons.volume_up_outlined
+                  : Icons.volume_off_outlined,
+            ),
+            title: Text(
+              state.mutedConversationIds.contains(conversation.id)
+                  ? 'Unmute chat'
+                  : 'Mute chat',
+            ),
+            onTap: () {
+              state.toggleConversationMuted(conversation.id);
+              Navigator.pop(sheetContext);
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.archive_outlined),
+            title: Text(
+              state.archivedConversationIds.contains(conversation.id)
+                  ? 'Restore chat'
+                  : 'Archive chat',
+            ),
+            onTap: () {
+              state.toggleConversationArchived(conversation.id);
+              Navigator.pop(sheetContext);
+            },
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+Future<void> showArchivedChatsSheet(
+  BuildContext context,
+  WebCordState state,
+) async {
+  final archived = state.social.conversations
+      .where(
+        (conversation) =>
+            state.archivedConversationIds.contains(conversation.id),
+      )
+      .toList();
+  await showModalBottomSheet<void>(
+    context: context,
+    showDragHandle: true,
+    builder: (sheetContext) => SafeArea(
+      child: SizedBox(
+        height: 480,
+        child: Column(
+          children: [
+            const ListTile(
+              leading: Icon(Icons.archive_rounded),
+              title: Text(
+                'Archived chats',
+                style: TextStyle(fontWeight: FontWeight.w900),
+              ),
+            ),
+            Expanded(
+              child: archived.isEmpty
+                  ? const Center(child: Text('Archive is empty'))
+                  : ListView(
+                      children: [
+                        for (final conversation in archived)
+                          ListTile(
+                            leading: ConversationAvatar(
+                              conversation: conversation,
+                              size: 38,
+                            ),
+                            title: Text(conversation.displayTitle),
+                            subtitle: Text(
+                              conversation.lastMessage?.content ??
+                                  conversation.subtitleLabel,
+                            ),
+                            trailing: IconButton(
+                              tooltip: 'Restore',
+                              onPressed: () {
+                                state.toggleConversationArchived(
+                                  conversation.id,
+                                );
+                                Navigator.pop(sheetContext);
+                              },
+                              icon: const Icon(Icons.unarchive_outlined),
+                            ),
+                            onTap: () {
+                              state.toggleConversationArchived(conversation.id);
+                              state.selectConversation(conversation.id);
+                              Navigator.pop(sheetContext);
+                            },
+                          ),
+                      ],
+                    ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+Future<void> showNativeChatInfo(
+  BuildContext context,
+  WebCordState state,
+) async {
+  final conversation = state.activeConversation;
+  final media = state.messages.where((message) {
+    final type = message.attachmentType?.toUpperCase() ?? '';
+    return type == 'IMAGE' || type == 'VIDEO' || type == 'CIRCLE_VIDEO';
+  }).toList();
+  final files = state.messages
+      .where((message) => message.hasAttachment && !media.contains(message))
+      .toList();
+  final links = state.messages
+      .where((message) => RegExp(r'https?://').hasMatch(message.content))
+      .toList();
+  await showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    showDragHandle: true,
+    builder: (sheetContext) {
+      final palette = WebCordPalette.of(sheetContext);
+      return SafeArea(
+        child: FractionallySizedBox(
+          heightFactor: .88,
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(18, 4, 18, 24),
+            children: [
+              Center(
+                child: conversation != null
+                    ? ConversationAvatar(conversation: conversation, size: 84)
+                    : CircleAvatar(
+                        radius: 42,
+                        backgroundColor: palette.accent.withAlpha(45),
+                        child: const Icon(Icons.tag_rounded, size: 34),
+                      ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                conversation?.displayTitle ??
+                    state.activeTextChannel?.name ??
+                    'Chat',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              Text(
+                conversation?.subtitleLabel ?? 'Shared workspace channel',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: palette.muted),
+              ),
+              const SizedBox(height: 18),
+              Row(
+                children: [
+                  for (final entry in [
+                    ('Media', media.length),
+                    ('Files', files.length),
+                    ('Links', links.length),
+                    ('Pinned', state.pinnedMessages.length),
+                  ])
+                    Expanded(
+                      child: Card(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                          child: Column(
+                            children: [
+                              Text(
+                                '${entry.$2}',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
+                              Text(
+                                entry.$1,
+                                style: TextStyle(
+                                  color: palette.muted,
+                                  fontSize: 10,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              const SectionLabel('Shared media'),
+              if (media.isEmpty)
+                const EmptyLine('No shared media yet')
+              else
+                GridView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 3,
+                    crossAxisSpacing: 5,
+                    mainAxisSpacing: 5,
+                  ),
+                  itemCount: media.length.clamp(0, 12),
+                  itemBuilder: (context, index) {
+                    final message = media[media.length - 1 - index];
+                    return InkWell(
+                      onTap: () => showMediaViewer(context, message, state),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(10),
+                        child: Image.network(
+                          state.api
+                              .attachmentUri(message.attachmentUrl!)
+                              .toString(),
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, _, _) => const ColoredBox(
+                            color: Colors.black12,
+                            child: Icon(Icons.broken_image_outlined),
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              const SectionLabel('Files and links'),
+              for (final message in [
+                ...links.reversed.take(4),
+                ...files.reversed.take(4),
+              ])
+                ListTile(
+                  leading: Icon(
+                    message.hasAttachment
+                        ? Icons.attach_file_rounded
+                        : Icons.link_rounded,
+                  ),
+                  title: Text(
+                    message.attachmentName ?? message.content,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  subtitle: Text(message.author.displayLabel),
+                  onTap: () => message.hasAttachment
+                      ? state.openAttachment(message)
+                      : Clipboard.setData(ClipboardData(text: message.content)),
+                ),
+            ],
+          ),
+        ),
+      );
+    },
+  );
 }
 
 Future<void> showPinnedMessagesDialog(
