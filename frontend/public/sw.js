@@ -1,4 +1,4 @@
-const CACHE_NAME = 'webcord-app-v8-telegram-motion';
+const CACHE_NAME = 'webcord-app-v9-product-depth';
 const SHELL_ASSETS = [
   '/manifest.webmanifest',
   '/icons/webcord.png',
@@ -26,6 +26,39 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('message', (event) => {
   if (event.data?.type === 'SKIP_WAITING') self.skipWaiting();
+});
+
+self.addEventListener('push', (event) => {
+  let payload = {};
+  try {
+    payload = event.data?.json?.() || {};
+  } catch {
+    payload = { body: event.data?.text?.() || 'New activity in WebCord' };
+  }
+  const title = payload.title || 'WebCord';
+  event.waitUntil(self.registration.showNotification(title, {
+    body: payload.body || '',
+    icon: '/icons/webcord.png',
+    badge: '/icons/webcord-white.png',
+    tag: payload.tag || 'webcord-message',
+    renotify: true,
+    data: { url: payload.url || '/' }
+  }));
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const targetUrl = new URL(event.notification.data?.url || '/', self.location.origin).href;
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(async (clients) => {
+      const existing = clients.find((client) => new URL(client.url).origin === self.location.origin);
+      if (existing) {
+        await existing.navigate(targetUrl);
+        return existing.focus();
+      }
+      return self.clients.openWindow(targetUrl);
+    })
+  );
 });
 
 self.addEventListener('fetch', (event) => {

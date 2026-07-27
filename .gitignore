@@ -27,6 +27,7 @@ Thumbs.db
 .vite/
 .cache/
 coverage/
+clients/webcord_native/test/failures/
 
 android/.gradle/
 android/app/build/

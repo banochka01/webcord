@@ -102,6 +102,11 @@ model User {
   reportsResolved         ModerationReport[]  @relation("ReportResolver")
   moderationActions       ModerationAction[]  @relation("ModerationActor")
   moderationTargets       ModerationAction[]  @relation("ModerationTargetUser")
+  messageBookmarks        MessageBookmark[]
+  messageEditHistory      MessageEditHistory[]
+  pushSubscriptions       PushSubscription[]
+  callRecordsCreated      CallRecord[]         @relation("CallRecordCaller")
+  callRecordMemberships   CallRecordParticipant[]
   createdAt               DateTime            @default(now())
 }
 
@@ -150,6 +155,8 @@ model Message {
   replies        Message[]       @relation("MessageReplies")
   reactions      MessageReaction[]
   reports        ModerationReport[]
+  bookmarks      MessageBookmark[]
+  editHistory    MessageEditHistory[]
 
   @@index([channelId, createdAt])
   @@index([channelId, pinnedAt])
@@ -212,6 +219,7 @@ model DirectConversation {
   userTwo    User?           @relation("DirectConversationRightUser", fields: [userTwoId], references: [id], onDelete: Cascade)
   members    DirectConversationMember[]
   messages   DirectMessage[]
+  callRecords CallRecord[]
 
   @@unique([userOneId, userTwoId])
   @@index([updatedAt])
@@ -255,6 +263,8 @@ model DirectMessage {
   replies        DirectMessage[]  @relation("DirectMessageReplies")
   reactions      DirectMessageReaction[]
   reports        ModerationReport[]
+  bookmarks      MessageBookmark[]
+  editHistory    MessageEditHistory[]
 
   @@index([conversationId, createdAt])
   @@index([conversationId, pinnedAt])
@@ -358,4 +368,86 @@ model StoryView {
 
   @@unique([storyId, viewerId])
   @@index([viewerId])
+}
+
+model MessageBookmark {
+  id              Int            @id @default(autoincrement())
+  userId          Int
+  messageId       Int?
+  directMessageId Int?
+  createdAt       DateTime       @default(now())
+  user            User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  message         Message?       @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  directMessage   DirectMessage? @relation(fields: [directMessageId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, messageId])
+  @@unique([userId, directMessageId])
+  @@index([userId, createdAt])
+}
+
+model MessageEditHistory {
+  id              Int            @id @default(autoincrement())
+  editorId        Int
+  messageId       Int?
+  directMessageId Int?
+  previousContent String
+  createdAt       DateTime       @default(now())
+  editor          User           @relation(fields: [editorId], references: [id], onDelete: Cascade)
+  message         Message?       @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  directMessage   DirectMessage? @relation(fields: [directMessageId], references: [id], onDelete: Cascade)
+
+  @@index([messageId, createdAt])
+  @@index([directMessageId, createdAt])
+  @@index([editorId, createdAt])
+}
+
+model PushSubscription {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  notificationMode String @default("all")
+  quietHoursEnabled Boolean @default(false)
+  quietHoursStart String @default("22:00")
+  quietHoursEnd String @default("08:00")
+  timezoneOffset Int @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model CallRecord {
+  id              String                  @id
+  conversationId  Int
+  callerId        Int
+  title           String
+  video           Boolean                 @default(false)
+  status          String                  @default("RINGING")
+  startedAt       DateTime                @default(now())
+  answeredAt      DateTime?
+  endedAt         DateTime?
+  durationSeconds Int                     @default(0)
+  conversation    DirectConversation      @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  caller          User                    @relation("CallRecordCaller", fields: [callerId], references: [id], onDelete: Cascade)
+  participants    CallRecordParticipant[]
+
+  @@index([conversationId, startedAt])
+  @@index([callerId, startedAt])
+  @@index([status, startedAt])
+}
+
+model CallRecordParticipant {
+  id        Int        @id @default(autoincrement())
+  callId    String
+  userId    Int
+  joinedAt  DateTime?
+  leftAt    DateTime?
+  call      CallRecord @relation(fields: [callId], references: [id], onDelete: Cascade)
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([callId, userId])
+  @@index([userId, callId])
 }

@@ -283,6 +283,90 @@ class WebCordApi {
     return ChatMessage.fromJson(json);
   }
 
+  Future<bool> toggleChannelMessageBookmark({
+    required String token,
+    required int messageId,
+  }) async {
+    final json = await _send(
+      'PUT',
+      '/messages/$messageId/bookmark',
+      token: token,
+    );
+    return json is Map && json['bookmarked'] == true;
+  }
+
+  Future<bool> toggleDirectMessageBookmark({
+    required String token,
+    required int conversationId,
+    required int messageId,
+  }) async {
+    final json = await _send(
+      'PUT',
+      '/dms/$conversationId/messages/$messageId/bookmark',
+      token: token,
+    );
+    return json is Map && json['bookmarked'] == true;
+  }
+
+  Future<List<SavedMessage>> savedMessages(String token) async {
+    final data = await _send('GET', '/me/bookmarks', token: token);
+    final rows = data is Map ? data['bookmarks'] : null;
+    if (rows is! List) return const [];
+    return rows
+        .whereType<Map>()
+        .map((item) => SavedMessage.fromJson(Map<String, dynamic>.from(item)))
+        .toList();
+  }
+
+  Future<List<MessageEditVersion>> channelMessageHistory({
+    required String token,
+    required int messageId,
+  }) async {
+    final data = await _send(
+      'GET',
+      '/messages/$messageId/history',
+      token: token,
+    );
+    return _editHistory(data);
+  }
+
+  Future<List<MessageEditVersion>> directMessageHistory({
+    required String token,
+    required int conversationId,
+    required int messageId,
+  }) async {
+    final data = await _send(
+      'GET',
+      '/dms/$conversationId/messages/$messageId/history',
+      token: token,
+    );
+    return _editHistory(data);
+  }
+
+  Future<MediaPage> sharedMedia({
+    required String token,
+    int? channelId,
+    int? conversationId,
+    int? cursor,
+    int limit = 48,
+  }) async {
+    final params = <String, String>{
+      if (channelId != null) 'channelId': '$channelId',
+      if (conversationId != null) 'conversationId': '$conversationId',
+      if (cursor != null) 'cursor': '$cursor',
+      'types': 'IMAGE,VIDEO,CIRCLE_VIDEO',
+      'limit': '$limit',
+    };
+    final data = await _send(
+      'GET',
+      '/media?${Uri(queryParameters: params).query}',
+      token: token,
+    );
+    return MediaPage.fromJson(
+      Map<String, dynamic>.from(data as Map? ?? const {}),
+    );
+  }
+
   Future<ChatMessage> editChannelMessage({
     required String token,
     required int messageId,
@@ -505,6 +589,16 @@ class WebCordApi {
     await _send('POST', '/calls/$callId/end', token: token);
   }
 
+  Future<List<CallRecord>> callHistory(String token) async {
+    final data = await _send('GET', '/calls?limit=100', token: token);
+    final rows = data is Map ? data['calls'] : null;
+    if (rows is! List) return const [];
+    return rows
+        .whereType<Map>()
+        .map((item) => CallRecord.fromJson(Map<String, dynamic>.from(item)))
+        .toList();
+  }
+
   Future<List<StoryItem>> stories(String token) async {
     final data = await _send('GET', '/stories', token: token);
     if (data is! List) return const [];
@@ -669,6 +763,18 @@ class WebCordApi {
         .whereType<Map>()
         .map(
           (item) => MessageReaction.fromJson(Map<String, dynamic>.from(item)),
+        )
+        .toList();
+  }
+
+  List<MessageEditVersion> _editHistory(dynamic data) {
+    final rows = data is Map ? data['history'] : null;
+    if (rows is! List) return const [];
+    return rows
+        .whereType<Map>()
+        .map(
+          (item) =>
+              MessageEditVersion.fromJson(Map<String, dynamic>.from(item)),
         )
         .toList();
   }

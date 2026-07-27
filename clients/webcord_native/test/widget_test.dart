@@ -52,6 +52,56 @@ void main() {
     expect(atmosphere.usesGlass, isTrue);
   });
 
+  test(
+    'saved messages, media pages and call history decode server payloads',
+    () {
+      final messagePayload = {
+        'id': 42,
+        'content': 'keep this',
+        'conversationId': 12,
+        'bookmarked': true,
+        'createdAt': '2026-07-28T01:00:00.000Z',
+        'author': {'id': 2, 'username': 'alice'},
+      };
+      final saved = SavedMessage.fromJson({
+        'id': 8,
+        'type': 'direct-message',
+        'createdAt': '2026-07-28T01:00:00.000Z',
+        'conversation': {
+          'id': 12,
+          'type': 'DIRECT',
+          'title': 'Alice',
+          'user': {'id': 2, 'username': 'alice'},
+        },
+        'message': messagePayload,
+      });
+      final media = MediaPage.fromJson({
+        'items': [
+          {...messagePayload, 'bookmarked': false},
+        ],
+        'nextCursor': 40,
+      });
+      final call = CallRecord.fromJson({
+        'id': 'call-1',
+        'conversationId': 12,
+        'title': 'Alice',
+        'callerId': 1,
+        'status': 'COMPLETED',
+        'startedAt': '2026-07-28T01:00:00.000Z',
+        'durationSeconds': 61,
+        'outgoing': true,
+        'participants': const [],
+      });
+
+      expect(saved.message.bookmarked, isTrue);
+      expect(saved.conversation?.displayTitle, 'alice');
+      expect(media.items.single.bookmarked, isFalse);
+      expect(media.nextCursor, 40);
+      expect(call.durationSeconds, 61);
+      expect(call.outgoing, isTrue);
+    },
+  );
+
   testWidgets('renders native WebCord app shell', (tester) async {
     await tester.pumpWidget(const WebCordNativeApp());
     await tester.pump(const Duration(milliseconds: 500));

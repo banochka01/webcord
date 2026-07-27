@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
+    "test": "node --test",
     "db:generate": "prisma generate",
     "db:validate": "prisma validate",
     "db:push": "prisma db push"
@@ -18,7 +19,8 @@
     "express": "^4.21.1",
     "jsonwebtoken": "^9.0.2",
     "multer": "^2.1.1",
-    "socket.io": "^4.8.1"
+    "socket.io": "^4.8.1",
+    "web-push": "^3.6.7"
   },
   "devDependencies": {
     "prisma": "^5.22.0"

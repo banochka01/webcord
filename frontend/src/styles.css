@@ -9541,6 +9541,10 @@ body::after {
   backdrop-filter: blur(22px) saturate(1.2);
 }
 
+.landing-page.design-draft-a .landing-login-btn {
+  color: #f7f8ff;
+}
+
 .landing-page.design-draft-a .landing-kicker {
   border-color: rgba(123, 107, 255, 0.32);
   background: rgba(123, 107, 255, 0.12);

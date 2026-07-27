@@ -6,10 +6,16 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import multer from 'multer';
+import webPush from 'web-push';
 import { fileURLToPath } from 'node:url';
 import { Server } from 'socket.io';
 import { prisma } from './prisma.js';
 import { authMiddleware, comparePassword, hashPassword, signToken, verifyToken } from './auth.js';
+import {
+  extractMentionUsernames,
+  isPushQuietHours,
+  normalizePushPreferences
+} from './push-utils.js';
 
 const app = express();
 const server = http.createServer(app);
@@ -35,6 +41,10 @@ const TURN_URLS = String(process.env.TURN_URLS || process.env.TURN_URL || '')
   .filter(Boolean);
 const TURN_USERNAME = String(process.env.TURN_USERNAME || '').trim();
 const TURN_CREDENTIAL = String(process.env.TURN_CREDENTIAL || '').trim();
+const VAPID_SUBJECT = String(process.env.VAPID_SUBJECT || 'mailto:admin@webcordes.ru').trim();
+const VAPID_PUBLIC_KEY = String(process.env.VAPID_PUBLIC_KEY || '').trim();
+const VAPID_PRIVATE_KEY = String(process.env.VAPID_PRIVATE_KEY || '').trim();
+const WEB_PUSH_ENABLED = Boolean(VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY);
 const BLOCKED_UPLOAD_EXTENSIONS = new Set(['.cjs', '.htm', '.html', '.js', '.mjs', '.svg', '.xhtml', '.xml']);
 const BLOCKED_UPLOAD_MIME_TYPES = new Set([
   'application/javascript',
@@ -159,6 +169,7 @@ const clientDownloadUpload = multer({
 const voiceParticipants = new Map();
 const callSessions = new Map();
 const callParticipants = new Map();
+const callTimeouts = new Map();
 const rateLimitBuckets = new Map();
 const publicUserSelect = {
   id: true,
@@ -194,6 +205,10 @@ const MODERATION_ACTIONS = new Set(['MUTE', 'UNMUTE', 'BAN', 'UNBAN']);
 const MESSAGE_REACTIONS = new Set(['❤️', '👍', '😂', '🔥', '👏', '😮']);
 const MAX_SIGNAL_SDP_LENGTH = 80_000;
 const MAX_ICE_CANDIDATE_LENGTH = 4_096;
+
+if (WEB_PUSH_ENABLED) {
+  webPush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
+}
 
 function normalizeUsername(value) {
   return String(value || '').trim().toLowerCase();
@@ -377,6 +392,65 @@ async function getReadinessSnapshot() {
     checks,
     voiceRooms: voiceParticipants.size
   };
+}
+
+async function sendPushToUsers(userIds, payload, { direct = false, mention = false } = {}) {
+  if (!WEB_PUSH_ENABLED) return;
+  const uniqueIds = [...new Set(userIds.map(Number).filter(Boolean))];
+  if (uniqueIds.length === 0) return;
+
+  const subscriptions = await prisma.pushSubscription.findMany({
+    where: { userId: { in: uniqueIds } }
+  });
+
+  await Promise.allSettled(subscriptions.map(async (subscription) => {
+    if (isPushQuietHours(subscription)) return;
+    if (subscription.notificationMode === 'mentions' && !direct && !mention) return;
+    try {
+      await webPush.sendNotification({
+        endpoint: subscription.endpoint,
+        keys: { p256dh: subscription.p256dh, auth: subscription.auth }
+      }, JSON.stringify(payload), {
+        TTL: 120,
+        urgency: direct || mention ? 'high' : 'normal'
+      });
+    } catch (error) {
+      if ([404, 410].includes(Number(error?.statusCode))) {
+        await prisma.pushSubscription.deleteMany({ where: { endpoint: subscription.endpoint } });
+        return;
+      }
+      console.error('Push notification failed:', error?.message || error);
+    }
+  }));
+}
+
+async function notifyChannelMentions(message, channel) {
+  const usernames = extractMentionUsernames(message.content, normalizeUsername);
+  if (usernames.length === 0) return;
+  const recipients = await prisma.user.findMany({
+    where: {
+      username: { in: usernames },
+      id: { not: message.authorId }
+    },
+    select: { id: true }
+  });
+  await sendPushToUsers(recipients.map((user) => user.id), {
+    title: `#${channel.name}`,
+    body: `${message.author?.displayName || message.author?.username || 'Someone'}: ${message.content || message.attachmentName || 'Attachment'}`,
+    url: `/?workspace=server&channel=${channel.id}&message=${message.id}`,
+    tag: `channel-${channel.id}`
+  }, { mention: true });
+}
+
+async function notifyDirectMessage(message, conversation) {
+  const recipientIds = getConversationMemberIds(conversation)
+    .filter((userId) => Number(userId) !== Number(message.authorId));
+  await sendPushToUsers(recipientIds, {
+    title: conversation.title || message.author?.displayName || message.author?.username || 'WebCord',
+    body: message.content || message.attachmentName || 'Attachment',
+    url: `/?workspace=dm&conversation=${conversation.id}&message=${message.id}`,
+    tag: `dm-${conversation.id}`
+  }, { direct: true });
 }
 
 function booleanFromPayload(value) {
@@ -1052,6 +1126,29 @@ function serializeCallSession(call) {
   };
 }
 
+function serializeCallRecord(record, currentUserId) {
+  if (!record) return null;
+  return {
+    id: record.id,
+    conversationId: record.conversationId,
+    title: record.title,
+    video: Boolean(record.video),
+    callerId: record.callerId,
+    status: record.status,
+    startedAt: record.startedAt,
+    answeredAt: record.answeredAt,
+    endedAt: record.endedAt,
+    durationSeconds: Number(record.durationSeconds || 0),
+    outgoing: Number(record.callerId) === Number(currentUserId),
+    participants: (record.participants || []).map((participant) => ({
+      userId: participant.userId,
+      joinedAt: participant.joinedAt,
+      leftAt: participant.leftAt,
+      user: participant.user ? serializePublicUser(participant.user) : undefined
+    }))
+  };
+}
+
 function getCallRoomKey(callId) {
   const value = String(callId || '').trim();
   return value ? `call:${value}` : '';
@@ -1060,6 +1157,38 @@ function getCallRoomKey(callId) {
 function getCallParticipantList(roomKey) {
   const participants = callParticipants.get(roomKey) || new Map();
   return Array.from(participants.entries()).map(([socketId, participant]) => serializeVoiceParticipant(socketId, participant));
+}
+
+function clearCallTimeout(callId) {
+  const timeout = callTimeouts.get(callId);
+  if (timeout) clearTimeout(timeout);
+  callTimeouts.delete(callId);
+}
+
+async function finalizeCallRecord(callId, status, endedAt = new Date()) {
+  clearCallTimeout(callId);
+  const record = await prisma.callRecord.findUnique({
+    where: { id: callId },
+    select: { startedAt: true, answeredAt: true, endedAt: true }
+  });
+  if (!record || record.endedAt) return;
+  const durationStart = record.answeredAt || record.startedAt || endedAt;
+  await prisma.callRecord.update({
+    where: { id: callId },
+    data: {
+      status,
+      endedAt,
+      durationSeconds: record.answeredAt
+        ? Math.max(0, Math.round((endedAt.getTime() - durationStart.getTime()) / 1000))
+        : 0,
+      participants: {
+        updateMany: {
+          where: { leftAt: null },
+          data: { leftAt: endedAt }
+        }
+      }
+    }
+  });
 }
 
 function leaveCallRoom(socket) {
@@ -1074,11 +1203,22 @@ function leaveCallRoom(socket) {
     participants.delete(socket.id);
     if (participants.size === 0) {
       callParticipants.delete(roomKey);
-      if (callId) callSessions.delete(callId);
+      if (callId) {
+        const call = callSessions.get(callId);
+        callSessions.delete(callId);
+        finalizeCallRecord(callId, call?.status === 'ACTIVE' ? 'COMPLETED' : 'MISSED')
+          .catch((error) => console.error('Could not finalize empty call:', error));
+      }
     }
   }
 
   socket.to(roomKey).emit('call-user-left', { socketId: socket.id, username: socket.user.username });
+  if (callId && socket.user?.userId) {
+    prisma.callRecordParticipant.updateMany({
+      where: { callId, userId: socket.user.userId, leftAt: null },
+      data: { leftAt: new Date() }
+    }).catch((error) => console.error('Could not update call participant departure:', error));
+  }
   delete socket.data.callRoomKey;
   delete socket.data.callId;
 }
@@ -1116,7 +1256,7 @@ async function createChannelMessage({ channelId, userId, content, attachmentUrl,
 
   const channel = await prisma.channel.findUnique({
     where: { id: channelId },
-    select: { id: true, type: true, guildId: true }
+    select: { id: true, name: true, type: true, guildId: true }
   });
 
   if (!channel || channel.type !== 'TEXT') {
@@ -1155,6 +1295,10 @@ async function createChannelMessage({ channelId, userId, content, attachmentUrl,
         }
       }
     }
+  });
+
+  notifyChannelMentions(message, channel).catch((error) => {
+    console.error('Could not send channel mention push:', error);
   });
 
   return { ...message, guildId: channel.guildId };
@@ -1224,6 +1368,13 @@ async function createDirectConversationMessage({ conversationId, userId, content
     data: { updatedAt: new Date() }
   });
 
+  notifyDirectMessage(message, {
+    ...conversation,
+    title: serializeDirectConversation(conversation, userId).title
+  }).catch((error) => {
+    console.error('Could not send direct message push:', error);
+  });
+
   return { conversation, message };
 }
 
@@ -1273,6 +1424,10 @@ app.get('/api/health', (_req, res) => {
 app.get('/api/ready', async (_req, res) => {
   const readiness = await getReadinessSnapshot();
   res.status(readiness.ok ? 200 : 503).json(readiness);
+});
+
+app.get('/api/push/vapid-public-key', (_req, res) => {
+  res.json({ enabled: WEB_PUSH_ENABLED, publicKey: WEB_PUSH_ENABLED ? VAPID_PUBLIC_KEY : '' });
 });
 
 app.get('/api/voice/ice-servers', authMiddleware, (_req, res) => {
@@ -1800,6 +1955,59 @@ app.put('/api/me/client-state', authMiddleware, async (req, res) => {
   }
 });
 
+app.post('/api/push/subscriptions', authMiddleware, async (req, res) => {
+  try {
+    if (!WEB_PUSH_ENABLED) {
+      return sendApiError(res, 503, 'WEB_PUSH_DISABLED', 'Web Push is not configured on this server.');
+    }
+    const endpoint = String(req.body?.subscription?.endpoint || '').trim();
+    const p256dh = String(req.body?.subscription?.keys?.p256dh || '').trim();
+    const auth = String(req.body?.subscription?.keys?.auth || '').trim();
+    if (!endpoint.startsWith('https://') || !p256dh || !auth) {
+      return sendApiError(res, 400, 'INVALID_PUSH_SUBSCRIPTION', 'Invalid push subscription.');
+    }
+    if (endpoint.length > 2_048 || p256dh.length > 512 || auth.length > 512) {
+      return sendApiError(res, 400, 'INVALID_PUSH_SUBSCRIPTION', 'Push subscription is too large.');
+    }
+    const preferences = normalizePushPreferences(req.body?.preferences);
+    const subscription = await prisma.pushSubscription.upsert({
+      where: { endpoint },
+      create: {
+        userId: req.user.userId,
+        endpoint,
+        p256dh,
+        auth,
+        ...preferences
+      },
+      update: {
+        userId: req.user.userId,
+        p256dh,
+        auth,
+        ...preferences
+      },
+      select: { id: true, updatedAt: true }
+    });
+    return res.status(201).json({ ok: true, subscription });
+  } catch (error) {
+    console.error(error);
+    return sendCaughtApiError(res, error, 'PUSH_SUBSCRIPTION_FAILED', 'Failed to save push subscription.');
+  }
+});
+
+app.delete('/api/push/subscriptions', authMiddleware, async (req, res) => {
+  try {
+    const endpoint = String(req.body?.endpoint || '').trim();
+    if (!endpoint) return sendApiError(res, 400, 'PUSH_ENDPOINT_REQUIRED', 'Push endpoint is required.');
+    await prisma.pushSubscription.deleteMany({
+      where: { endpoint, userId: req.user.userId }
+    });
+    return res.json({ ok: true });
+  } catch (error) {
+    console.error(error);
+    return sendCaughtApiError(res, error, 'PUSH_UNSUBSCRIBE_FAILED', 'Failed to remove push subscription.');
+  }
+});
+
 app.patch('/api/me/profile', authMiddleware, async (req, res) => {
   try {
     const currentUser = await prisma.user.update({
@@ -2178,6 +2386,229 @@ app.get('/api/search', authMiddleware, async (req, res) => {
   }
 });
 
+app.get('/api/me/bookmarks', authMiddleware, async (req, res) => {
+  try {
+    const rows = await prisma.messageBookmark.findMany({
+      where: { userId: req.user.userId },
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+      include: {
+        message: {
+          include: {
+            author: { select: publicUserSelect },
+            channel: { select: { id: true, name: true, guildId: true } },
+            reactions: { select: { emoji: true, userId: true } },
+            replyTo: { include: { author: { select: publicUserSelect } } }
+          }
+        },
+        directMessage: {
+          include: {
+            author: { select: publicUserSelect },
+            conversation: {
+              include: {
+                userOne: { select: publicUserSelect },
+                userTwo: { select: publicUserSelect },
+                members: { include: { user: { select: publicUserSelect } } }
+              }
+            },
+            reactions: { select: { emoji: true, userId: true } },
+            replyTo: { include: { author: { select: publicUserSelect } } }
+          }
+        }
+      }
+    });
+    const bookmarks = rows.flatMap((row) => {
+      if (row.message && !row.message.deletedAt) {
+        return [{
+          id: row.id,
+          type: 'channel',
+          createdAt: row.createdAt,
+          message: { ...row.message, bookmarked: true }
+        }];
+      }
+      if (
+        row.directMessage &&
+        !row.directMessage.deletedAt &&
+        getConversationMemberIds(row.directMessage.conversation).includes(req.user.userId)
+      ) {
+        const { conversation, ...message } = row.directMessage;
+        return [{
+          id: row.id,
+          type: 'direct-message',
+          createdAt: row.createdAt,
+          conversation: serializeDirectConversation(conversation, req.user.userId),
+          message: { ...message, conversationId: conversation.id, bookmarked: true }
+        }];
+      }
+      return [];
+    });
+    return res.json({ bookmarks });
+  } catch (error) {
+    console.error(error);
+    return sendCaughtApiError(res, error, 'BOOKMARKS_FETCH_FAILED', 'Failed to load saved messages.');
+  }
+});
+
+app.put('/api/messages/:messageId/bookmark', authMiddleware, messageRateLimit, async (req, res) => {
+  try {
+    const messageId = parsePositiveInt(req.params.messageId);
+    if (!messageId) return sendApiError(res, 400, 'INVALID_MESSAGE_ID', 'Invalid message id.');
+    const message = await prisma.message.findFirst({
+      where: { id: messageId, deletedAt: null },
+      select: { id: true, channelId: true }
+    });
+    if (!message) return sendApiError(res, 404, 'MESSAGE_NOT_FOUND', 'Message not found.');
+    const key = { userId: req.user.userId, messageId };
+    const existing = await prisma.messageBookmark.findUnique({
+      where: { userId_messageId: key }
+    });
+    if (existing) {
+      await prisma.messageBookmark.delete({ where: { id: existing.id } });
+      return res.json({ messageId, channelId: message.channelId, bookmarked: false });
+    }
+    await prisma.messageBookmark.create({ data: key });
+    return res.json({ messageId, channelId: message.channelId, bookmarked: true });
+  } catch (error) {
+    console.error(error);
+    return sendCaughtApiError(res, error, 'BOOKMARK_UPDATE_FAILED', 'Failed to update saved message.');
+  }
+});
+
+app.put('/api/dms/:conversationId/messages/:messageId/bookmark', authMiddleware, messageRateLimit, async (req, res) => {
+  try {
+    const conversationId = parsePositiveInt(req.params.conversationId);
+    const messageId = parsePositiveInt(req.params.messageId);
+    if (!conversationId || !messageId) {
+      return sendApiError(res, 400, 'INVALID_MESSAGE_ID', 'Invalid message id.');
+    }
+    const [conversation, message] = await Promise.all([
+      prisma.directConversation.findUnique({ where: { id: conversationId }, include: { members: true } }),
+      prisma.directMessage.findFirst({ where: { id: messageId, conversationId, deletedAt: null }, select: { id: true } })
+    ]);
+    if (!conversation || !message || !getConversationMemberIds(conversation).includes(req.user.userId)) {
+      return sendApiError(res, 404, 'MESSAGE_NOT_FOUND', 'Message not found.');
+    }
+    const key = { userId: req.user.userId, directMessageId: messageId };
+    const existing = await prisma.messageBookmark.findUnique({
+      where: { userId_directMessageId: key }
+    });
+    if (existing) {
+      await prisma.messageBookmark.delete({ where: { id: existing.id } });
+      return res.json({ messageId, conversationId, bookmarked: false });
+    }
+    await prisma.messageBookmark.create({ data: key });
+    return res.json({ messageId, conversationId, bookmarked: true });
+  } catch (error) {
+    console.error(error);
+    return sendCaughtApiError(res, error, 'BOOKMARK_UPDATE_FAILED', 'Failed to update saved message.');
+  }
+});
+
+app.get('/api/messages/:messageId/history', authMiddleware, async (req, res) => {
+  try {
+    const messageId = parsePositiveInt(req.params.messageId);
+    if (!messageId) return sendApiError(res, 400, 'INVALID_MESSAGE_ID', 'Invalid message id.');
+    const message = await prisma.message.findFirst({
+      where: { id: messageId, deletedAt: null },
+      select: { id: true, content: true, editedAt: true }
+    });
+    if (!message) return sendApiError(res, 404, 'MESSAGE_NOT_FOUND', 'Message not found.');
+    const history = await prisma.messageEditHistory.findMany({
+      where: { messageId },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+      include: { editor: { select: publicUserSelect } }
+    });
+    return res.json({ message, history });
+  } catch (error) {
+    console.error(error);
+    return sendCaughtApiError(res, error, 'MESSAGE_HISTORY_FAILED', 'Failed to load edit history.');
+  }
+});
+
+app.get('/api/dms/:conversationId/messages/:messageId/history', authMiddleware, async (req, res) => {
+  try {
+    const conversationId = parsePositiveInt(req.params.conversationId);
+    const messageId = parsePositiveInt(req.params.messageId);
+    const conversation = conversationId
+      ? await prisma.directConversation.findUnique({ where: { id: conversationId }, include: { members: true } })
+      : null;
+    if (!conversation || !messageId || !getConversationMemberIds(conversation).includes(req.user.userId)) {
+      return sendApiError(res, 404, 'MESSAGE_NOT_FOUND', 'Message not found.');
+    }
+    const message = await prisma.directMessage.findFirst({
+      where: { id: messageId, conversationId, deletedAt: null },
+      select: { id: true, content: true, editedAt: true }
+    });
+    if (!message) return sendApiError(res, 404, 'MESSAGE_NOT_FOUND', 'Message not found.');
+    const history = await prisma.messageEditHistory.findMany({
+      where: { directMessageId: messageId },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+      include: { editor: { select: publicUserSelect } }
+    });
+    return res.json({ message, history });
+  } catch (error) {
+    console.error(error);
+    return sendCaughtApiError(res, error, 'MESSAGE_HISTORY_FAILED', 'Failed to load edit history.');
+  }
+});
+
+app.get('/api/media', authMiddleware, async (req, res) => {
+  try {
+    const channelId = parsePositiveInt(req.query.channelId);
+    const conversationId = parsePositiveInt(req.query.conversationId);
+    if (Boolean(channelId) === Boolean(conversationId)) {
+      return sendApiError(res, 400, 'MEDIA_SCOPE_REQUIRED', 'Choose one media scope.');
+    }
+    const requestedTypes = String(req.query.types || 'IMAGE,VIDEO,CIRCLE_VIDEO,AUDIO')
+      .split(',')
+      .map((value) => value.trim().toUpperCase())
+      .filter((value) => ATTACHMENT_TYPES.has(value) && value !== 'FILE');
+    const attachmentTypes = requestedTypes.length > 0 ? requestedTypes : ['IMAGE', 'VIDEO', 'CIRCLE_VIDEO', 'AUDIO'];
+    const cursor = parsePositiveInt(req.query.cursor);
+    const limit = Math.min(100, Math.max(12, parsePositiveInt(req.query.limit) || 48));
+    const commonWhere = {
+      deletedAt: null,
+      attachmentUrl: { not: null },
+      attachmentType: { in: attachmentTypes },
+      ...(cursor ? { id: { lt: cursor } } : {})
+    };
+    let items;
+    if (channelId) {
+      items = await prisma.message.findMany({
+        where: { channelId, ...commonWhere },
+        orderBy: { id: 'desc' },
+        take: limit + 1,
+        include: { author: { select: publicUserSelect } }
+      });
+    } else {
+      const conversation = await prisma.directConversation.findUnique({
+        where: { id: conversationId },
+        include: { members: true }
+      });
+      if (!conversation || !getConversationMemberIds(conversation).includes(req.user.userId)) {
+        return sendApiError(res, 404, 'CONVERSATION_NOT_FOUND', 'Conversation not found.');
+      }
+      items = await prisma.directMessage.findMany({
+        where: { conversationId, ...commonWhere },
+        orderBy: { id: 'desc' },
+        take: limit + 1,
+        include: { author: { select: publicUserSelect } }
+      });
+    }
+    const hasMore = items.length > limit;
+    const page = items.slice(0, limit);
+    return res.json({
+      items: page,
+      nextCursor: hasMore ? page[page.length - 1]?.id || null : null
+    });
+  } catch (error) {
+    console.error(error);
+    return sendCaughtApiError(res, error, 'MEDIA_FETCH_FAILED', 'Failed to load shared media.');
+  }
+});
+
 app.post('/api/friends/request', authMiddleware, async (req, res) => {
   try {
     const username = String(req.body.username || '').trim();
@@ -2493,6 +2924,29 @@ app.post('/api/groups', authMiddleware, async (req, res) => {
   }
 });
 
+app.get('/api/calls', authMiddleware, async (req, res) => {
+  try {
+    const limit = Math.min(100, Math.max(10, parsePositiveInt(req.query.limit) || 50));
+    const records = await prisma.callRecord.findMany({
+      where: {
+        participants: { some: { userId: req.user.userId } }
+      },
+      orderBy: { startedAt: 'desc' },
+      take: limit,
+      include: {
+        participants: {
+          include: { user: { select: publicUserSelect } },
+          orderBy: { id: 'asc' }
+        }
+      }
+    });
+    return res.json({ calls: records.map((record) => serializeCallRecord(record, req.user.userId)) });
+  } catch (error) {
+    console.error(error);
+    return sendCaughtApiError(res, error, 'CALL_HISTORY_FAILED', 'Failed to load call history.');
+  }
+});
+
 app.post('/api/dms/:conversationId/calls', authMiddleware, async (req, res) => {
   try {
     const conversationId = Number(req.params.conversationId);
@@ -2544,11 +2998,37 @@ app.post('/api/dms/:conversationId/calls', authMiddleware, async (req, res) => {
       createdAt: new Date().toISOString()
     };
     callSessions.set(call.id, call);
+    await prisma.callRecord.create({
+      data: {
+        id: call.id,
+        conversationId,
+        callerId: req.user.userId,
+        title: call.title,
+        video: call.video,
+        status: call.status,
+        startedAt: new Date(call.createdAt),
+        participants: {
+          create: call.memberIds.map((userId) => ({
+            userId,
+            joinedAt: Number(userId) === Number(req.user.userId) ? new Date(call.createdAt) : null
+          }))
+        }
+      }
+    });
 
     const payload = serializeCallSession(call);
     call.memberIds.forEach((userId) => {
       io.to(`user:${userId}`).emit(userId === req.user.userId ? 'call:outgoing' : 'call:incoming', payload);
     });
+    callTimeouts.set(call.id, setTimeout(() => {
+      const pendingCall = callSessions.get(call.id);
+      if (!pendingCall || pendingCall.status !== 'RINGING') return;
+      const timeoutPayload = { ...serializeCallSession(pendingCall), endedBy: null, reason: 'timeout' };
+      pendingCall.memberIds.forEach((userId) => io.to(`user:${userId}`).emit('call:ended', timeoutPayload));
+      callSessions.delete(call.id);
+      finalizeCallRecord(call.id, 'MISSED')
+        .catch((error) => console.error('Could not finalize missed call:', error));
+    }, 45_000));
 
     return res.status(201).json(payload);
   } catch (error) {
@@ -2574,6 +3054,20 @@ app.post('/api/calls/:callId/respond', authMiddleware, async (req, res) => {
     if (action === 'ACCEPT') {
       call.status = 'ACTIVE';
       callSessions.set(call.id, call);
+      clearCallTimeout(call.id);
+      await prisma.callRecord.update({
+        where: { id: call.id },
+        data: {
+          status: 'ACTIVE',
+          answeredAt: new Date(),
+          participants: {
+            updateMany: {
+              where: { userId: req.user.userId },
+              data: { joinedAt: new Date() }
+            }
+          }
+        }
+      });
       const payload = serializeCallSession(call);
       call.memberIds.forEach((userId) => io.to(`user:${userId}`).emit('call:accepted', payload));
       return res.json(payload);
@@ -2583,6 +3077,8 @@ app.post('/api/calls/:callId/respond', authMiddleware, async (req, res) => {
       ...serializeCallSession(call),
       declinedBy: req.user.userId
     });
+    await finalizeCallRecord(call.id, 'DECLINED');
+    callSessions.delete(call.id);
     return res.json({ ok: true });
   } catch (error) {
     console.error(error);
@@ -2605,6 +3101,8 @@ app.post('/api/calls/:callId/end', authMiddleware, async (req, res) => {
     call.memberIds.forEach((userId) => io.to(`user:${userId}`).emit('call:ended', payload));
     const roomKey = getCallRoomKey(callId);
     io.to(roomKey).emit('call:ended', payload);
+    const now = new Date();
+    await finalizeCallRecord(callId, call.status === 'ACTIVE' ? 'COMPLETED' : 'MISSED', now);
     callSessions.delete(callId);
     callParticipants.delete(roomKey);
     return res.json({ ok: true });
@@ -2998,14 +3496,23 @@ app.patch('/api/messages/:messageId', authMiddleware, messageRateLimit, async (r
       return sendApiError(res, 404, 'MESSAGE_NOT_FOUND', 'Message not found');
     }
 
-    const message = await prisma.message.update({
-      where: { id: messageId },
-      data: { content, editedAt: new Date() },
-      include: {
-        author: { select: publicUserSelect },
-        reactions: { select: { emoji: true, userId: true } },
-        replyTo: { include: { author: { select: publicUserSelect } } }
-      }
+    const message = await prisma.$transaction(async (tx) => {
+      await tx.messageEditHistory.create({
+        data: {
+          editorId: req.user.userId,
+          messageId,
+          previousContent: existing.content
+        }
+      });
+      return tx.message.update({
+        where: { id: messageId },
+        data: { content, editedAt: new Date() },
+        include: {
+          author: { select: publicUserSelect },
+          reactions: { select: { emoji: true, userId: true } },
+          replyTo: { include: { author: { select: publicUserSelect } } }
+        }
+      });
     });
 
     io.to(`channel:${message.channelId}`).emit('message:updated', message);
@@ -3161,14 +3668,23 @@ app.patch('/api/dms/:conversationId/messages/:messageId', authMiddleware, messag
       return sendApiError(res, 404, 'MESSAGE_NOT_FOUND', 'Message not found');
     }
 
-    const message = await prisma.directMessage.update({
-      where: { id: messageId },
-      data: { content, editedAt: new Date() },
-      include: {
-        author: { select: publicUserSelect },
-        reactions: { select: { emoji: true, userId: true } },
-        replyTo: { include: { author: { select: publicUserSelect } } }
-      }
+    const message = await prisma.$transaction(async (tx) => {
+      await tx.messageEditHistory.create({
+        data: {
+          editorId: req.user.userId,
+          directMessageId: messageId,
+          previousContent: existing.content
+        }
+      });
+      return tx.directMessage.update({
+        where: { id: messageId },
+        data: { content, editedAt: new Date() },
+        include: {
+          author: { select: publicUserSelect },
+          reactions: { select: { emoji: true, userId: true } },
+          replyTo: { include: { author: { select: publicUserSelect } } }
+        }
+      });
     });
 
     io.to(`dm:${conversationId}`).emit('direct-message:updated', { ...message, conversationId });
@@ -3663,8 +4179,25 @@ io.on('connection', (socket) => {
       callParticipants.set(roomKey, participants);
       socket.data.callRoomKey = roomKey;
       socket.data.callId = parsedCallId;
-      call.status = 'ACTIVE';
+      const answering = Number(socket.user.userId) !== Number(call.callerId);
+      if (answering) {
+        call.status = 'ACTIVE';
+        clearCallTimeout(call.id);
+      }
       callSessions.set(call.id, call);
+      await prisma.callRecord.update({
+        where: { id: parsedCallId },
+        data: {
+          status: answering ? 'ACTIVE' : call.status,
+          answeredAt: answering ? new Date() : undefined,
+          participants: {
+            updateMany: {
+              where: { userId: socket.user.userId },
+              data: { joinedAt: new Date(), leftAt: null }
+            }
+          }
+        }
+      });
 
       socket.to(roomKey).emit('call-user-joined', {
         callId: parsedCallId,

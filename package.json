@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "postinstall": "node scripts/patch-capacitor-gradle.cjs",
-    "check": "node --check backend/src/server.js && node --check backend/src/auth.js && node --check desktop/main.cjs && node --check desktop/preload.cjs && npm --prefix backend run db:validate && npm --prefix frontend run build",
+    "check": "node --check backend/src/server.js && node --check backend/src/auth.js && node --check desktop/main.cjs && node --check desktop/preload.cjs && npm --prefix backend run db:validate && npm --prefix backend test && npm --prefix frontend run build",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",

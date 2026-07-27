@@ -5,13 +5,13 @@ import gsap from 'gsap';
 import { io } from 'socket.io-client';
 import {
   TbArrowLeft, TbArrowsMaximize, TbArrowsMinimize, TbBolt, TbBrowser, TbCameraRotate,
-  TbCircleCheck, TbCircleDashed, TbDotsVertical, TbHash, TbMenu2, TbMicrophone, TbMicrophoneOff,
+  TbBookmark, TbCircleCheck, TbCircleDashed, TbDotsVertical, TbHash, TbMenu2, TbMicrophone, TbMicrophoneOff,
   TbMinus, TbMoodSmile, TbMusic, TbPalette, TbPaperclip, TbPhone, TbPhoneOff, TbPlayerPause,
   TbPlayerPlay, TbPlayerStop, TbPlus, TbPinned, TbScreenShare, TbSearch, TbSend2, TbSettings,
   TbSun, TbMoon, TbVideo, TbVideoOff, TbVolume, TbVolumeOff, TbWaveSine, TbX
 } from 'react-icons/tb';
 import {
-  MdAdd, MdArrowBackIosNew, MdClose, MdFullscreen, MdFullscreenExit, MdMenu,
+  MdAdd, MdArrowBackIosNew, MdBookmarkBorder, MdClose, MdFullscreen, MdFullscreenExit, MdMenu,
   MdMoreVert, MdOutlineAttachFile, MdOutlineAutoStories, MdOutlineBolt,
   MdOutlineCall, MdOutlineCallEnd, MdOutlineCameraswitch, MdOutlineCheckCircle,
   MdOutlineChatBubbleOutline, MdOutlineGraphicEq, MdOutlineGroup, MdOutlineMic,
@@ -22,7 +22,7 @@ import {
   MdOutlinePushPin, MdPlayArrow, MdRemove, MdStop
 } from 'react-icons/md';
 import {
-  PiArrowLeft, PiBrowser, PiCameraRotate, PiChatCircleDots, PiCheckCircle,
+  PiArrowLeft, PiBookmarkSimple, PiBrowser, PiCameraRotate, PiChatCircleDots, PiCheckCircle,
   PiCornersIn, PiCornersOut, PiDotsThreeVertical, PiGear, PiHash, PiImageSquare,
   PiImagesSquare, PiList, PiMagnifyingGlass, PiMicrophone, PiMicrophoneSlash, PiMoon,
   PiMinus, PiMonitorArrowUp, PiMusicNotes, PiPalette, PiPaperPlaneTilt,
@@ -676,9 +676,11 @@ async function apiFetch(path, options = {}, token) {
   return payload;
 }
 
-function uploadFormDataWithProgress(path, formData, token, onProgress) {
+function uploadFormDataWithProgress(path, formData, token, onProgress, signal) {
   return new Promise((resolve, reject) => {
     const request = new XMLHttpRequest();
+    const abort = () => request.abort();
+    signal?.addEventListener?.('abort', abort, { once: true });
     request.open('POST', `${API_URL}${path}`);
     if (token) request.setRequestHeader('Authorization', `Bearer ${token}`);
     request.upload.addEventListener('progress', (event) => {
@@ -692,6 +694,7 @@ function uploadFormDataWithProgress(path, formData, token, onProgress) {
         // A non-JSON response is handled as a regular upload failure below.
       }
       if (request.status >= 200 && request.status < 300) {
+        signal?.removeEventListener?.('abort', abort);
         onProgress?.(100);
         resolve(payload);
         return;
@@ -701,10 +704,66 @@ function uploadFormDataWithProgress(path, formData, token, onProgress) {
       error.code = payload?.code || '';
       reject(error);
     });
-    request.addEventListener('error', () => reject(new Error('Upload failed because the network connection was interrupted')));
-    request.addEventListener('abort', () => reject(new Error('Upload was cancelled')));
+    request.addEventListener('error', () => {
+      signal?.removeEventListener?.('abort', abort);
+      reject(new Error('Upload failed because the network connection was interrupted'));
+    });
+    request.addEventListener('abort', () => {
+      signal?.removeEventListener?.('abort', abort);
+      reject(new Error('Upload was cancelled'));
+    });
     request.send(formData);
   });
+}
+
+function urlBase64ToUint8Array(value) {
+  const padding = '='.repeat((4 - (value.length % 4)) % 4);
+  const normalized = `${value}${padding}`.replace(/-/g, '+').replace(/_/g, '/');
+  const raw = window.atob(normalized);
+  return Uint8Array.from(raw, (character) => character.charCodeAt(0));
+}
+
+async function syncWebPushSubscription(token, settings, enabled) {
+  if (!token || !('serviceWorker' in navigator) || !('PushManager' in window)) {
+    return { enabled: false, reason: 'unsupported' };
+  }
+  const registration = await navigator.serviceWorker.ready;
+  let subscription = await registration.pushManager.getSubscription();
+  if (!enabled) {
+    if (subscription) {
+      await apiFetch('/push/subscriptions', {
+        method: 'DELETE',
+        body: JSON.stringify({ endpoint: subscription.endpoint })
+      }, token).catch(() => {});
+      await subscription.unsubscribe();
+    }
+    return { enabled: false };
+  }
+
+  const vapid = await apiFetch('/push/vapid-public-key', {}, token);
+  if (!vapid?.enabled || !vapid.publicKey) return { enabled: false, reason: 'server-disabled' };
+  if (Notification.permission !== 'granted') {
+    const permission = await Notification.requestPermission();
+    if (permission !== 'granted') return { enabled: false, reason: 'permission' };
+  }
+  subscription ||= await registration.pushManager.subscribe({
+    userVisibleOnly: true,
+    applicationServerKey: urlBase64ToUint8Array(vapid.publicKey)
+  });
+  await apiFetch('/push/subscriptions', {
+    method: 'POST',
+    body: JSON.stringify({
+      subscription: subscription.toJSON(),
+      preferences: {
+        notificationMode: settings.notificationMode,
+        quietHoursEnabled: settings.quietHoursEnabled,
+        quietHoursStart: settings.quietHoursStart,
+        quietHoursEnd: settings.quietHoursEnd,
+        timezoneOffset: new Date().getTimezoneOffset()
+      }
+    })
+  }, token);
+  return { enabled: true };
 }
 
 function normalizeAppPath(pathname = window.location.pathname) {
@@ -1161,6 +1220,7 @@ function BrowserIcon() {
 
 const APP_ICONS = {
   arrowLeft: <><path d="m15 18-6-6 6-6" /><path d="M9 12h12" /></>,
+  bookmark: <path d="M6 3h12v18l-6-4-6 4V3Z" />,
   browser: <><rect x="4" y="5" width="16" height="14" rx="3" /><path d="M4 9h16" /><path d="M8 7h.01M11 7h.01" /><path d="M9 14h6" /></>,
   camera: <><path d="M15 10.5 20 7v10l-5-3.5" /><rect x="4" y="6" width="11" height="12" rx="2" /></>,
   cameraOff: <><path d="m3 3 18 18" /><path d="M15 10.5 20 7v9.2" /><path d="M13.2 18H6a2 2 0 0 1-2-2V8.8" /><path d="M8.8 6H13a2 2 0 0 1 2 2v2.2" /></>,
@@ -1196,7 +1256,7 @@ const APP_ICONS = {
 
 const ICON_FAMILIES = {
   telegram: {
-    arrowLeft: TbArrowLeft, browser: TbBrowser, camera: TbVideo, cameraOff: TbVideoOff,
+    arrowLeft: TbArrowLeft, bookmark: TbBookmark, browser: TbBrowser, camera: TbVideo, cameraOff: TbVideoOff,
     check: TbCircleCheck,
     close: TbX, expand: TbArrowsMaximize, hash: TbHash, menu: TbMenu2, more: TbDotsVertical,
     mic: TbMicrophone, micOff: TbMicrophoneOff, minus: TbMinus, music: TbMusic,
@@ -1208,7 +1268,7 @@ const ICON_FAMILIES = {
     sun: TbSun, moon: TbMoon, theme: TbPalette
   },
   material: {
-    arrowLeft: MdArrowBackIosNew, browser: MdOutlinePublic, camera: MdOutlineVideocam,
+    arrowLeft: MdArrowBackIosNew, bookmark: MdBookmarkBorder, browser: MdOutlinePublic, camera: MdOutlineVideocam,
     cameraOff: MdOutlineVideocamOff, check: MdOutlineCheckCircle, close: MdClose,
     expand: MdFullscreen, hash: MdOutlineTag, menu: MdMenu, more: MdMoreVert,
     mic: MdOutlineMic, micOff: MdOutlineMicOff, minus: MdRemove,
@@ -1223,7 +1283,7 @@ const ICON_FAMILIES = {
     sun: MdOutlineLightMode, moon: MdOutlineDarkMode
   },
   atmosphere: {
-    arrowLeft: PiArrowLeft, browser: PiBrowser, camera: PiVideoCamera,
+    arrowLeft: PiArrowLeft, bookmark: PiBookmarkSimple, browser: PiBrowser, camera: PiVideoCamera,
     check: PiCheckCircle, cameraOff: PiVideoCameraSlash, close: PiX,
     expand: PiCornersOut, hash: PiHash, menu: PiList, more: PiDotsThreeVertical,
     mic: PiMicrophone, micOff: PiMicrophoneSlash, minus: PiMinus,
@@ -2367,7 +2427,22 @@ function MessageAttachment({ message, onOpenMedia }) {
   return <a className="file-link" href={url} download>{title}</a>;
 }
 
-function MediaViewer({ message, onClose }) {
+function MediaViewer({ message, items = [], onNavigate, onClose }) {
+  const currentIndex = items.findIndex((item) => String(item.id) === String(message?.id));
+  const previous = currentIndex >= 0 ? items[currentIndex - 1] : null;
+  const next = currentIndex >= 0 ? items[currentIndex + 1] : null;
+
+  useEffect(() => {
+    if (!message) return undefined;
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') onClose?.();
+      if (event.key === 'ArrowLeft' && previous) onNavigate?.(previous);
+      if (event.key === 'ArrowRight' && next) onNavigate?.(next);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [message, previous, next, onNavigate, onClose]);
+
   if (!message?.attachmentUrl) return null;
 
   const kind = getAttachmentKind(message);
@@ -2382,12 +2457,15 @@ function MediaViewer({ message, onClose }) {
           <button className="icon-btn" type="button" aria-label="Close" title="Close" onClick={onClose}><AppIcon name="close" /></button>
         </div>
         <div className="media-viewer-stage">
+          {previous ? <button className="media-viewer-nav previous" type="button" aria-label="Previous media" onClick={() => onNavigate?.(previous)}><AppIcon name="arrowLeft" /></button> : null}
           {kind === 'IMAGE' ? <img src={url} alt={title} /> : null}
           {kind === 'VIDEO' ? <video controls autoPlay playsInline src={url} /> : null}
           {kind === 'CIRCLE_VIDEO' ? <CircleVideoPlayer src={url} title={title} large /> : null}
           {kind === 'AUDIO' ? <CustomAudioPlayer src={url} title={title} variant="viewer" /> : null}
+          {next ? <button className="media-viewer-nav next" type="button" aria-label="Next media" onClick={() => onNavigate?.(next)}><AppIcon name="arrowLeft" /></button> : null}
         </div>
         <div className="media-viewer-actions">
+          {currentIndex >= 0 ? <span>{currentIndex + 1} / {items.length}</span> : null}
           <a className="ghost-btn" href={url} download>Download</a>
         </div>
       </div>
@@ -2395,7 +2473,7 @@ function MediaViewer({ message, onClose }) {
   );
 }
 
-function MessageItem({ message, currentUserId, workspace, grouped = false, groupedWithNext = false, showDateDivider = false, showUnreadDivider = false, canModerateMessages = false, selected = false, highlighted = false, onAvatarClick, onReply, onNavigateToReply, onEdit, onDelete, onReport, onOpenMedia, onToggleReaction, onCopy, onPin, onForward, onSelect }) {
+function MessageItem({ message, currentUserId, workspace, grouped = false, groupedWithNext = false, showDateDivider = false, showUnreadDivider = false, canModerateMessages = false, selected = false, highlighted = false, onAvatarClick, onReply, onNavigateToReply, onEdit, onDelete, onReport, onOpenMedia, onToggleReaction, onCopy, onShare, onPin, onBookmark, onHistory, onForward, onSelect }) {
   const isOwn = String(message.author?.id) === String(currentUserId);
   const canDelete = isOwn || canModerateMessages;
   const pointerStartRef = useRef(null);
@@ -2479,7 +2557,7 @@ function MessageItem({ message, currentUserId, workspace, grouped = false, group
       ) : null}
       {showUnreadDivider ? <div className="message-unread-divider"><span>Unread messages</span></div> : null}
       <article
-        className={`${isOwn ? 'message-card own' : 'message-card incoming'} ${authorColorClass}${grouped ? ' grouped' : ''}${groupedWithNext ? ' grouped-next' : ''}${selected ? ' selected' : ''}${highlighted ? ' highlighted' : ''}${emojiOnly ? ' emoji-only' : ''}${message.pinnedAt ? ' pinned' : ''}`}
+        className={`${isOwn ? 'message-card own' : 'message-card incoming'} ${authorColorClass}${grouped ? ' grouped' : ''}${groupedWithNext ? ' grouped-next' : ''}${selected ? ' selected' : ''}${highlighted ? ' highlighted' : ''}${emojiOnly ? ' emoji-only' : ''}${message.pinnedAt ? ' pinned' : ''}${message.bookmarked ? ' bookmarked' : ''}`}
         data-message-id={message.id}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
@@ -2555,7 +2633,8 @@ function MessageItem({ message, currentUserId, workspace, grouped = false, group
           <div className="message-footer">
             {message.queued ? <span className="message-queued">queued</span> : message.optimistic ? <span>sending</span> : null}
             {message.pinnedAt ? <span className="message-pinned-mark" title="Pinned">◆</span> : null}
-            {message.editedAt ? <span>edited</span> : null}
+            {message.bookmarked ? <AppIcon name="bookmark" size={12} /> : null}
+            {message.editedAt ? <button className="message-history-link" type="button" onClick={() => onHistory?.(message)}>edited</button> : null}
             <time dateTime={message.createdAt}>{timeLabel}</time>
             {workspace === 'dm' && isOwn ? (
               <span className={`message-delivery-check ${message.readAt ? 'is-read' : 'is-delivered'}`} aria-label={message.readAt ? 'Read' : 'Delivered'}>
@@ -2576,8 +2655,11 @@ function MessageItem({ message, currentUserId, workspace, grouped = false, group
               </div>
               <button type="button" role="menuitem" onClick={() => runContextAction(() => onReply?.(message))}>Reply</button>
               <button type="button" role="menuitem" onClick={() => runContextAction(() => onCopy?.(message))}>Copy</button>
+              <button type="button" role="menuitem" onClick={() => runContextAction(() => onShare?.(message))}>Share</button>
               <button type="button" role="menuitem" onClick={() => runContextAction(() => onForward?.(message))}>Forward</button>
               <button type="button" role="menuitem" onClick={() => runContextAction(() => onPin?.(message))}>{message.pinnedAt ? 'Unpin' : 'Pin'}</button>
+              <button type="button" role="menuitem" onClick={() => runContextAction(() => onBookmark?.(message))}>{message.bookmarked ? 'Remove from Saved' : 'Save message'}</button>
+              {message.editedAt ? <button type="button" role="menuitem" onClick={() => runContextAction(() => onHistory?.(message))}>Edit history</button> : null}
               <button type="button" role="menuitem" onClick={() => runContextAction(() => onSelect?.(message))}>{selected ? 'Unselect' : 'Select'}</button>
               {isOwn && message.content ? <button type="button" role="menuitem" onClick={() => runContextAction(() => onEdit?.(message))}>Edit</button> : null}
               {!isOwn ? <button type="button" role="menuitem" onClick={() => runContextAction(() => onReport?.(message))}>Report</button> : null}
@@ -2618,6 +2700,72 @@ function ForwardMessagesModal({ messages, channels, conversations, onSend, onClo
             </button>
           ))}
         </div>
+      </div>
+    </div>
+  );
+}
+
+function SavedMessagesModal({ open, loading, bookmarks, onOpen, onClose }) {
+  if (!open) return null;
+  return (
+    <div className="modal-backdrop" role="dialog" aria-modal="true" onClick={onClose}>
+      <div className="modal-card saved-messages-modal" onClick={(event) => event.stopPropagation()}>
+        <div className="modal-header">
+          <div>
+            <h3>Saved messages</h3>
+            <p className="muted">Your private cross-device bookmarks.</p>
+          </div>
+          <button className="icon-btn" type="button" aria-label="Close saved messages" onClick={onClose}><AppIcon name="close" /></button>
+        </div>
+        <div className="saved-message-list">
+          {loading ? <p className="muted">Loading saved messages…</p> : null}
+          {!loading && bookmarks.length === 0 ? <p className="muted">Nothing saved yet. Open a message menu and choose Save message.</p> : null}
+          {bookmarks.map((bookmark) => (
+            <button type="button" key={bookmark.id} onClick={() => onOpen(bookmark)}>
+              <UserAvatar user={bookmark.message.author} />
+              <span>
+                <strong>{bookmark.type === 'channel' ? `#${bookmark.message.channel?.name || 'channel'}` : getConversationTitle(bookmark.conversation)}</strong>
+                <small>{bookmark.message.content || bookmark.message.attachmentName || 'Attachment'}</small>
+              </span>
+              <time>{new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short' }).format(new Date(bookmark.createdAt))}</time>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MessageHistoryModal({ payload, loading, onClose }) {
+  if (!payload && !loading) return null;
+  const history = payload?.history || [];
+  return (
+    <div className="modal-backdrop" role="dialog" aria-modal="true" onClick={onClose}>
+      <div className="modal-card message-history-modal" onClick={(event) => event.stopPropagation()}>
+        <div className="modal-header">
+          <div>
+            <h3>Edit history</h3>
+            <p className="muted">Previous versions are read-only.</p>
+          </div>
+          <button className="icon-btn" type="button" aria-label="Close edit history" onClick={onClose}><AppIcon name="close" /></button>
+        </div>
+        {loading ? <p className="muted">Loading history…</p> : (
+          <div className="message-history-list">
+            <article className="current">
+              <strong>Current version</strong>
+              <p>{payload?.message?.content || 'Empty message'}</p>
+            </article>
+            {history.map((entry) => (
+              <article key={entry.id}>
+                <span>
+                  <strong>{getDisplayName(entry.editor)}</strong>
+                  <time>{new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(entry.createdAt))}</time>
+                </span>
+                <p>{entry.previousContent}</p>
+              </article>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -2669,9 +2817,10 @@ function ChatListRow({ conversation, preference, draft, selected, unread, onSele
   );
 }
 
-function ChatInfoPanel({ open, conversation, channel, messages, pinnedMessages, muted, onToggleMute, onOpenMessage, onClose }) {
+function ChatInfoPanel({ open, conversation, channel, messages, mediaItems = [], mediaLoading = false, mediaHasMore = false, pinnedMessages, muted, onToggleMute, onLoadMoreMedia, onOpenMessage, onClose }) {
   if (!open) return null;
-  const media = messages.filter((message) => /^(IMAGE|VIDEO|CIRCLE_VIDEO)$/i.test(message.attachmentType || ''));
+  const loadedMedia = messages.filter((message) => /^(IMAGE|VIDEO|CIRCLE_VIDEO)$/i.test(message.attachmentType || ''));
+  const media = mediaItems.length > 0 ? mediaItems : loadedMedia;
   const files = messages.filter((message) => message.attachmentUrl && !/^(IMAGE|VIDEO|CIRCLE_VIDEO)$/i.test(message.attachmentType || ''));
   const links = messages.flatMap((message) => {
     const match = String(message.content || '').match(/https?:\/\/[^\s]+/g) || [];
@@ -2701,9 +2850,22 @@ function ChatInfoPanel({ open, conversation, channel, messages, pinnedMessages, 
       <section>
         <p className="section-label">Shared media</p>
         <div className="chat-media-grid">
-          {media.slice(-12).map((message) => <button type="button" key={message.id} onClick={() => onOpenMessage(message)}><img src={getAttachmentUrl(message.attachmentUrl)} alt={message.attachmentName || 'Shared media'} /></button>)}
+          {media.map((message) => {
+            const kind = getAttachmentKind(message);
+            const url = getAttachmentUrl(message.attachmentUrl);
+            return (
+              <button type="button" key={message.id} onClick={() => onOpenMessage(message)}>
+                {kind === 'IMAGE'
+                  ? <img src={url} alt={message.attachmentName || 'Shared media'} loading="lazy" />
+                  : <video src={url} aria-label={message.attachmentName || 'Shared video'} preload="metadata" muted playsInline />}
+                {kind === 'CIRCLE_VIDEO' ? <span className="chat-media-kind"><AppIcon name="circleVideo" size={14} /></span> : null}
+              </button>
+            );
+          })}
           {media.length === 0 ? <p className="muted">No shared media yet.</p> : null}
         </div>
+        {mediaLoading ? <p className="muted">Loading media…</p> : null}
+        {mediaHasMore && !mediaLoading ? <button className="ghost-btn chat-media-more" type="button" onClick={onLoadMoreMedia}>Load older media</button> : null}
       </section>
       <section>
         <p className="section-label">Recent links and files</p>
@@ -3786,6 +3948,7 @@ export default function App() {
   const [viewedMedia, setViewedMedia] = useState(null);
   const [reportTarget, setReportTarget] = useState(null);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [bannerUploading, setBannerUploading] = useState(false);
   const [trackUploading, setTrackUploading] = useState(false);
@@ -3839,6 +4002,14 @@ export default function App() {
   const [globalSearchLoading, setGlobalSearchLoading] = useState(false);
   const [pinnedPanelOpen, setPinnedPanelOpen] = useState(false);
   const [pinnedMessages, setPinnedMessages] = useState([]);
+  const [savedMessagesOpen, setSavedMessagesOpen] = useState(false);
+  const [savedMessagesLoading, setSavedMessagesLoading] = useState(false);
+  const [savedMessages, setSavedMessages] = useState([]);
+  const [messageHistory, setMessageHistory] = useState(null);
+  const [messageHistoryLoading, setMessageHistoryLoading] = useState(false);
+  const [chatMedia, setChatMedia] = useState([]);
+  const [chatMediaCursor, setChatMediaCursor] = useState(null);
+  const [chatMediaLoading, setChatMediaLoading] = useState(false);
   const [selectedMessageIds, setSelectedMessageIds] = useState([]);
   const [forwardingMessages, setForwardingMessages] = useState([]);
   const [highlightedMessageId, setHighlightedMessageId] = useState(null);
@@ -3880,6 +4051,7 @@ export default function App() {
 
   const socketRef = useRef(null);
   const fileInputRef = useRef(null);
+  const uploadAbortControllerRef = useRef(null);
   const composerInputRef = useRef(null);
   const avatarInputRef = useRef(null);
   const bannerInputRef = useRef(null);
@@ -3933,6 +4105,7 @@ export default function App() {
   const clientStateHydratedRef = useRef(false);
   const clientStateSyncTimerRef = useRef(null);
   const chatPreferencesRef = useRef(chatPreferences);
+  const browserDeepLinkHandledRef = useRef(false);
 
   const isAdminRoute = ADMIN_PATHS.has(currentPath);
   const isAuthed = Boolean(token && user);
@@ -3946,6 +4119,8 @@ export default function App() {
   const visibleMessages = messageSearchOpen && messageSearchQuery.trim()
     ? messageSearchResults
     : messages;
+  const mediaViewerItems = (chatMedia.length > 0 ? chatMedia : messages)
+    .filter((message) => /^(IMAGE|VIDEO|CIRCLE_VIDEO|AUDIO)$/i.test(message.attachmentType || ''));
   const selectedMobileFolder = customFolders.find((folder) => String(folder.id) === String(activeMobileFolderId)) || null;
   const selectedMobileChannelIds = new Set(selectedMobileFolder?.channelIds || []);
   const selectedMobileFriendIds = new Set(selectedMobileFolder?.friendIds || []);
@@ -4494,6 +4669,70 @@ export default function App() {
   useEffect(() => {
     if (pinnedPanelOpen) refreshPinnedMessages();
   }, [pinnedPanelOpen, workspace, channelId, dmConversationId]);
+
+  useEffect(() => {
+    setChatMedia([]);
+    setChatMediaCursor(null);
+    if (chatInfoOpen && (workspace === 'server' || workspace === 'dm')) {
+      loadChatMedia({ reset: true });
+    }
+  }, [chatInfoOpen, workspace, channelId, dmConversationId]);
+
+  useEffect(() => {
+    if (!isAuthed || isAdminRoute) return undefined;
+    const timeout = window.setTimeout(() => refreshSavedMessages(), 400);
+    return () => window.clearTimeout(timeout);
+  }, [isAuthed, isAdminRoute, workspace, channelId, dmConversationId]);
+
+  useEffect(() => {
+    if (!isAuthed || !clientStateReady || IS_NATIVE_CLIENT) return undefined;
+    const timeout = window.setTimeout(() => {
+      syncWebPushSubscription(token, clientSettings, clientSettings.notificationsEnabled).catch(() => {});
+    }, 1200);
+    return () => window.clearTimeout(timeout);
+  }, [
+    isAuthed,
+    clientStateReady,
+    token,
+    clientSettings.notificationsEnabled,
+    clientSettings.notificationMode,
+    clientSettings.quietHoursEnabled,
+    clientSettings.quietHoursStart,
+    clientSettings.quietHoursEnd
+  ]);
+
+  useEffect(() => {
+    if (!isAuthed || browserDeepLinkHandledRef.current) return;
+    const params = new URLSearchParams(window.location.search);
+    const targetWorkspace = params.get('workspace');
+    const targetMessage = params.get('message');
+    const targetConversation = params.get('conversation');
+    const targetChannel = params.get('channel');
+    if (!targetMessage || (targetWorkspace !== 'dm' && targetWorkspace !== 'server')) return;
+    browserDeepLinkHandledRef.current = true;
+    const open = async () => {
+      try {
+        if (targetWorkspace === 'dm' && targetConversation) {
+          const payload = await apiFetch(`/dms/${targetConversation}/messages/${targetMessage}/context`, {}, token);
+          setWorkspace('dm');
+          setDmConversationId(String(targetConversation));
+          setMessages(sortMessages(payload.messages || []));
+        } else if (targetWorkspace === 'server' && targetChannel) {
+          const payload = await apiFetch(`/messages/${targetChannel}/context/${targetMessage}`, {}, token);
+          setWorkspace('server');
+          setChannelId(String(targetChannel));
+          setMessages(sortMessages(payload.messages || []));
+        }
+        setMobileChatOpen(true);
+        setHighlightedMessageId(String(targetMessage));
+        window.setTimeout(() => document.querySelector(`[data-message-id="${targetMessage}"]`)?.scrollIntoView({ block: 'center' }), 120);
+        window.history.replaceState({}, '', window.location.pathname);
+      } catch (err) {
+        reportError(err, 'Could not open notification target');
+      }
+    };
+    open();
+  }, [isAuthed, token]);
 
   useEffect(() => {
     if (!isAuthed || isAdminRoute) return undefined;
@@ -5053,6 +5292,15 @@ export default function App() {
     if (nextEnabled && 'Notification' in window && Notification.permission === 'default') {
       await Notification.requestPermission().catch(() => {});
     }
+    if (!IS_NATIVE_CLIENT) {
+      const result = await syncWebPushSubscription(token, clientSettings, nextEnabled).catch(() => ({ enabled: false, reason: 'failed' }));
+      if (nextEnabled && result.reason === 'server-disabled') {
+        pushToast('Foreground notifications enabled; background push is not configured on the server', 'error');
+      } else if (nextEnabled && result.reason === 'permission') {
+        pushToast('Notification permission was not granted', 'error');
+        return;
+      }
+    }
     updateClientSetting('notificationsEnabled', nextEnabled);
     pushToast(nextEnabled ? 'Notifications enabled' : 'Notifications disabled');
   }
@@ -5181,6 +5429,93 @@ export default function App() {
     }
   }
 
+  async function refreshSavedMessages({ open = false } = {}) {
+    if (!token) return;
+    if (open) setSavedMessagesOpen(true);
+    setSavedMessagesLoading(true);
+    try {
+      const payload = await apiFetch('/me/bookmarks', {}, token);
+      const bookmarks = payload?.bookmarks || [];
+      setSavedMessages(bookmarks);
+      const activeSavedIds = new Set(bookmarks
+        .filter((bookmark) => bookmark.type === (workspace === 'dm' ? 'direct-message' : 'channel'))
+        .map((bookmark) => String(bookmark.message?.id)));
+      setMessages((current) => current.map((message) => ({
+        ...message,
+        bookmarked: activeSavedIds.has(String(message.id))
+      })));
+    } catch (err) {
+      reportError(err, 'Could not load saved messages');
+    } finally {
+      setSavedMessagesLoading(false);
+    }
+  }
+
+  async function toggleMessageBookmark(message) {
+    const path = workspace === 'dm'
+      ? `/dms/${dmConversationId}/messages/${message.id}/bookmark`
+      : `/messages/${message.id}/bookmark`;
+    try {
+      const payload = await apiFetch(path, { method: 'PUT' }, token);
+      const update = (current) => current.map((entry) => (
+        String(entry.id) === String(message.id)
+          ? { ...entry, bookmarked: Boolean(payload.bookmarked) }
+          : entry
+      ));
+      setMessages(update);
+      setMessageSearchResults(update);
+      await refreshSavedMessages();
+      pushToast(payload.bookmarked ? 'Message saved' : 'Removed from Saved');
+    } catch (err) {
+      reportError(err, 'Could not update saved message');
+    }
+  }
+
+  async function openSavedMessage(bookmark) {
+    setSavedMessagesOpen(false);
+    await openGlobalSearchResult({
+      type: bookmark.type === 'direct-message' ? 'direct-message' : 'channel-message',
+      message: bookmark.message
+    });
+  }
+
+  async function openMessageHistory(message) {
+    setMessageHistoryLoading(true);
+    setMessageHistory({ message, history: [] });
+    try {
+      const path = workspace === 'dm'
+        ? `/dms/${dmConversationId}/messages/${message.id}/history`
+        : `/messages/${message.id}/history`;
+      setMessageHistory(await apiFetch(path, {}, token));
+    } catch (err) {
+      setMessageHistory(null);
+      reportError(err, 'Could not load edit history');
+    } finally {
+      setMessageHistoryLoading(false);
+    }
+  }
+
+  async function loadChatMedia({ reset = false } = {}) {
+    if (chatMediaLoading) return;
+    const scope = workspace === 'dm'
+      ? `conversationId=${encodeURIComponent(dmConversationId)}`
+      : `channelId=${encodeURIComponent(channelId)}`;
+    if ((workspace === 'dm' && !dmConversationId) || (workspace === 'server' && !channelId)) return;
+    setChatMediaLoading(true);
+    try {
+      const cursor = reset ? '' : chatMediaCursor;
+      const payload = await apiFetch(`/media?${scope}&types=IMAGE,VIDEO,CIRCLE_VIDEO&limit=48${cursor ? `&cursor=${cursor}` : ''}`, {}, token);
+      setChatMedia((current) => reset
+        ? payload.items || []
+        : [...current, ...(payload.items || []).filter((item) => !current.some((entry) => String(entry.id) === String(item.id)))]);
+      setChatMediaCursor(payload.nextCursor || null);
+    } catch (err) {
+      reportError(err, 'Could not load shared media');
+    } finally {
+      setChatMediaLoading(false);
+    }
+  }
+
   async function scrollToMessage(target) {
     if (!target?.id) return;
     let node = document.querySelector(`[data-message-id="${target.id}"]`);
@@ -5215,6 +5550,24 @@ export default function App() {
     if (!text) return;
     await navigator.clipboard.writeText(text);
     pushToast('Message copied');
+  }
+
+  async function shareMessage(message) {
+    const text = getMessageCopyText(message);
+    const params = workspace === 'dm'
+      ? `workspace=dm&conversation=${encodeURIComponent(dmConversationId)}&message=${encodeURIComponent(message.id)}`
+      : `workspace=server&channel=${encodeURIComponent(channelId)}&message=${encodeURIComponent(message.id)}`;
+    const url = `${window.location.origin}/?${params}`;
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: 'WebCord message', text, url });
+        return;
+      } catch (error) {
+        if (error?.name === 'AbortError') return;
+      }
+    }
+    await navigator.clipboard.writeText(`${text}${text ? '\n' : ''}${url}`);
+    pushToast('Share link copied');
   }
 
   async function toggleMessagePin(message) {
@@ -5985,6 +6338,8 @@ export default function App() {
       ? `webcord-circle-video-${Date.now()}.webm`
       : `webcord-voice-message-${Date.now()}.webm`;
 
+    const controller = new AbortController();
+    uploadAbortControllerRef.current = controller;
     try {
       if (!preserveDraft) {
         await writeRecordingDraft({ blob, kind, transcript, createdAt: Date.now() }).catch(() => {});
@@ -5997,13 +6352,14 @@ export default function App() {
       }
       const formData = new FormData();
       formData.append('file', blob, fileName);
-      const uploaded = await uploadFormDataWithProgress('/upload', formData, token, setRecordingUploadProgress);
+      const uploaded = await uploadFormDataWithProgress('/upload', formData, token, setRecordingUploadProgress, controller.signal);
       setPendingAttachment({ ...uploaded, transcript: transcript || undefined });
       await clearRecordingDraft();
       pushToast(kind === 'circle' ? 'Video circle attached' : 'Voice message attached');
     } catch (err) {
       reportError(err, 'Could not upload recorded media');
     } finally {
+      uploadAbortControllerRef.current = null;
       setUploading(false);
       setRecordingUploadProgress(0);
       setCircleRecording(false);
@@ -6114,13 +6470,19 @@ export default function App() {
   async function handleFileSelect(event) {
     const files = Array.from(event.target.files || []).slice(0, 10);
     if (files.length === 0 || !token) return;
+    const controller = new AbortController();
+    uploadAbortControllerRef.current = controller;
     try {
       setUploading(true);
+      setUploadProgress(0);
       const uploaded = [];
-      for (const file of files) {
+      for (let index = 0; index < files.length; index += 1) {
+        const file = files[index];
         const formData = new FormData();
         formData.append('file', file);
-        uploaded.push(await apiFetch('/upload', { method: 'POST', body: formData }, token));
+        uploaded.push(await uploadFormDataWithProgress('/upload', formData, token, (fileProgress) => {
+          setUploadProgress(Math.round(((index + fileProgress / 100) / files.length) * 100));
+        }, controller.signal));
       }
       setPendingAttachment(uploaded[0] || null);
       setPendingAttachmentQueue(uploaded.slice(1));
@@ -6130,9 +6492,15 @@ export default function App() {
       setPendingAttachment(null);
       setPendingAttachmentQueue([]);
     } finally {
+      uploadAbortControllerRef.current = null;
       setUploading(false);
+      setUploadProgress(0);
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
+  }
+
+  function cancelAttachmentUpload() {
+    uploadAbortControllerRef.current?.abort();
   }
 
   function selectTextChannel(nextId) {
@@ -7427,6 +7795,16 @@ export default function App() {
                   >
                     <AppIcon name="pin" />
                   </button>
+                  <button
+                    className="icon-btn"
+                    type="button"
+                    title="Saved messages"
+                    aria-label="Saved messages"
+                    aria-expanded={savedMessagesOpen}
+                    onClick={() => refreshSavedMessages({ open: true })}
+                  >
+                    <AppIcon name="bookmark" />
+                  </button>
                   <button className="icon-btn" type="button" title="Chat info" aria-label="Chat info" onClick={() => setChatInfoOpen((value) => !value)}>
                     <AppIcon name="browser" />
                   </button>
@@ -7513,12 +7891,17 @@ export default function App() {
             conversation={workspace === 'dm' ? activeConversation : null}
             channel={workspace === 'server' ? activeTextChannel : null}
             messages={messages}
+            mediaItems={chatMedia}
+            mediaLoading={chatMediaLoading}
+            mediaHasMore={Boolean(chatMediaCursor)}
             pinnedMessages={pinnedMessages}
             muted={Boolean(getChatPreference(activeChatScopeKey).muted)}
             onToggleMute={() => updateChatPreference(activeChatScopeKey, { muted: !getChatPreference(activeChatScopeKey).muted })}
+            onLoadMoreMedia={() => loadChatMedia()}
             onOpenMessage={(message) => {
               setChatInfoOpen(false);
-              scrollToMessage(message);
+              if (/^(IMAGE|VIDEO|CIRCLE_VIDEO|AUDIO)$/i.test(message.attachmentType || '')) setViewedMedia(message);
+              else scrollToMessage(message);
             }}
             onClose={() => setChatInfoOpen(false)}
           />
@@ -7595,7 +7978,7 @@ export default function App() {
                     Math.abs(new Date(next.createdAt) - new Date(message.createdAt)) < 5 * 60 * 1000
                   );
                   const showDateDivider = !previous || new Date(previous.createdAt).toDateString() !== new Date(message.createdAt).toDateString();
-                  return <MessageItem key={message.id} message={message} workspace={workspace} currentUserId={user?.id} grouped={grouped} groupedWithNext={groupedWithNext} showDateDivider={showDateDivider} showUnreadDivider={String(unreadAnchorId) === String(message.id)} selected={selectedMessageIds.includes(String(message.id))} highlighted={String(highlightedMessageId) === String(message.id)} canModerateMessages={userCanModerateMessages} onAvatarClick={setViewedProfile} onReply={beginReply} onNavigateToReply={scrollToMessage} onEdit={beginEdit} onDelete={deleteMessage} onReport={openReportForMessage} onOpenMedia={setViewedMedia} onToggleReaction={toggleMessageReaction} onCopy={copyMessage} onPin={toggleMessagePin} onForward={beginForwardMessages} onSelect={toggleMessageSelection} />;
+                  return <MessageItem key={message.id} message={message} workspace={workspace} currentUserId={user?.id} grouped={grouped} groupedWithNext={groupedWithNext} showDateDivider={showDateDivider} showUnreadDivider={String(unreadAnchorId) === String(message.id)} selected={selectedMessageIds.includes(String(message.id))} highlighted={String(highlightedMessageId) === String(message.id)} canModerateMessages={userCanModerateMessages} onAvatarClick={setViewedProfile} onReply={beginReply} onNavigateToReply={scrollToMessage} onEdit={beginEdit} onDelete={deleteMessage} onReport={openReportForMessage} onOpenMedia={setViewedMedia} onToggleReaction={toggleMessageReaction} onCopy={copyMessage} onShare={shareMessage} onPin={toggleMessagePin} onBookmark={toggleMessageBookmark} onHistory={openMessageHistory} onForward={beginForwardMessages} onSelect={toggleMessageSelection} />;
                 })}
                 <div ref={endRef} />
               </div>
@@ -7681,6 +8064,12 @@ export default function App() {
           <div className="panel-footer">
             {pendingAttachment ? (
               <div className="attachment-preview">
+                {getAttachmentKind({ attachmentType: pendingAttachment.type, attachmentName: pendingAttachment.name, attachmentUrl: pendingAttachment.url }) === 'IMAGE'
+                  ? <img src={getAttachmentUrl(pendingAttachment.url)} alt={pendingAttachment.name || 'Attachment preview'} />
+                  : null}
+                {['VIDEO', 'CIRCLE_VIDEO'].includes(getAttachmentKind({ attachmentType: pendingAttachment.type, attachmentName: pendingAttachment.name, attachmentUrl: pendingAttachment.url }))
+                  ? <video src={getAttachmentUrl(pendingAttachment.url)} muted playsInline controls />
+                  : null}
                 <span className="attachment-dot">{getAttachmentBadge(getAttachmentKind({ attachmentType: pendingAttachment.type, attachmentName: pendingAttachment.name, attachmentUrl: pendingAttachment.url }))}</span>
                 <p className="muted">Attached: {pendingAttachment.name}{pendingAttachmentQueue.length ? ` +${pendingAttachmentQueue.length}` : ''}</p>
                 <button className="icon-btn" type="button" aria-label="Remove attachments" title="Remove attachments" onClick={() => { setPendingAttachment(null); setPendingAttachmentQueue([]); }}><AppIcon name="close" /></button>
@@ -7694,7 +8083,13 @@ export default function App() {
                 <button className="ghost-btn" type="button" onClick={() => cleanupMessageRecording({ cancel: true })}>Cancel</button>
               </div>
             ) : null}
-            {uploading ? <p className="muted">Uploading...</p> : null}
+            {uploading ? (
+              <div className="attachment-upload-progress" aria-live="polite">
+                <progress max="100" value={uploadProgress || recordingUploadProgress || 0} />
+                <span>Uploading {uploadProgress || recordingUploadProgress || 0}%</span>
+                <button className="ghost-btn" type="button" onClick={cancelAttachmentUpload}>Cancel</button>
+              </div>
+            ) : null}
             {error ? <p className="error">{error}</p> : null}
           </div>
 
@@ -7850,8 +8245,20 @@ export default function App() {
         onSend={forwardMessagesTo}
         onClose={() => setForwardingMessages([])}
       />
+      <SavedMessagesModal
+        open={savedMessagesOpen}
+        loading={savedMessagesLoading}
+        bookmarks={savedMessages}
+        onOpen={openSavedMessage}
+        onClose={() => setSavedMessagesOpen(false)}
+      />
+      <MessageHistoryModal
+        payload={messageHistory}
+        loading={messageHistoryLoading}
+        onClose={() => setMessageHistory(null)}
+      />
       <ReportModal target={reportTarget} onClose={() => setReportTarget(null)} onSubmit={(payload) => submitReport(payload)} />
-      <MediaViewer message={viewedMedia} onClose={() => setViewedMedia(null)} />
+      <MediaViewer message={viewedMedia} items={mediaViewerItems} onNavigate={setViewedMedia} onClose={() => setViewedMedia(null)} />
       <StoryViewer story={activeStory} stories={stories} onClose={() => setActiveStoryId(null)} onNext={() => stepStory(1)} onPrev={() => stepStory(-1)} />
       <StoryComposerModal
         open={showStoryComposer}

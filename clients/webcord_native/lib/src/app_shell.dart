@@ -371,6 +371,13 @@ class MobileShell extends StatelessWidget {
           ],
         ),
         actions: [
+          if (state.workspace == WorkspaceKind.server ||
+              state.workspace == WorkspaceKind.direct)
+            IconButton(
+              tooltip: 'Saved messages',
+              onPressed: () => showSavedMessagesDialog(context, state),
+              icon: const Icon(Icons.bookmark_border_rounded),
+            ),
           if (state.workspace == WorkspaceKind.server)
             IconButton(
               tooltip: 'Voice rooms',
@@ -382,15 +389,35 @@ class MobileShell extends StatelessWidget {
                 color: state.voiceJoined ? WebCordColors.success : null,
               ),
             ),
-          IconButton(
-            tooltip: 'Settings',
-            onPressed: () => showSettingsDialog(context, state),
-            icon: Icon(themeSystem.icon(WebCordIconRole.settings)),
-          ),
-          IconButton(
-            tooltip: 'Logout',
-            onPressed: state.logout,
-            icon: Icon(themeSystem.icon(WebCordIconRole.logout)),
+          PopupMenuButton<String>(
+            tooltip: 'More',
+            icon: const Icon(Icons.more_vert_rounded),
+            onSelected: (value) {
+              if (value == 'settings') showSettingsDialog(context, state);
+              if (value == 'logout') state.logout();
+            },
+            itemBuilder: (context) => [
+              PopupMenuItem(
+                value: 'settings',
+                child: Row(
+                  children: [
+                    Icon(themeSystem.icon(WebCordIconRole.settings), size: 19),
+                    const SizedBox(width: 10),
+                    const Text('Settings'),
+                  ],
+                ),
+              ),
+              PopupMenuItem(
+                value: 'logout',
+                child: Row(
+                  children: [
+                    Icon(themeSystem.icon(WebCordIconRole.logout), size: 19),
+                    const SizedBox(width: 10),
+                    const Text('Logout'),
+                  ],
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -1415,6 +1442,11 @@ class ChatHeader extends StatelessWidget {
             tooltip: 'Pinned messages',
             onPressed: () => showPinnedMessagesDialog(context, state),
             icon: const Icon(Icons.push_pin_outlined),
+          ),
+          IconButton(
+            tooltip: 'Saved messages',
+            onPressed: () => showSavedMessagesDialog(context, state),
+            icon: const Icon(Icons.bookmark_border_rounded),
           ),
           IconButton(
             tooltip: 'Chat information',
@@ -2793,6 +2825,19 @@ class _MessageTileState extends State<MessageTile> {
                                                       ),
                                                       const SizedBox(width: 4),
                                                     ],
+                                                    if (message.bookmarked) ...[
+                                                      Icon(
+                                                        Icons.bookmark_rounded,
+                                                        size: 12,
+                                                        color: own
+                                                            ? Colors.white
+                                                                  .withAlpha(
+                                                                    185,
+                                                                  )
+                                                            : palette.accent,
+                                                      ),
+                                                      const SizedBox(width: 4),
+                                                    ],
                                                     Text(
                                                       _timeLabel(
                                                         message.createdAt,
@@ -2885,6 +2930,16 @@ class _MessageTileState extends State<MessageTile> {
                                                 );
                                               } else if (value == 'pin') {
                                                 state.toggleMessagePin(message);
+                                              } else if (value == 'bookmark') {
+                                                state.toggleMessageBookmark(
+                                                  message,
+                                                );
+                                              } else if (value == 'history') {
+                                                showMessageHistoryDialog(
+                                                  context,
+                                                  state,
+                                                  message,
+                                                );
                                               } else if (value == 'forward') {
                                                 showForwardMessageDialog(
                                                   context,
@@ -2928,6 +2983,19 @@ class _MessageTileState extends State<MessageTile> {
                                                       : 'Unpin',
                                                 ),
                                               ),
+                                              PopupMenuItem(
+                                                value: 'bookmark',
+                                                child: Text(
+                                                  message.bookmarked
+                                                      ? 'Remove from Saved'
+                                                      : 'Save message',
+                                                ),
+                                              ),
+                                              if (message.editedAt != null)
+                                                const PopupMenuItem(
+                                                  value: 'history',
+                                                  child: Text('Edit history'),
+                                                ),
                                               const PopupMenuItem(
                                                 value: 'select',
                                                 child: Text('Select'),
@@ -3562,6 +3630,53 @@ class CallsHome extends StatelessWidget {
                 ),
               ),
             ),
+          const SectionLabel('Recent calls'),
+          if (state.callHistory.isEmpty)
+            const Padding(
+              padding: EdgeInsets.only(bottom: 12),
+              child: Text(
+                'Your completed and missed calls will appear here.',
+                style: TextStyle(color: WebCordColors.muted),
+              ),
+            )
+          else
+            for (final record in state.callHistory.take(12))
+              ListTile(
+                contentPadding: const EdgeInsets.symmetric(horizontal: 6),
+                leading: CircleAvatar(
+                  backgroundColor:
+                      record.status == 'MISSED' || record.status == 'DECLINED'
+                      ? WebCordColors.danger.withAlpha(28)
+                      : WebCordColors.success.withAlpha(28),
+                  child: Icon(
+                    record.video
+                        ? Icons.videocam_rounded
+                        : record.outgoing
+                        ? Icons.call_made_rounded
+                        : Icons.call_received_rounded,
+                    color:
+                        record.status == 'MISSED' || record.status == 'DECLINED'
+                        ? WebCordColors.danger
+                        : WebCordColors.success,
+                  ),
+                ),
+                title: Text(
+                  record.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                subtitle: Text(
+                  '${record.status.toLowerCase()} · ${_durationLabel(Duration(seconds: record.durationSeconds))}',
+                ),
+                trailing: Text(
+                  _timeLabel(record.startedAt),
+                  style: const TextStyle(
+                    color: WebCordColors.muted,
+                    fontSize: 11,
+                  ),
+                ),
+                onTap: () => state.selectConversation(record.conversationId),
+              ),
           const SectionLabel('Start a call'),
           if (state.social.conversations.isEmpty)
             const EmptyState(
@@ -8978,13 +9093,18 @@ Future<void> showNativeChatInfo(
   BuildContext context,
   WebCordState state,
 ) async {
+  await state.refreshSharedMedia();
+  if (!context.mounted) return;
   final conversation = state.activeConversation;
-  final media = state.messages.where((message) {
+  final recentMedia = state.messages.where((message) {
     final type = message.attachmentType?.toUpperCase() ?? '';
     return type == 'IMAGE' || type == 'VIDEO' || type == 'CIRCLE_VIDEO';
   }).toList();
+  final media = state.sharedMedia.isNotEmpty ? state.sharedMedia : recentMedia;
   final files = state.messages
-      .where((message) => message.hasAttachment && !media.contains(message))
+      .where(
+        (message) => message.hasAttachment && !recentMedia.contains(message),
+      )
       .toList();
   final links = state.messages
       .where((message) => RegExp(r'https?://').hasMatch(message.content))
@@ -9073,23 +9193,57 @@ Future<void> showNativeChatInfo(
                     crossAxisSpacing: 5,
                     mainAxisSpacing: 5,
                   ),
-                  itemCount: media.length.clamp(0, 12),
+                  itemCount: media.length.clamp(0, 48),
                   itemBuilder: (context, index) {
-                    final message = media[media.length - 1 - index];
+                    final message = media[index];
+                    final isImage =
+                        message.attachmentType?.toUpperCase() == 'IMAGE';
                     return InkWell(
                       onTap: () => showMediaViewer(context, message, state),
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(10),
-                        child: Image.network(
-                          state.api
-                              .attachmentUri(message.attachmentUrl!)
-                              .toString(),
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, _, _) => const ColoredBox(
-                            color: Colors.black12,
-                            child: Icon(Icons.broken_image_outlined),
-                          ),
-                        ),
+                        child: isImage
+                            ? Image.network(
+                                state.api
+                                    .attachmentUri(message.attachmentUrl!)
+                                    .toString(),
+                                fit: BoxFit.cover,
+                                errorBuilder: (_, _, _) => const ColoredBox(
+                                  color: Colors.black12,
+                                  child: Icon(Icons.broken_image_outlined),
+                                ),
+                              )
+                            : ColoredBox(
+                                color: palette.panelStrong,
+                                child: Stack(
+                                  alignment: Alignment.center,
+                                  children: [
+                                    Icon(
+                                      message.attachmentType?.toUpperCase() ==
+                                              'CIRCLE_VIDEO'
+                                          ? Icons.circle_outlined
+                                          : Icons.play_circle_fill_rounded,
+                                      color: palette.accent,
+                                      size: 38,
+                                    ),
+                                    Positioned(
+                                      left: 7,
+                                      right: 7,
+                                      bottom: 6,
+                                      child: Text(
+                                        message.attachmentName ?? 'Video',
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          color: palette.text,
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
                       ),
                     );
                   },
@@ -9179,6 +9333,127 @@ Future<void> showPinnedMessagesDialog(
     ),
   );
   if (state.pinnedMessagesOpen) state.togglePinnedMessages();
+}
+
+Future<void> showSavedMessagesDialog(
+  BuildContext context,
+  WebCordState state,
+) async {
+  await state.refreshSavedMessages();
+  if (!context.mounted) return;
+  await showModalBottomSheet<void>(
+    context: context,
+    showDragHandle: true,
+    isScrollControlled: true,
+    builder: (sheetContext) => SafeArea(
+      child: SizedBox(
+        height: MediaQuery.sizeOf(sheetContext).height * 0.72,
+        child: Column(
+          children: [
+            const ListTile(
+              leading: Icon(Icons.bookmarks_rounded),
+              title: Text(
+                'Saved messages',
+                style: TextStyle(fontWeight: FontWeight.w900),
+              ),
+              subtitle: Text('Private and synchronized across devices'),
+            ),
+            Expanded(
+              child: state.savedMessages.isEmpty
+                  ? const Center(
+                      child: Text(
+                        'Nothing saved yet.\nUse the message menu to add a bookmark.',
+                        textAlign: TextAlign.center,
+                      ),
+                    )
+                  : ListView.builder(
+                      itemCount: state.savedMessages.length,
+                      itemBuilder: (context, index) {
+                        final saved = state.savedMessages[index];
+                        final message = saved.message;
+                        return ListTile(
+                          leading: UserAvatar(user: message.author, size: 36),
+                          title: Text(
+                            saved.type == 'channel'
+                                ? 'Channel message'
+                                : saved.conversation?.displayTitle ??
+                                      'Direct message',
+                          ),
+                          subtitle: Text(
+                            message.content.isNotEmpty
+                                ? message.content
+                                : message.attachmentName ?? 'Attachment',
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          trailing: const Icon(Icons.chevron_right_rounded),
+                          onTap: () {
+                            Navigator.pop(sheetContext);
+                            state.openSavedMessage(saved);
+                          },
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+Future<void> showMessageHistoryDialog(
+  BuildContext context,
+  WebCordState state,
+  ChatMessage message,
+) async {
+  final history = await state.messageEditHistory(message);
+  if (!context.mounted) return;
+  await showModalBottomSheet<void>(
+    context: context,
+    showDragHandle: true,
+    isScrollControlled: true,
+    builder: (sheetContext) => SafeArea(
+      child: SizedBox(
+        height: MediaQuery.sizeOf(sheetContext).height * 0.64,
+        child: Column(
+          children: [
+            const ListTile(
+              leading: Icon(Icons.history_rounded),
+              title: Text(
+                'Edit history',
+                style: TextStyle(fontWeight: FontWeight.w900),
+              ),
+              subtitle: Text('Previous message versions are read-only'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.check_circle_rounded),
+              title: const Text('Current version'),
+              subtitle: Text(message.content),
+            ),
+            const Divider(height: 1),
+            Expanded(
+              child: history.isEmpty
+                  ? const Center(child: Text('No previous versions.'))
+                  : ListView.builder(
+                      itemCount: history.length,
+                      itemBuilder: (context, index) {
+                        final entry = history[index];
+                        return ListTile(
+                          leading: UserAvatar(user: entry.editor, size: 34),
+                          title: Text(entry.previousContent),
+                          subtitle: Text(
+                            '${entry.editor.displayLabel} · ${entry.createdAt.toLocal()}',
+                          ),
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
 }
 
 Future<void> showForwardMessageDialog(
@@ -9299,6 +9574,29 @@ Future<void> showMessageActionsSheet(
               Navigator.pop(sheetContext);
             },
           ),
+          ListTile(
+            leading: Icon(
+              message.bookmarked
+                  ? Icons.bookmark_remove_rounded
+                  : Icons.bookmark_add_outlined,
+            ),
+            title: Text(
+              message.bookmarked ? 'Remove from Saved' : 'Save message',
+            ),
+            onTap: () {
+              state.toggleMessageBookmark(message);
+              Navigator.pop(sheetContext);
+            },
+          ),
+          if (message.editedAt != null)
+            ListTile(
+              leading: const Icon(Icons.history_rounded),
+              title: const Text('Edit history'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                showMessageHistoryDialog(context, state, message);
+              },
+            ),
           ListTile(
             leading: const Icon(Icons.check_circle_outline_rounded),
             title: const Text('Select'),

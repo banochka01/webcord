@@ -172,6 +172,11 @@ class WebCordState extends ChangeNotifier {
   List<ChatMessage> messages = [];
   List<ChatMessage> messageSearchResults = [];
   List<ChatMessage> pinnedMessages = [];
+  List<SavedMessage> savedMessages = [];
+  List<CallRecord> callHistory = [];
+  List<ChatMessage> sharedMedia = [];
+  int? sharedMediaCursor;
+  bool sharedMediaLoading = false;
   final Set<int> selectedMessageIds = {};
   String messageSearchQuery = '';
   ChatMessage? replyingTo;
@@ -452,6 +457,8 @@ class WebCordState extends ChangeNotifier {
     loadingOlderMessages = false;
     voiceParticipants = [];
     stories = [];
+    savedMessages = [];
+    callHistory = [];
     activeCall = null;
     incomingCall = null;
     unreadChannelIds.clear();
@@ -523,6 +530,8 @@ class WebCordState extends ChangeNotifier {
     _connectSocket(currentToken);
     unawaited(refreshMediaDevices());
     unawaited(refreshStories());
+    await refreshSavedMessages(notify: false);
+    unawaited(refreshCallHistory());
     if (workspace == WorkspaceKind.direct && selectedConversationId != null) {
       await loadDirectMessages(selectedConversationId!);
     } else {
@@ -553,6 +562,82 @@ class WebCordState extends ChangeNotifier {
     }
   }
 
+  Future<void> refreshSavedMessages({bool notify = true}) async {
+    final currentToken = token;
+    if (currentToken == null) return;
+    try {
+      savedMessages = await api.savedMessages(currentToken);
+      messages = _applySavedState(messages);
+    } catch (exception) {
+      error = '$exception';
+    }
+    if (notify) notifyListeners();
+  }
+
+  Future<void> refreshCallHistory() async {
+    final currentToken = token;
+    if (currentToken == null) return;
+    try {
+      callHistory = await api.callHistory(currentToken);
+    } catch (exception) {
+      error = '$exception';
+    }
+    notifyListeners();
+  }
+
+  Future<void> refreshSharedMedia({bool loadMore = false}) async {
+    final currentToken = token;
+    if (currentToken == null || sharedMediaLoading) return;
+    if (workspace != WorkspaceKind.direct && selectedTextChannelId == null) {
+      return;
+    }
+    sharedMediaLoading = true;
+    notifyListeners();
+    try {
+      final page = await api.sharedMedia(
+        token: currentToken,
+        channelId: workspace == WorkspaceKind.server
+            ? selectedTextChannelId
+            : null,
+        conversationId: workspace == WorkspaceKind.direct
+            ? selectedConversationId
+            : null,
+        cursor: loadMore ? sharedMediaCursor : null,
+      );
+      if (loadMore) {
+        final existing = sharedMedia.map((item) => item.id).toSet();
+        sharedMedia = [
+          ...sharedMedia,
+          ...page.items.where((item) => !existing.contains(item.id)),
+        ];
+      } else {
+        sharedMedia = page.items;
+      }
+      sharedMediaCursor = page.nextCursor;
+    } catch (exception) {
+      error = '$exception';
+    } finally {
+      sharedMediaLoading = false;
+      notifyListeners();
+    }
+  }
+
+  List<ChatMessage> _applySavedState(List<ChatMessage> source, {bool? direct}) {
+    final directScope = direct ?? workspace == WorkspaceKind.direct;
+    final savedIds = savedMessages
+        .where(
+          (item) => item.type == (directScope ? 'direct-message' : 'channel'),
+        )
+        .map((item) => item.message.id)
+        .toSet();
+    return source
+        .map(
+          (message) =>
+              message.copyWith(bookmarked: savedIds.contains(message.id)),
+        )
+        .toList();
+  }
+
   Future<void> loadChannelMessages(int? channelId) async {
     final currentToken = token;
     if (currentToken == null || channelId == null) return;
@@ -561,7 +646,10 @@ class WebCordState extends ChangeNotifier {
       channelId,
       limit: _messagePageSize,
     );
-    messages = next.where((message) => !message.isDeleted).toList();
+    messages = _applySavedState(
+      next.where((message) => !message.isDeleted).toList(),
+      direct: false,
+    );
     hasOlderMessages = next.length >= _messagePageSize;
     unreadChannelIds.remove(channelId);
     notifyListeners();
@@ -575,7 +663,10 @@ class WebCordState extends ChangeNotifier {
       conversationId,
       limit: _messagePageSize,
     );
-    messages = next.where((message) => !message.isDeleted).toList();
+    messages = _applySavedState(
+      next.where((message) => !message.isDeleted).toList(),
+      direct: true,
+    );
     hasOlderMessages = next.length >= _messagePageSize;
     unreadConversationIds.remove(conversationId);
     notifyListeners();
@@ -647,6 +738,7 @@ class WebCordState extends ChangeNotifier {
         next == WorkspaceKind.friends) {
       messages = [];
       hasOlderMessages = false;
+      if (next == WorkspaceKind.calls) await refreshCallHistory();
       notifyListeners();
     } else {
       messages = [];
@@ -658,6 +750,8 @@ class WebCordState extends ChangeNotifier {
   Future<void> selectTextChannel(int channelId) async {
     workspace = WorkspaceKind.server;
     replyingTo = null;
+    sharedMedia = [];
+    sharedMediaCursor = null;
     selectedTextChannelId = channelId;
     await _store?.setInt(_textChannelKey, channelId);
     await _loadCurrentChatWallpaper();
@@ -678,6 +772,8 @@ class WebCordState extends ChangeNotifier {
   Future<void> selectConversation(int conversationId) async {
     workspace = WorkspaceKind.direct;
     replyingTo = null;
+    sharedMedia = [];
+    sharedMediaCursor = null;
     selectedConversationId = conversationId;
     await _store?.setInt(_conversationKey, conversationId);
     await _loadCurrentChatWallpaper();
@@ -1081,6 +1177,94 @@ class WebCordState extends ChangeNotifier {
       error = '$exception';
       notifyListeners();
     }
+  }
+
+  Future<void> toggleMessageBookmark(ChatMessage message) async {
+    final currentToken = token;
+    if (currentToken == null) return;
+    try {
+      final bookmarked =
+          workspace == WorkspaceKind.direct && selectedConversationId != null
+          ? await api.toggleDirectMessageBookmark(
+              token: currentToken,
+              conversationId: selectedConversationId!,
+              messageId: message.id,
+            )
+          : await api.toggleChannelMessageBookmark(
+              token: currentToken,
+              messageId: message.id,
+            );
+      messages = [
+        for (final item in messages)
+          if (item.id == message.id)
+            item.copyWith(bookmarked: bookmarked)
+          else
+            item,
+      ];
+      messageSearchResults = [
+        for (final item in messageSearchResults)
+          if (item.id == message.id)
+            item.copyWith(bookmarked: bookmarked)
+          else
+            item,
+      ];
+      await refreshSavedMessages(notify: false);
+    } catch (exception) {
+      error = '$exception';
+    }
+    notifyListeners();
+  }
+
+  Future<List<MessageEditVersion>> messageEditHistory(
+    ChatMessage message,
+  ) async {
+    final currentToken = token;
+    if (currentToken == null) return const [];
+    if (workspace == WorkspaceKind.direct && selectedConversationId != null) {
+      return api.directMessageHistory(
+        token: currentToken,
+        conversationId: selectedConversationId!,
+        messageId: message.id,
+      );
+    }
+    return api.channelMessageHistory(
+      token: currentToken,
+      messageId: message.id,
+    );
+  }
+
+  Future<void> openSavedMessage(SavedMessage saved) async {
+    final currentToken = token;
+    if (currentToken == null) return;
+    try {
+      if (saved.type == 'direct-message') {
+        final conversationId =
+            saved.message.conversationId ?? saved.conversation?.id;
+        if (conversationId == null) return;
+        workspace = WorkspaceKind.direct;
+        selectedConversationId = conversationId;
+        messages = await api.directMessageContext(
+          currentToken,
+          conversationId,
+          saved.message.id,
+        );
+      } else {
+        final channelId = saved.message.channelId;
+        if (channelId == null) return;
+        workspace = WorkspaceKind.server;
+        selectedTextChannelId = channelId;
+        messages = await api.channelMessageContext(
+          currentToken,
+          channelId,
+          saved.message.id,
+        );
+      }
+      messages = _applySavedState(messages);
+      _joinRooms();
+    } catch (exception) {
+      error = '$exception';
+    }
+    notifyListeners();
   }
 
   void toggleMessageSelection(ChatMessage message) {
@@ -1690,6 +1874,7 @@ class WebCordState extends ChangeNotifier {
         accept: false,
       );
       incomingCall = null;
+      unawaited(refreshCallHistory());
     });
   }
 
@@ -1702,6 +1887,7 @@ class WebCordState extends ChangeNotifier {
           .catchError((_) {});
     }
     await _cleanupVoice(emitLeave: true);
+    unawaited(refreshCallHistory());
   }
 
   Future<void> _joinCallMedia(CallSession call) async {
@@ -3171,6 +3357,7 @@ class WebCordState extends ChangeNotifier {
             voiceStatus = 'Call declined';
             unawaited(_cleanupVoice(emitLeave: true));
           }
+          unawaited(refreshCallHistory());
         }
       })
       ..on('call:ended', (payload) {
@@ -3183,6 +3370,7 @@ class WebCordState extends ChangeNotifier {
           } else {
             notifyListeners();
           }
+          unawaited(refreshCallHistory());
         }
       })
       ..on('call-participants', (payload) {

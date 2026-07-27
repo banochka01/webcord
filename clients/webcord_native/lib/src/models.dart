@@ -166,6 +166,7 @@ class ChatMessage {
     this.editedAt,
     this.deletedAt,
     this.readAt,
+    this.bookmarked = false,
     this.reactions = const [],
   });
 
@@ -186,12 +187,13 @@ class ChatMessage {
   final DateTime? editedAt;
   final DateTime? deletedAt;
   final DateTime? readAt;
+  final bool bookmarked;
   final List<MessageReaction> reactions;
 
   bool get isDeleted => deletedAt != null;
   bool get hasAttachment => attachmentUrl != null && attachmentUrl!.isNotEmpty;
 
-  ChatMessage copyWith({List<MessageReaction>? reactions}) {
+  ChatMessage copyWith({List<MessageReaction>? reactions, bool? bookmarked}) {
     return ChatMessage(
       id: id,
       content: content,
@@ -210,6 +212,7 @@ class ChatMessage {
       editedAt: editedAt,
       deletedAt: deletedAt,
       readAt: readAt,
+      bookmarked: bookmarked ?? this.bookmarked,
       reactions: reactions ?? this.reactions,
     );
   }
@@ -235,9 +238,88 @@ class ChatMessage {
       editedAt: _asNullableDate(json['editedAt']),
       deletedAt: _asNullableDate(json['deletedAt']),
       readAt: _asNullableDate(json['readAt']),
+      bookmarked: _asBool(json['bookmarked']),
       reactions: _asList(
         json['reactions'],
       ).map(MessageReaction.fromJson).toList(),
+    );
+  }
+}
+
+class SavedMessage {
+  const SavedMessage({
+    required this.id,
+    required this.type,
+    required this.createdAt,
+    required this.message,
+    this.conversation,
+  });
+
+  final int id;
+  final String type;
+  final DateTime createdAt;
+  final ChatMessage message;
+  final DirectConversation? conversation;
+
+  factory SavedMessage.fromJson(Map<String, dynamic> json) {
+    return SavedMessage(
+      id: _asInt(json['id']),
+      type: '${json['type'] ?? 'channel'}',
+      createdAt: _asDate(json['createdAt']),
+      message: ChatMessage.fromJson(
+        Map<String, dynamic>.from(json['message'] as Map? ?? const {}),
+      ),
+      conversation: json['conversation'] is Map
+          ? DirectConversation.fromJson(
+              Map<String, dynamic>.from(json['conversation'] as Map),
+            )
+          : null,
+    );
+  }
+}
+
+class MediaPage {
+  const MediaPage({required this.items, this.nextCursor});
+
+  final List<ChatMessage> items;
+  final int? nextCursor;
+
+  factory MediaPage.fromJson(Map<String, dynamic> json) {
+    final rows = json['items'];
+    return MediaPage(
+      items: rows is List
+          ? rows
+                .whereType<Map>()
+                .map(
+                  (item) =>
+                      ChatMessage.fromJson(Map<String, dynamic>.from(item)),
+                )
+                .toList()
+          : const [],
+      nextCursor: _asNullableInt(json['nextCursor']),
+    );
+  }
+}
+
+class MessageEditVersion {
+  const MessageEditVersion({
+    required this.id,
+    required this.previousContent,
+    required this.createdAt,
+    required this.editor,
+  });
+
+  final int id;
+  final String previousContent;
+  final DateTime createdAt;
+  final PublicUser editor;
+
+  factory MessageEditVersion.fromJson(Map<String, dynamic> json) {
+    return MessageEditVersion(
+      id: _asInt(json['id']),
+      previousContent: '${json['previousContent'] ?? ''}',
+      createdAt: _asDate(json['createdAt']),
+      editor: PublicUser.fromJson(json['editor'] as Map<String, dynamic>?),
     );
   }
 }
@@ -509,6 +591,50 @@ class CallSession {
               .toList(),
       video: _asBool(json['video']),
       status: '${json['status'] ?? 'RINGING'}',
+    );
+  }
+}
+
+class CallRecord {
+  const CallRecord({
+    required this.id,
+    required this.conversationId,
+    required this.title,
+    required this.callerId,
+    required this.startedAt,
+    this.video = false,
+    this.status = 'COMPLETED',
+    this.answeredAt,
+    this.endedAt,
+    this.durationSeconds = 0,
+    this.outgoing = false,
+  });
+
+  final String id;
+  final int conversationId;
+  final String title;
+  final int callerId;
+  final DateTime startedAt;
+  final bool video;
+  final String status;
+  final DateTime? answeredAt;
+  final DateTime? endedAt;
+  final int durationSeconds;
+  final bool outgoing;
+
+  factory CallRecord.fromJson(Map<String, dynamic> json) {
+    return CallRecord(
+      id: '${json['id'] ?? ''}',
+      conversationId: _asInt(json['conversationId']),
+      title: '${json['title'] ?? 'Call'}',
+      callerId: _asInt(json['callerId']),
+      startedAt: _asDate(json['startedAt']),
+      video: _asBool(json['video']),
+      status: '${json['status'] ?? 'COMPLETED'}',
+      answeredAt: _asNullableDate(json['answeredAt']),
+      endedAt: _asNullableDate(json['endedAt']),
+      durationSeconds: _asInt(json['durationSeconds']),
+      outgoing: _asBool(json['outgoing']),
     );
   }
 }
