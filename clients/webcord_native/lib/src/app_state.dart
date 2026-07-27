@@ -143,6 +143,8 @@ class WebCordState extends ChangeNotifier {
   io.Socket? _socket;
   Timer? _recordingTimer;
   Timer? _voiceStatsTimer;
+  Timer? _clientStateSyncTimer;
+  Map<String, dynamic> _remoteClientState = {};
   MediaStream? _localVoiceStream;
   MediaStream? _cameraStream;
   MediaStream? _screenStream;
@@ -464,6 +466,7 @@ class WebCordState extends ChangeNotifier {
   void dispose() {
     _recordingTimer?.cancel();
     _voiceStatsTimer?.cancel();
+    _clientStateSyncTimer?.cancel();
     _socket?.emit('leave-voice');
     _disposeStream(_localVoiceStream);
     _disposeStream(_cameraStream);
@@ -498,6 +501,7 @@ class WebCordState extends ChangeNotifier {
     channels = data.channels;
     social = data.social;
     user = data.currentUser;
+    await _hydrateClientState(currentToken);
 
     selectedTextChannelId =
         _validChannelId(selectedTextChannelId, ChannelKind.text) ??
@@ -718,6 +722,7 @@ class WebCordState extends ChangeNotifier {
       chatDrafts[key] = value;
     }
     await _store?.setString(_chatDraftsKey, jsonEncode(chatDrafts));
+    _scheduleClientStateSync();
     notifyListeners();
   }
 
@@ -726,6 +731,7 @@ class WebCordState extends ChangeNotifier {
       pinnedConversationIds.remove(conversationId);
     }
     await _persistChatPreferences();
+    _scheduleClientStateSync();
     notifyListeners();
   }
 
@@ -734,6 +740,7 @@ class WebCordState extends ChangeNotifier {
       archivedConversationIds.remove(conversationId);
     }
     await _persistChatPreferences();
+    _scheduleClientStateSync();
     notifyListeners();
   }
 
@@ -742,6 +749,7 @@ class WebCordState extends ChangeNotifier {
       mutedConversationIds.remove(conversationId);
     }
     await _persistChatPreferences();
+    _scheduleClientStateSync();
     notifyListeners();
   }
 
@@ -791,6 +799,118 @@ class WebCordState extends ChangeNotifier {
           }),
         ) ??
         Future.value();
+  }
+
+  Future<void> _hydrateClientState(String currentToken) async {
+    try {
+      final state = await api.clientState(currentToken);
+      _remoteClientState = state;
+      final preferences = state['chatPreferences'];
+      if (preferences is Map) {
+        for (final entry in preferences.entries) {
+          final match = RegExp(r'^dm:(\d+)$').firstMatch('${entry.key}');
+          if (match == null || entry.value is! Map) continue;
+          final conversationId = int.tryParse(match.group(1) ?? '');
+          if (conversationId == null) continue;
+          final value = entry.value as Map;
+          _syncSet(
+            pinnedConversationIds,
+            conversationId,
+            value['pinned'] == true,
+          );
+          _syncSet(
+            archivedConversationIds,
+            conversationId,
+            value['archived'] == true,
+          );
+          _syncSet(
+            mutedConversationIds,
+            conversationId,
+            value['muted'] == true,
+          );
+        }
+      }
+      final drafts = state['chatDrafts'];
+      if (drafts is Map) {
+        chatDrafts
+          ..clear()
+          ..addEntries(
+            drafts.entries
+                .where(
+                  (entry) =>
+                      entry.value is String && '${entry.value}'.isNotEmpty,
+                )
+                .map((entry) => MapEntry('${entry.key}', '${entry.value}')),
+          );
+      }
+      final native = state['native'];
+      if (native is Map) {
+        themeMode = AppThemeMode.fromName(
+          '${native['themeMode'] ?? themeMode.name}',
+        );
+        brightnessMode = AppBrightnessMode.fromName(
+          '${native['brightnessMode'] ?? brightnessMode.name}',
+        );
+        notificationsEnabled = native['notificationsEnabled'] is bool
+            ? native['notificationsEnabled'] as bool
+            : notificationsEnabled;
+      }
+      await _persistChatPreferences();
+      await _store?.setString(_chatDraftsKey, jsonEncode(chatDrafts));
+      await _store?.setString(_themeModeKey, themeMode.name);
+      await _store?.setString(_brightnessModeKey, brightnessMode.name);
+      await _store?.setInt(_notificationsKey, notificationsEnabled ? 1 : 0);
+    } catch (_) {
+      // Local state remains authoritative while the server is unavailable.
+    }
+  }
+
+  void _syncSet(Set<int> target, int value, bool enabled) {
+    if (enabled) {
+      target.add(value);
+    } else {
+      target.remove(value);
+    }
+  }
+
+  void _scheduleClientStateSync() {
+    _clientStateSyncTimer?.cancel();
+    _clientStateSyncTimer = Timer(const Duration(milliseconds: 850), () {
+      unawaited(_saveClientState());
+    });
+  }
+
+  Future<void> _saveClientState() async {
+    final currentToken = token;
+    if (currentToken == null) return;
+    final preferences = _remoteClientState['chatPreferences'] is Map
+        ? Map<String, dynamic>.from(
+            _remoteClientState['chatPreferences'] as Map,
+          )
+        : <String, dynamic>{};
+    for (final conversation in social.conversations) {
+      preferences['dm:${conversation.id}'] = {
+        'pinned': pinnedConversationIds.contains(conversation.id),
+        'archived': archivedConversationIds.contains(conversation.id),
+        'muted': mutedConversationIds.contains(conversation.id),
+      };
+    }
+    final state = <String, dynamic>{
+      ..._remoteClientState,
+      'chatPreferences': preferences,
+      'chatDrafts': Map<String, String>.from(chatDrafts),
+      'native': {
+        'themeMode': themeMode.name,
+        'brightnessMode': brightnessMode.name,
+        'notificationsEnabled': notificationsEnabled,
+      },
+    };
+    try {
+      await api.saveClientState(currentToken, state);
+      _remoteClientState = state;
+    } catch (_) {
+      // A later local change or bootstrap retries the synchronized state.
+    }
   }
 
   Future<void> sendMessage(String content) async {
@@ -865,6 +985,42 @@ class WebCordState extends ChangeNotifier {
               selectedTextChannelId!,
               search: query,
             );
+    } catch (exception) {
+      error = '$exception';
+    }
+    notifyListeners();
+  }
+
+  Future<void> loadMessageContext(int messageId) async {
+    final currentToken = token;
+    if (currentToken == null) return;
+    try {
+      final context =
+          workspace == WorkspaceKind.direct && selectedConversationId != null
+          ? await api.directMessageContext(
+              currentToken,
+              selectedConversationId!,
+              messageId,
+            )
+          : selectedTextChannelId != null
+          ? await api.channelMessageContext(
+              currentToken,
+              selectedTextChannelId!,
+              messageId,
+            )
+          : const <ChatMessage>[];
+      final byId = <int, ChatMessage>{
+        for (final message in messages) message.id: message,
+        for (final message in context) message.id: message,
+      };
+      messages = byId.values.where((message) => !message.isDeleted).toList()
+        ..sort((left, right) {
+          final created = left.createdAt.compareTo(right.createdAt);
+          return created != 0 ? created : left.id.compareTo(right.id);
+        });
+      messageSearchOpen = false;
+      messageSearchQuery = '';
+      messageSearchResults = [];
     } catch (exception) {
       error = '$exception';
     }
@@ -1699,12 +1855,14 @@ class WebCordState extends ChangeNotifier {
   Future<void> setThemeMode(AppThemeMode mode) async {
     themeMode = mode;
     await _store?.setString(_themeModeKey, mode.name);
+    _scheduleClientStateSync();
     notifyListeners();
   }
 
   Future<void> setBrightnessMode(AppBrightnessMode mode) async {
     brightnessMode = mode;
     await _store?.setString(_brightnessModeKey, mode.name);
+    _scheduleClientStateSync();
     notifyListeners();
   }
 
@@ -1782,7 +1940,19 @@ class WebCordState extends ChangeNotifier {
   Future<void> setNotificationsEnabled(bool value) async {
     notificationsEnabled = value;
     await _store?.setInt(_notificationsKey, value ? 1 : 0);
+    _scheduleClientStateSync();
     notifyListeners();
+  }
+
+  Future<void> openClientUpdate() async {
+    final platform = Platform.isAndroid ? 'android' : 'windows';
+    final opened = await NativeBridge.openUrl(
+      'https://webcordes.ru/downloads/$platform',
+    );
+    if (!opened) {
+      error = 'Could not open the WebCord download page';
+      notifyListeners();
+    }
   }
 
   Future<void> setCompactMessages(bool value) async {

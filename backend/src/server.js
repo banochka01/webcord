@@ -1757,6 +1757,49 @@ app.get('/api/me/profile', authMiddleware, async (req, res) => {
   }
 });
 
+app.get('/api/me/client-state', authMiddleware, async (req, res) => {
+  try {
+    const rows = await prisma.$queryRaw`
+      SELECT "state", "updatedAt"
+      FROM "UserClientState"
+      WHERE "userId" = ${req.user.userId}
+      LIMIT 1
+    `;
+    const row = rows[0];
+    return res.json({
+      state: row?.state && typeof row.state === 'object' ? row.state : {},
+      updatedAt: row?.updatedAt || null
+    });
+  } catch (error) {
+    console.error(error);
+    return sendApiError(res, 500, 'CLIENT_STATE_FETCH_FAILED', 'Failed to fetch synchronized client state.');
+  }
+});
+
+app.put('/api/me/client-state', authMiddleware, async (req, res) => {
+  try {
+    const state = req.body?.state;
+    if (!state || typeof state !== 'object' || Array.isArray(state)) {
+      return sendApiError(res, 400, 'INVALID_CLIENT_STATE', 'Client state must be an object.');
+    }
+    const serialized = JSON.stringify(state);
+    if (Buffer.byteLength(serialized, 'utf8') > 96 * 1024) {
+      return sendApiError(res, 413, 'CLIENT_STATE_TOO_LARGE', 'Client state is too large.');
+    }
+    const rows = await prisma.$queryRaw`
+      INSERT INTO "UserClientState" ("userId", "state", "updatedAt")
+      VALUES (${req.user.userId}, ${serialized}::jsonb, NOW())
+      ON CONFLICT ("userId")
+      DO UPDATE SET "state" = EXCLUDED."state", "updatedAt" = NOW()
+      RETURNING "updatedAt"
+    `;
+    return res.json({ ok: true, updatedAt: rows[0]?.updatedAt || new Date().toISOString() });
+  } catch (error) {
+    console.error(error);
+    return sendApiError(res, 500, 'CLIENT_STATE_SAVE_FAILED', 'Failed to save synchronized client state.');
+  }
+});
+
 app.patch('/api/me/profile', authMiddleware, async (req, res) => {
   try {
     const currentUser = await prisma.user.update({
@@ -2060,6 +2103,78 @@ app.get('/api/social', authMiddleware, async (req, res) => {
   } catch (error) {
     console.error(error);
     return res.status(500).json({ error: 'Failed to fetch social data' });
+  }
+});
+
+app.get('/api/search', authMiddleware, async (req, res) => {
+  try {
+    const query = normalizeMessageMetadata(req.query.q, 80);
+    if (!query || query.length < 2) {
+      return res.json({ users: [], channelMessages: [], directMessages: [] });
+    }
+    const social = await getSocialSnapshot(req.user.userId);
+    const conversationIds = social.conversations.map((conversation) => conversation.id);
+    const blockedUserIds = social.blockedUserIds || [];
+    const [users, channelMessages, directMessages] = await Promise.all([
+      prisma.user.findMany({
+        where: {
+          id: { notIn: blockedUserIds },
+          OR: [
+            { username: { contains: query } },
+            { displayName: { contains: query } }
+          ]
+        },
+        take: 12,
+        select: publicUserSelect
+      }),
+      prisma.message.findMany({
+        where: {
+          deletedAt: null,
+          ...(blockedUserIds.length > 0 ? { authorId: { notIn: blockedUserIds } } : {}),
+          OR: [
+            { content: { contains: query } },
+            { attachmentName: { contains: query } },
+            { transcript: { contains: query } }
+          ]
+        },
+        orderBy: { id: 'desc' },
+        take: 24,
+        include: {
+          author: { select: publicUserSelect },
+          channel: { select: { id: true, name: true, guildId: true } }
+        }
+      }),
+      conversationIds.length === 0
+        ? Promise.resolve([])
+        : prisma.directMessage.findMany({
+            where: {
+              conversationId: { in: conversationIds },
+              deletedAt: null,
+              OR: [
+                { content: { contains: query } },
+                { attachmentName: { contains: query } },
+                { transcript: { contains: query } }
+              ]
+            },
+            orderBy: { id: 'desc' },
+            take: 24,
+            include: { author: { select: publicUserSelect } }
+          })
+    ]);
+    return res.json({
+      users: users.map(serializePublicUser),
+      channelMessages: channelMessages.map((message) => ({
+        ...message,
+        author: serializePublicUser(message.author)
+      })),
+      directMessages: directMessages.map((message) => ({
+        ...message,
+        author: serializePublicUser(message.author)
+      }))
+    });
+  } catch (error) {
+    console.error(error);
+    return sendCaughtApiError(res, error, 'GLOBAL_SEARCH_FAILED', 'Failed to search WebCord.');
   }
 });
 
@@ -2575,6 +2690,51 @@ app.get('/api/dms/:conversationId/messages', authMiddleware, async (req, res) =>
   }
 });
 
+app.get('/api/dms/:conversationId/messages/:messageId/context', authMiddleware, async (req, res) => {
+  try {
+    const conversationId = parsePositiveInt(req.params.conversationId);
+    const messageId = parsePositiveInt(req.params.messageId);
+    if (!conversationId || !messageId) {
+      return sendApiError(res, 400, 'INVALID_MESSAGE_CONTEXT', 'Invalid conversation or message id.');
+    }
+    const conversation = await prisma.directConversation.findUnique({
+      where: { id: conversationId },
+      include: { members: true }
+    });
+    if (!conversation || !getConversationMemberIds(conversation).includes(req.user.userId)) {
+      return sendApiError(res, 404, 'CONVERSATION_NOT_FOUND', 'Conversation not found.');
+    }
+    const include = {
+      author: { select: publicUserSelect },
+      reactions: { select: { emoji: true, userId: true } },
+      replyTo: { include: { author: { select: publicUserSelect } } }
+    };
+    const target = await prisma.directMessage.findFirst({
+      where: { id: messageId, conversationId, deletedAt: null },
+      include
+    });
+    if (!target) return sendApiError(res, 404, 'MESSAGE_NOT_FOUND', 'Message not found.');
+    const [before, after] = await Promise.all([
+      prisma.directMessage.findMany({
+        where: { conversationId, deletedAt: null, id: { lt: messageId } },
+        orderBy: { id: 'desc' },
+        take: 24,
+        include
+      }),
+      prisma.directMessage.findMany({
+        where: { conversationId, deletedAt: null, id: { gt: messageId } },
+        orderBy: { id: 'asc' },
+        take: 24,
+        include
+      })
+    ]);
+    return res.json({ targetId: messageId, messages: [...before.reverse(), target, ...after] });
+  } catch (error) {
+    console.error(error);
+    return sendCaughtApiError(res, error, 'MESSAGE_CONTEXT_FAILED', 'Failed to load message context.');
+  }
+});
+
 app.get('/api/guilds', authMiddleware, async (_req, res) => {
   try {
     const guilds = await prisma.guild.findMany({ orderBy: { id: 'asc' } });
@@ -2679,6 +2839,44 @@ app.get('/api/messages/:channelId', authMiddleware, async (req, res) => {
   } catch (error) {
     console.error(error);
     return res.status(500).json({ error: 'Failed to fetch messages' });
+  }
+});
+
+app.get('/api/messages/:channelId/context/:messageId', authMiddleware, async (req, res) => {
+  try {
+    const channelId = parsePositiveInt(req.params.channelId);
+    const messageId = parsePositiveInt(req.params.messageId);
+    if (!channelId || !messageId) {
+      return sendApiError(res, 400, 'INVALID_MESSAGE_CONTEXT', 'Invalid channel or message id.');
+    }
+    const include = {
+      author: { select: publicUserSelect },
+      reactions: { select: { emoji: true, userId: true } },
+      replyTo: { include: { author: { select: publicUserSelect } } }
+    };
+    const target = await prisma.message.findFirst({
+      where: { id: messageId, channelId, deletedAt: null },
+      include
+    });
+    if (!target) return sendApiError(res, 404, 'MESSAGE_NOT_FOUND', 'Message not found.');
+    const [before, after] = await Promise.all([
+      prisma.message.findMany({
+        where: { channelId, deletedAt: null, id: { lt: messageId } },
+        orderBy: { id: 'desc' },
+        take: 24,
+        include
+      }),
+      prisma.message.findMany({
+        where: { channelId, deletedAt: null, id: { gt: messageId } },
+        orderBy: { id: 'asc' },
+        take: 24,
+        include
+      })
+    ]);
+    return res.json({ targetId: messageId, messages: [...before.reverse(), target, ...after] });
+  } catch (error) {
+    console.error(error);
+    return sendCaughtApiError(res, error, 'MESSAGE_CONTEXT_FAILED', 'Failed to load message context.');
   }
 });
 

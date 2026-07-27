@@ -17,12 +17,14 @@ const fallbackIcon = nativeImage.createFromDataURL(
 const iconPath = path.join(__dirname, 'build', 'icon.png');
 const appIcon = fs.existsSync(iconPath) ? nativeImage.createFromPath(iconPath) : fallbackIcon;
 const trayIcon = appIcon.isEmpty() ? fallbackIcon : appIcon;
-const updatesUrl = 'https://github.com/banochka01/webcord/releases';
+const updatesUrl = 'https://webcordes.ru/downloads/windows';
 const allowedExternalProtocols = new Set(['http:', 'https:', 'mailto:']);
 
 let mainWindow;
 let tray;
 let pendingDeepLink = '';
+let isQuitting = false;
+let closeToTray = true;
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -102,6 +104,12 @@ function createWindow() {
   mainWindow.on('unmaximize', sendWindowState);
   mainWindow.on('focus', () => mainWindow.webContents.send('window:focus', true));
   mainWindow.on('blur', () => mainWindow.webContents.send('window:focus', false));
+  mainWindow.on('close', (event) => {
+    if (!isQuitting && closeToTray) {
+      event.preventDefault();
+      mainWindow.hide();
+    }
+  });
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     openTrustedExternalUrl(url);
@@ -133,6 +141,30 @@ function createWindow() {
 function createTray() {
   tray = new Tray(trayIcon);
   tray.setToolTip('WebCord');
+  tray.setContextMenu(Menu.buildFromTemplate([
+    {
+      label: 'Open WebCord',
+      click: () => focusWithDeepLink()
+    },
+    {
+      label: 'Download latest update',
+      click: () => openTrustedExternalUrl(updatesUrl)
+    },
+    { type: 'separator' },
+    {
+      label: 'Launch at login',
+      type: 'checkbox',
+      checked: app.getLoginItemSettings().openAtLogin,
+      click: (item) => app.setLoginItemSettings({ openAtLogin: item.checked, path: process.execPath })
+    },
+    {
+      label: 'Quit',
+      click: () => {
+        isQuitting = true;
+        app.quit();
+      }
+    }
+  ]));
   tray.on('click', () => {
     if (!mainWindow) return;
     if (mainWindow.isMinimized()) mainWindow.restore();
@@ -176,7 +208,11 @@ app.on('open-url', (event, url) => {
 });
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
+  if (process.platform !== 'darwin' && (isQuitting || !closeToTray)) app.quit();
+});
+
+app.on('before-quit', () => {
+  isQuitting = true;
 });
 
 ipcMain.handle('window:minimize', () => mainWindow?.minimize());
@@ -199,6 +235,15 @@ ipcMain.handle('app:notify', (_event, payload = {}) => {
 });
 ipcMain.handle('app:check-updates', () => {
   return { ok: openTrustedExternalUrl(updatesUrl), url: updatesUrl };
+});
+ipcMain.handle('app:get-auto-launch', () => app.getLoginItemSettings().openAtLogin);
+ipcMain.handle('app:set-auto-launch', (_event, enabled) => {
+  app.setLoginItemSettings({ openAtLogin: Boolean(enabled), path: process.execPath });
+  return app.getLoginItemSettings().openAtLogin;
+});
+ipcMain.handle('app:set-close-to-tray', (_event, enabled) => {
+  closeToTray = Boolean(enabled);
+  return closeToTray;
 });
 ipcMain.handle('app:set-badge', (_event, count = 0) => {
   const nextCount = Math.max(0, Number(count) || 0);

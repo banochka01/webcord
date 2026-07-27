@@ -134,6 +134,13 @@ const PROFILE_ACCENTS = ['#7c5cff', '#4f8cff', '#31e4d1', '#ff6b8a', '#f2b84b', 
 const EMPTY_SOCIAL = { friends: [], requests: [], conversations: [], blockedUserIds: [] };
 const DEFAULT_CLIENT_SETTINGS = {
   notificationsEnabled: true,
+  notificationMode: 'all',
+  quietHoursEnabled: false,
+  quietHoursStart: '22:00',
+  quietHoursEnd: '08:00',
+  autoDownloadMedia: true,
+  launchAtLogin: false,
+  minimizeToTray: true,
   micDeviceId: '',
   cameraDeviceId: '',
   outputDeviceId: '',
@@ -729,8 +736,22 @@ function getPublicAssetUrl(value) {
   return value;
 }
 
-function showClientNotification(title, body) {
-  if (!readClientSettings().notificationsEnabled) return;
+function isWithinQuietHours(settings, now = new Date()) {
+  if (!settings.quietHoursEnabled) return false;
+  const toMinutes = (value) => {
+    const [hours, minutes] = String(value || '').split(':').map(Number);
+    return Number.isFinite(hours) && Number.isFinite(minutes) ? hours * 60 + minutes : 0;
+  };
+  const current = now.getHours() * 60 + now.getMinutes();
+  const start = toMinutes(settings.quietHoursStart);
+  const end = toMinutes(settings.quietHoursEnd);
+  return start === end || (start < end ? current >= start && current < end : current >= start || current < end);
+}
+
+function showClientNotification(title, body, { direct = false, mention = false, muted = false } = {}) {
+  const settings = readClientSettings();
+  if (!settings.notificationsEnabled || muted || isWithinQuietHours(settings)) return;
+  if (settings.notificationMode === 'mentions' && !mention && !direct) return;
   if (!IS_NATIVE_CLIENT || !document.hidden) return;
   const bridge = getNativeBridge();
   if (typeof bridge?.notify === 'function') {
@@ -2694,6 +2715,51 @@ function ChatInfoPanel({ open, conversation, channel, messages, pinnedMessages, 
   );
 }
 
+function GlobalSearchPalette({ open, query, loading, results, onQueryChange, onOpenResult, onClose }) {
+  if (!open) return null;
+  const users = results?.users || [];
+  const channelMessages = results?.channelMessages || [];
+  const directMessages = results?.directMessages || [];
+  const empty = query.trim().length >= 2 && !loading && users.length + channelMessages.length + directMessages.length === 0;
+  return (
+    <div className="global-search-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+      <section className="global-search-palette" role="dialog" aria-modal="true" aria-label="Search WebCord">
+        <div className="global-search-input">
+          <AppIcon name="search" />
+          <input autoFocus value={query} onChange={(event) => onQueryChange(event.target.value)} placeholder="People, chats and messages" />
+          <kbd>Esc</kbd>
+        </div>
+        <div className="global-search-results">
+          {query.trim().length < 2 ? <p className="muted">Type at least two characters. Press Ctrl K anywhere to return here.</p> : null}
+          {loading ? <p className="muted">Searching across WebCord…</p> : null}
+          {users.length ? <h4>People</h4> : null}
+          {users.map((profile) => (
+            <button type="button" key={`user-${profile.id}`} onClick={() => onOpenResult({ type: 'user', profile })}>
+              <UserAvatar user={profile} />
+              <span><strong>{getDisplayName(profile)}</strong><small>{getUsernameTag(profile)}</small></span>
+            </button>
+          ))}
+          {channelMessages.length ? <h4>Channels</h4> : null}
+          {channelMessages.map((message) => (
+            <button type="button" key={`channel-${message.id}`} onClick={() => onOpenResult({ type: 'channel-message', message })}>
+              <AppIcon name="hash" />
+              <span><strong>{message.channel?.name || 'Channel'}</strong><small>{message.content || message.attachmentName || 'Attachment'}</small></span>
+            </button>
+          ))}
+          {directMessages.length ? <h4>Direct messages</h4> : null}
+          {directMessages.map((message) => (
+            <button type="button" key={`dm-${message.id}`} onClick={() => onOpenResult({ type: 'direct-message', message })}>
+              <UserAvatar user={message.author} />
+              <span><strong>{getDisplayName(message.author)}</strong><small>{message.content || message.attachmentName || 'Attachment'}</small></span>
+            </button>
+          ))}
+          {empty ? <p className="muted">Nothing matched this search.</p> : null}
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function UserProfileModal({ open, profile, relationshipLabel, canAddFriend, isBlocked, onAddFriend, onReport, onBlock, onUnblock, onClose }) {
   if (!open || !profile) return null;
   const displayName = getDisplayName(profile);
@@ -3390,18 +3456,42 @@ function SettingsModal({
             <h2>Notifications</h2>
             <div className="settings-card-list">
               <div className="settings-row"><span>Client notifications</span><button type="button" onClick={onToggleNotifications}>{clientSettings.notificationsEnabled ? 'Enabled' : 'Disabled'}</button></div>
+              <label className="settings-row">
+                <span>Notify me about</span>
+                <select value={clientSettings.notificationMode || 'all'} onChange={(event) => onClientSettingChange('notificationMode', event.target.value)}>
+                  <option value="all">All messages</option>
+                  <option value="mentions">Mentions and direct messages</option>
+                </select>
+              </label>
+              <div className="settings-row">
+                <span>Quiet hours</span>
+                <button type="button" onClick={() => onClientSettingChange('quietHoursEnabled', !clientSettings.quietHoursEnabled)}>
+                  {clientSettings.quietHoursEnabled ? 'Enabled' : 'Disabled'}
+                </button>
+              </div>
+              {clientSettings.quietHoursEnabled ? (
+                <div className="settings-time-range">
+                  <label>From<input type="time" value={clientSettings.quietHoursStart || '22:00'} onChange={(event) => onClientSettingChange('quietHoursStart', event.target.value)} /></label>
+                  <label>Until<input type="time" value={clientSettings.quietHoursEnd || '08:00'} onChange={(event) => onClientSettingChange('quietHoursEnd', event.target.value)} /></label>
+                </div>
+              ) : null}
               <div className="settings-row"><span>Browser permission</span><strong>{'Notification' in window ? Notification.permission : 'Unsupported'}</strong></div>
               <div className="settings-row"><span>Desktop updates</span><button type="button" onClick={onCheckUpdates}>Check Releases</button></div>
             </div>
           </div>
         ) : null}
         {activeSection === 'devices' ? (
-          <StaticSettingsPage title="Devices" rows={[
-            `${mediaDevices.audioinput.length} microphone(s) detected`,
-            `${mediaDevices.videoinput.length} camera(s) detected`,
-            `${mediaDevices.audiooutput.length} output device(s) detected`,
-            'TURN can be configured without secrets in the repo via VITE_TURN_URLS, VITE_TURN_USERNAME and VITE_TURN_CREDENTIAL.'
-          ]} />
+          <div className="settings-page">
+            <h2>Devices and desktop</h2>
+            <div className="settings-card-list">
+              <div className="settings-row"><span>Microphones detected</span><strong>{mediaDevices.audioinput.length}</strong></div>
+              <div className="settings-row"><span>Cameras detected</span><strong>{mediaDevices.videoinput.length}</strong></div>
+              <div className="settings-row"><span>Outputs detected</span><strong>{mediaDevices.audiooutput.length}</strong></div>
+              <div className="settings-row"><span>Launch with Windows</span><button type="button" onClick={() => onClientSettingChange('launchAtLogin', !clientSettings.launchAtLogin)}>{clientSettings.launchAtLogin ? 'Enabled' : 'Disabled'}</button></div>
+              <div className="settings-row"><span>Close to tray</span><button type="button" onClick={() => onClientSettingChange('minimizeToTray', !clientSettings.minimizeToTray)}>{clientSettings.minimizeToTray ? 'Enabled' : 'Disabled'}</button></div>
+              <div className="settings-row"><span>Media cache</span><button type="button" onClick={() => onClientSettingChange('autoDownloadMedia', !clientSettings.autoDownloadMedia)}>{clientSettings.autoDownloadMedia ? 'Automatic' : 'On demand'}</button></div>
+            </div>
+          </div>
         ) : null}
       </section>
     </div>
@@ -3669,6 +3759,7 @@ export default function App() {
   const [friendUsername, setFriendUsername] = useState('');
   const [newMessage, setNewMessage] = useState('');
   const [pendingAttachment, setPendingAttachment] = useState(null);
+  const [pendingAttachmentQueue, setPendingAttachmentQueue] = useState([]);
   const [replyTarget, setReplyTarget] = useState(null);
   const [editingMessage, setEditingMessage] = useState(null);
   const [dmSearch, setDmSearch] = useState('');
@@ -3687,6 +3778,7 @@ export default function App() {
   const [customFoldersOwnerKey, setCustomFoldersOwnerKey] = useState(() => getFolderOwnerKey(user));
   const [newFolderName, setNewFolderName] = useState('');
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [showComposerTools, setShowComposerTools] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showThemeModal, setShowThemeModal] = useState(false);
   const [settingsSection, setSettingsSection] = useState('account');
@@ -3732,6 +3824,7 @@ export default function App() {
   const [cameraPreviewStream, setCameraPreviewStream] = useState(null);
   const [mediaDevices, setMediaDevices] = useState({ audioinput: [], videoinput: [], audiooutput: [] });
   const [clientSettings, setClientSettings] = useState(() => readClientSettings());
+  const [clientStateReady, setClientStateReady] = useState(false);
   const [toasts, setToasts] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [unreadAnchorId, setUnreadAnchorId] = useState(null);
@@ -3740,6 +3833,10 @@ export default function App() {
   const [messageSearchQuery, setMessageSearchQuery] = useState('');
   const [messageSearchResults, setMessageSearchResults] = useState([]);
   const [messageSearchLoading, setMessageSearchLoading] = useState(false);
+  const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
+  const [globalSearchQuery, setGlobalSearchQuery] = useState('');
+  const [globalSearchResults, setGlobalSearchResults] = useState({ users: [], channelMessages: [], directMessages: [] });
+  const [globalSearchLoading, setGlobalSearchLoading] = useState(false);
   const [pinnedPanelOpen, setPinnedPanelOpen] = useState(false);
   const [pinnedMessages, setPinnedMessages] = useState([]);
   const [selectedMessageIds, setSelectedMessageIds] = useState([]);
@@ -3783,6 +3880,7 @@ export default function App() {
 
   const socketRef = useRef(null);
   const fileInputRef = useRef(null);
+  const composerInputRef = useRef(null);
   const avatarInputRef = useRef(null);
   const bannerInputRef = useRef(null);
   const trackInputRef = useRef(null);
@@ -3827,10 +3925,14 @@ export default function App() {
   const appShellRef = useRef(null);
   const composerPhaseTimerRef = useRef(null);
   const messageSearchTimerRef = useRef(null);
+  const globalSearchTimerRef = useRef(null);
   const highlightTimerRef = useRef(null);
   const speechRecognitionRef = useRef(null);
   const recordingTranscriptRef = useRef('');
   const recordingRecoveryAttemptedRef = useRef(false);
+  const clientStateHydratedRef = useRef(false);
+  const clientStateSyncTimerRef = useRef(null);
+  const chatPreferencesRef = useRef(chatPreferences);
 
   const isAdminRoute = ADMIN_PATHS.has(currentPath);
   const isAuthed = Boolean(token && user);
@@ -3895,18 +3997,14 @@ export default function App() {
     const root = appShellRef.current;
     if (!root || !isAuthed || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
 
-    const timeline = gsap.timeline({ defaults: { ease: 'power3.out' } });
-    timeline
-      .fromTo('.rail', { autoAlpha: 0, x: -18 }, { autoAlpha: 1, x: 0, duration: 0.42 })
-      .fromTo('.sidebar', { autoAlpha: 0, x: -24 }, { autoAlpha: 1, x: 0, duration: 0.52 }, '-=0.26')
-      .fromTo('.chat-panel', { autoAlpha: 0, y: 18, scale: 0.992 }, { autoAlpha: 1, y: 0, scale: 1, duration: 0.58 }, '-=0.34')
-      .fromTo('.channel-btn, .conversation-btn', { autoAlpha: 0, x: -9 }, {
-        autoAlpha: 1,
-        x: 0,
-        duration: 0.3,
-        stagger: 0.018,
-        clearProps: 'transform'
-      }, '-=0.42');
+    gsap.fromTo('.channel-btn, .conversation-btn', { autoAlpha: 0, x: -9 }, {
+      autoAlpha: 1,
+      x: 0,
+      duration: 0.3,
+      ease: 'power3.out',
+      stagger: 0.018,
+      clearProps: 'transform,visibility,opacity'
+    });
   }, { scope: appShellRef, dependencies: [isAuthed, workspace], revertOnUpdate: true });
 
   useGSAP(() => {
@@ -3922,7 +4020,7 @@ export default function App() {
 
     if (!reducedMotion) {
       gsap.fromTo(
-        '.rail, .sidebar, .chat-header, .message-form, .mobile-bottom-nav',
+        '.chat-header, .message-form, .mobile-bottom-nav',
         { autoAlpha: 0.72, y: profile.y, scale: profile.scale },
         {
           autoAlpha: 1,
@@ -4020,7 +4118,58 @@ export default function App() {
 
   useEffect(() => {
     localStorage.setItem(KEYS.settings, JSON.stringify(clientSettings));
+    const bridge = getNativeBridge();
+    bridge?.setAutoLaunch?.(Boolean(clientSettings.launchAtLogin)).catch?.(() => {});
+    bridge?.setCloseToTray?.(Boolean(clientSettings.minimizeToTray)).catch?.(() => {});
   }, [clientSettings]);
+
+  useEffect(() => {
+    if (!isAuthed || !token || isAdminRoute) {
+      clientStateHydratedRef.current = false;
+      setClientStateReady(false);
+      return;
+    }
+    let cancelled = false;
+    apiFetch('/me/client-state', {}, token).then((payload) => {
+      if (cancelled) return;
+      const state = payload?.state || {};
+      if (state.chatPreferences && typeof state.chatPreferences === 'object') setChatPreferences(state.chatPreferences);
+      if (state.chatDrafts && typeof state.chatDrafts === 'object') setChatDrafts(state.chatDrafts);
+      if (Array.isArray(state.customFolders)) setCustomFolders(state.customFolders);
+      if (state.clientSettings && typeof state.clientSettings === 'object') {
+        setClientSettings((current) => ({ ...current, ...state.clientSettings }));
+      }
+      if (state.theme && typeof state.theme === 'object') setTheme(hydrateTheme(state.theme));
+      if (COLOR_MODES.includes(state.colorMode)) setColorMode(state.colorMode);
+      clientStateHydratedRef.current = true;
+      setClientStateReady(true);
+    }).catch(() => {
+      clientStateHydratedRef.current = true;
+      setClientStateReady(true);
+    });
+    return () => { cancelled = true; };
+  }, [isAuthed, isAdminRoute, token, user?.id]);
+
+  useEffect(() => {
+    if (!isAuthed || !token || !clientStateHydratedRef.current || !clientStateReady || isAdminRoute) return undefined;
+    window.clearTimeout(clientStateSyncTimerRef.current);
+    clientStateSyncTimerRef.current = window.setTimeout(() => {
+      apiFetch('/me/client-state', {
+        method: 'PUT',
+        body: JSON.stringify({
+          state: {
+            chatPreferences,
+            chatDrafts,
+            customFolders,
+            clientSettings,
+            theme,
+            colorMode
+          }
+        })
+      }, token).catch(() => {});
+    }, 900);
+    return () => window.clearTimeout(clientStateSyncTimerRef.current);
+  }, [isAuthed, isAdminRoute, token, clientStateReady, chatPreferences, chatDrafts, customFolders, clientSettings, theme, colorMode]);
 
   useEffect(() => {
     if (!showSettingsModal) return;
@@ -4039,6 +4188,26 @@ export default function App() {
   useEffect(() => () => {
     cleanupMessageRecording({ cancel: true });
   }, []);
+
+  useEffect(() => {
+    if (!circleRecording && !voiceRecording) return undefined;
+    const cancelOnEscape = (event) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      cleanupMessageRecording({ cancel: true });
+    };
+    window.addEventListener('keydown', cancelOnEscape);
+    return () => window.removeEventListener('keydown', cancelOnEscape);
+  }, [circleRecording, voiceRecording]);
+
+  useEffect(() => {
+    if (recordingPhase !== 'requesting') return undefined;
+    const timeout = window.setTimeout(() => {
+      cleanupMessageRecording({ cancel: true });
+      reportError(new Error('Camera or microphone did not respond in time'), 'Recording cancelled safely');
+    }, 20000);
+    return () => window.clearTimeout(timeout);
+  }, [recordingPhase]);
 
   useEffect(() => {
     if (user) {
@@ -4074,6 +4243,7 @@ export default function App() {
   useEffect(() => { volumeRef.current = participantVolumes; }, [participantVolumes]);
   useEffect(() => { remoteStreamsRef.current = remoteStreams; }, [remoteStreams]);
   useEffect(() => { voiceQualityRef.current = voiceQuality; }, [voiceQuality]);
+  useEffect(() => { chatPreferencesRef.current = chatPreferences; }, [chatPreferences]);
   useEffect(() => {
     scopeRef.current = workspace === 'dm'
       ? { type: 'dm', id: String(dmConversationId || '') }
@@ -4103,8 +4273,15 @@ export default function App() {
 
   useEffect(() => {
     const onKeyDown = (event) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        setGlobalSearchOpen(true);
+        return;
+      }
       if (event.key === 'Escape') {
         setShowEmojiPicker(false);
+        setShowComposerTools(false);
+        setGlobalSearchOpen(false);
         setShowSettingsModal(false);
         setViewedProfile(null);
       }
@@ -4297,6 +4474,24 @@ export default function App() {
   }, [messageSearchOpen, messageSearchQuery, workspace, channelId, dmConversationId]);
 
   useEffect(() => {
+    window.clearTimeout(globalSearchTimerRef.current);
+    const query = globalSearchQuery.trim();
+    if (!globalSearchOpen || query.length < 2 || !token) {
+      setGlobalSearchResults({ users: [], channelMessages: [], directMessages: [] });
+      setGlobalSearchLoading(false);
+      return undefined;
+    }
+    setGlobalSearchLoading(true);
+    globalSearchTimerRef.current = window.setTimeout(() => {
+      apiFetch(`/search?q=${encodeURIComponent(query)}`, {}, token)
+        .then(setGlobalSearchResults)
+        .catch((err) => reportError(err, 'Could not search WebCord'))
+        .finally(() => setGlobalSearchLoading(false));
+    }, 260);
+    return () => window.clearTimeout(globalSearchTimerRef.current);
+  }, [globalSearchOpen, globalSearchQuery, token]);
+
+  useEffect(() => {
     if (pinnedPanelOpen) refreshPinnedMessages();
   }, [pinnedPanelOpen, workspace, channelId, dmConversationId]);
 
@@ -4361,7 +4556,14 @@ export default function App() {
         }
         setMessages((prev) => mergeMessage(prev, message));
         if (String(message.author?.id) !== String(user?.id)) {
-          showClientNotification(getDisplayName(message.author), message.content || message.attachmentName || 'New message');
+          showClientNotification(
+            getDisplayName(message.author),
+            message.content || message.attachmentName || 'New message',
+            {
+              mention: Boolean(user?.username && String(message.content || '').toLowerCase().includes(`@${user.username.toLowerCase()}`)),
+              muted: Boolean(chatPreferencesRef.current[`channel:${message.channelId}`]?.muted)
+            }
+          );
         }
       }
     });
@@ -4395,7 +4597,14 @@ export default function App() {
         setMessages((prev) => mergeMessage(prev, message));
         if (String(message.author?.id) !== String(user?.id)) {
           if (document.hidden || workspaceRef.current !== 'dm') setUnreadCount((count) => count + 1);
-          showClientNotification(getDisplayName(message.author), message.content || message.attachmentName || 'New direct message');
+          showClientNotification(
+            getDisplayName(message.author),
+            message.content || message.attachmentName || 'New direct message',
+            {
+              direct: true,
+              muted: Boolean(chatPreferencesRef.current[`dm:${message.conversationId}`]?.muted)
+            }
+          );
         }
       }
     });
@@ -4925,6 +5134,41 @@ export default function App() {
     }
   }
 
+  async function openGlobalSearchResult(result) {
+    if (result.type === 'user') {
+      setViewedProfile(result.profile);
+      setGlobalSearchOpen(false);
+      return;
+    }
+    const message = result.message;
+    try {
+      if (result.type === 'direct-message') {
+        const conversationId = message.conversationId;
+        const payload = await apiFetch(`/dms/${conversationId}/messages/${message.id}/context`, {}, token);
+        setWorkspace('dm');
+        setDmConversationId(String(conversationId));
+        setMessages(sortMessages(payload.messages || []));
+      } else {
+        const targetChannelId = message.channel?.id || message.channelId;
+        const payload = await apiFetch(`/messages/${targetChannelId}/context/${message.id}`, {}, token);
+        setWorkspace('server');
+        setChannelId(String(targetChannelId));
+        setMessages(sortMessages(payload.messages || []));
+      }
+      setGlobalSearchOpen(false);
+      setGlobalSearchQuery('');
+      setMobileChatOpen(true);
+      setHighlightedMessageId(String(message.id));
+      window.setTimeout(() => {
+        document.querySelector(`[data-message-id="${message.id}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      }, 80);
+      window.clearTimeout(highlightTimerRef.current);
+      highlightTimerRef.current = window.setTimeout(() => setHighlightedMessageId(null), 1800);
+    } catch (err) {
+      reportError(err, 'Could not open search result');
+    }
+  }
+
   async function refreshPinnedMessages() {
     const path = getCurrentMessagePath();
     if (!path) return;
@@ -4940,17 +5184,20 @@ export default function App() {
   async function scrollToMessage(target) {
     if (!target?.id) return;
     let node = document.querySelector(`[data-message-id="${target.id}"]`);
-    if (!node && target.content) {
-      const path = getCurrentMessagePath();
-      if (path) {
-        try {
-          const results = await apiFetch(`${path}?search=${encodeURIComponent(target.content.slice(0, 80))}&limit=100`, {}, token);
-          setMessages((current) => sortMessages([...current, ...results.filter((item) => !current.some((entry) => String(entry.id) === String(item.id)))]));
-          await new Promise((resolve) => window.requestAnimationFrame(resolve));
-          node = document.querySelector(`[data-message-id="${target.id}"]`);
-        } catch {
-          // The reply still remains readable even if older history cannot be fetched.
-        }
+    if (!node) {
+      try {
+        const path = workspace === 'dm'
+          ? `/dms/${dmConversationId}/messages/${target.id}/context`
+          : `/messages/${channelId}/context/${target.id}`;
+        const payload = await apiFetch(path, {}, token);
+        setMessages((current) => sortMessages([
+          ...current,
+          ...(payload?.messages || []).filter((item) => !current.some((entry) => String(entry.id) === String(item.id)))
+        ]));
+        await new Promise((resolve) => window.requestAnimationFrame(resolve));
+        node = document.querySelector(`[data-message-id="${target.id}"]`);
+      } catch {
+        // Keep the reply card usable even when the remote history is unavailable.
       }
     }
     if (!node) {
@@ -5865,16 +6112,23 @@ export default function App() {
   }
 
   async function handleFileSelect(event) {
-    const file = event.target.files?.[0];
-    if (!file || !token) return;
+    const files = Array.from(event.target.files || []).slice(0, 10);
+    if (files.length === 0 || !token) return;
     try {
       setUploading(true);
-      const formData = new FormData();
-      formData.append('file', file);
-      setPendingAttachment(await apiFetch('/upload', { method: 'POST', body: formData }, token));
+      const uploaded = [];
+      for (const file of files) {
+        const formData = new FormData();
+        formData.append('file', file);
+        uploaded.push(await apiFetch('/upload', { method: 'POST', body: formData }, token));
+      }
+      setPendingAttachment(uploaded[0] || null);
+      setPendingAttachmentQueue(uploaded.slice(1));
+      pushToast(uploaded.length > 1 ? `${uploaded.length} files ready to send` : 'File ready to send');
     } catch (err) {
       setError(err.message);
       setPendingAttachment(null);
+      setPendingAttachmentQueue([]);
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -5917,39 +6171,66 @@ export default function App() {
     navigator.vibrate?.(10);
   }
 
+  function formatComposerSelection(prefix, suffix = prefix) {
+    const input = composerInputRef.current;
+    if (!input) return;
+    const start = input.selectionStart ?? newMessage.length;
+    const end = input.selectionEnd ?? start;
+    const selected = newMessage.slice(start, end);
+    const next = `${newMessage.slice(0, start)}${prefix}${selected}${suffix}${newMessage.slice(end)}`;
+    setNewMessage(next);
+    window.requestAnimationFrame(() => {
+      input.focus();
+      const cursorStart = start + prefix.length;
+      const cursorEnd = cursorStart + selected.length;
+      input.setSelectionRange(cursorStart, cursorEnd);
+    });
+  }
+
   async function sendMessage(event) {
     event.preventDefault();
     const content = newMessage.trim();
-    if ((!content && !pendingAttachment) || !token) return;
+    if ((!content && !pendingAttachment && pendingAttachmentQueue.length === 0) || !token) return;
     if (!networkOnline) {
       if (editingMessage) {
         setError('Reconnect before editing this message.');
         announceComposerPhase('error');
         return;
       }
-      const clientId = -Date.now();
-      const body = {
-        content,
-        attachmentUrl: pendingAttachment?.url,
-        attachmentType: pendingAttachment?.type,
-        attachmentName: pendingAttachment?.name,
-        transcript: pendingAttachment?.transcript,
-        replyToId: replyTarget?.id
-      };
-      setMessages((current) => mergeMessage(current, {
-        id: clientId,
+      const attachments = [pendingAttachment, ...pendingAttachmentQueue].filter(Boolean);
+      const queuedBodies = (attachments.length > 0 ? attachments : [null]).map((attachment, index) => ({
+        clientId: -(Date.now() + index),
+        body: {
+          content: index === 0 ? content : '',
+          attachmentUrl: attachment?.url,
+          attachmentType: attachment?.type,
+          attachmentName: attachment?.name,
+          transcript: attachment?.transcript,
+          replyToId: index === 0 ? replyTarget?.id : undefined
+        }
+      }));
+      setMessages((current) => queuedBodies.reduce((next, queued, index) => mergeMessage(next, {
+        id: queued.clientId,
         channelId: workspace === 'server' ? Number(channelId) : undefined,
         conversationId: workspace === 'dm' ? Number(dmConversationId) : undefined,
-        ...body,
-        replyTo: replyTarget || null,
+        ...queued.body,
+        replyTo: index === 0 ? replyTarget || null : null,
         author: user,
-        createdAt: new Date().toISOString(),
+        createdAt: new Date(Date.now() + index).toISOString(),
         queued: true,
         reactions: []
-      }));
-      setMessageOutbox((current) => [...current, { clientId, workspace, scopeId: workspace === 'dm' ? dmConversationId : channelId, body }]);
+      }), current));
+      setMessageOutbox((current) => [
+        ...current,
+        ...queuedBodies.map((queued) => ({
+          ...queued,
+          workspace,
+          scopeId: workspace === 'dm' ? dmConversationId : channelId
+        }))
+      ]);
       setNewMessage('');
       setPendingAttachment(null);
+      setPendingAttachmentQueue([]);
       setReplyTarget(null);
       pushToast('Message queued and will send when you reconnect');
       setSocketStatus('offline');
@@ -6042,13 +6323,29 @@ export default function App() {
         ));
       }
 
+      for (const attachment of pendingAttachmentQueue) {
+        const body = {
+          content: '',
+          attachmentUrl: attachment.url,
+          attachmentType: attachment.type,
+          attachmentName: attachment.name,
+          transcript: attachment.transcript
+        };
+        const extraMessage = workspace === 'dm'
+          ? await apiFetch(`/dms/${dmConversationId}/messages`, { method: 'POST', body: JSON.stringify(body) }, token)
+          : await apiFetch('/messages', { method: 'POST', body: JSON.stringify({ ...body, channelId: Number(channelId) }) }, token);
+        setMessages((current) => mergeMessage(current, extraMessage));
+      }
+
       setError('');
       setNewMessage('');
       setPendingAttachment(null);
+      setPendingAttachmentQueue([]);
       setRecordingTranscript('');
       recordingTranscriptRef.current = '';
       setReplyTarget(null);
       setShowEmojiPicker(false);
+      setShowComposerTools(false);
       announceComposerPhase('sent');
     } catch (err) {
       if (optimisticId !== null) {
@@ -6918,7 +7215,7 @@ export default function App() {
                     if (workspace === 'dm') setDmSearch(event.target.value);
                     else setMobileChatSearch(event.target.value);
                   }}
-                  placeholder="Search"
+                  placeholder="Filter current list · Ctrl K global"
                   aria-label="Search chats and channels"
                 />
               </label>
@@ -7316,7 +7613,7 @@ export default function App() {
                     <button className="icon-btn" type="button" aria-label="Cancel" title="Cancel" onClick={cancelComposerContext}><AppIcon name="close" /></button>
                   </div>
                 ) : null}
-                <input ref={fileInputRef} type="file" accept="image/*,video/*,audio/*,.webm,.ogg,.mp3,.m4a,.wav" onChange={handleFileSelect} hidden />
+                <input ref={fileInputRef} type="file" multiple accept="image/*,video/*,audio/*,.webm,.ogg,.mp3,.m4a,.wav,.pdf,.zip,.doc,.docx,.txt" onChange={handleFileSelect} hidden />
                 <button className="icon-btn composer-btn" type="button" aria-label="Attach file" title="Attach file" onClick={() => fileInputRef.current?.click()}><AppIcon name="paperclip" /></button>
                 <button
                   className={voiceRecording ? 'icon-btn composer-btn recording' : 'icon-btn composer-btn'}
@@ -7338,6 +7635,17 @@ export default function App() {
                 >
                   <AppIcon name={circleRecording ? 'stop' : 'camera'} />
                 </button>
+                <div className="composer-tools-wrapper">
+                  <button className="icon-btn composer-btn" type="button" aria-label="Formatting tools" title="Formatting tools" onClick={() => setShowComposerTools((value) => !value)}><AppIcon name="more" /></button>
+                  {showComposerTools ? (
+                    <div className="composer-tools-popover" role="toolbar" aria-label="Message formatting">
+                      <button type="button" onClick={() => formatComposerSelection('**')}>Bold</button>
+                      <button type="button" onClick={() => formatComposerSelection('`')}>Code</button>
+                      <button type="button" onClick={() => formatComposerSelection('||')}>Spoiler</button>
+                      <button type="button" onClick={() => formatComposerSelection('> ', '')}>Quote</button>
+                    </div>
+                  ) : null}
+                </div>
                 <div className="emoji-wrapper">
                   <button className="icon-btn composer-btn" type="button" aria-label="Emoji" title="Emoji" onClick={() => setShowEmojiPicker((prev) => !prev)}><AppIcon name="smile" /></button>
                   {showEmojiPicker ? (
@@ -7349,6 +7657,7 @@ export default function App() {
                   ) : null}
                 </div>
                 <textarea
+                  ref={composerInputRef}
                   rows={1}
                   value={newMessage}
                   onChange={(e) => setNewMessage(e.target.value)}
@@ -7364,7 +7673,7 @@ export default function App() {
                 <span className="composer-phase" aria-live="polite">
                   {composerPhase === 'sending' ? 'Sending' : composerPhase === 'saving' ? 'Saving' : composerPhase === 'sent' ? 'Sent' : composerPhase === 'saved' ? 'Saved' : composerPhase === 'error' ? 'Try again' : ''}
                 </span>
-                <button className="composer-send" type="submit" disabled={uploading || composerPhase === 'sending' || composerPhase === 'saving' || (!newMessage.trim() && !pendingAttachment)}><AppIcon name={composerPhase === 'sending' || composerPhase === 'saving' ? 'wave' : 'send'} size={16} />{editingMessage ? 'Save' : 'Send'}</button>
+                <button className="composer-send" type="submit" disabled={uploading || composerPhase === 'sending' || composerPhase === 'saving' || (!newMessage.trim() && !pendingAttachment && pendingAttachmentQueue.length === 0)}><AppIcon name={composerPhase === 'sending' || composerPhase === 'saving' ? 'wave' : 'send'} size={16} />{editingMessage ? 'Save' : 'Send'}</button>
               </form>
             </>
           )}
@@ -7373,8 +7682,8 @@ export default function App() {
             {pendingAttachment ? (
               <div className="attachment-preview">
                 <span className="attachment-dot">{getAttachmentBadge(getAttachmentKind({ attachmentType: pendingAttachment.type, attachmentName: pendingAttachment.name, attachmentUrl: pendingAttachment.url }))}</span>
-                <p className="muted">Attached: {pendingAttachment.name}</p>
-                <button className="icon-btn" type="button" aria-label="Remove attachment" title="Remove attachment" onClick={() => setPendingAttachment(null)}><AppIcon name="close" /></button>
+                <p className="muted">Attached: {pendingAttachment.name}{pendingAttachmentQueue.length ? ` +${pendingAttachmentQueue.length}` : ''}</p>
+                <button className="icon-btn" type="button" aria-label="Remove attachments" title="Remove attachments" onClick={() => { setPendingAttachment(null); setPendingAttachmentQueue([]); }}><AppIcon name="close" /></button>
               </div>
             ) : null}
             {voiceRecording ? (
@@ -7446,6 +7755,16 @@ export default function App() {
         onThemeChange={setTheme}
         onColorModeChange={setColorMode}
         onReset={() => { setTheme(DEFAULT_THEME); setColorMode('system'); }}
+      />
+
+      <GlobalSearchPalette
+        open={globalSearchOpen}
+        query={globalSearchQuery}
+        loading={globalSearchLoading}
+        results={globalSearchResults}
+        onQueryChange={setGlobalSearchQuery}
+        onOpenResult={openGlobalSearchResult}
+        onClose={() => setGlobalSearchOpen(false)}
       />
 
       <div className="toast-stack" aria-live="polite">

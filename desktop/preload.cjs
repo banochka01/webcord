@@ -8,6 +8,9 @@ const windowApi = {
   close: () => ipcRenderer.invoke('window:close'),
   notify: (payload) => ipcRenderer.invoke('app:notify', payload),
   checkUpdates: () => ipcRenderer.invoke('app:check-updates'),
+  getAutoLaunch: () => ipcRenderer.invoke('app:get-auto-launch'),
+  setAutoLaunch: (enabled) => ipcRenderer.invoke('app:set-auto-launch', enabled),
+  setCloseToTray: (enabled) => ipcRenderer.invoke('app:set-close-to-tray', enabled),
   setBadge: (count) => ipcRenderer.invoke('app:set-badge', count),
   onDeepLink: (callback) => {
     const listener = (_event, value) => callback(String(value || ''));

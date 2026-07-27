@@ -3314,6 +3314,36 @@ class _ComposerState extends State<Composer> {
                             : null,
                         icon: Icon(themeSystem.icon(WebCordIconRole.video)),
                       ),
+                      if (!mobile)
+                        PopupMenuButton<String>(
+                          tooltip: 'Formatting tools',
+                          icon: const Icon(Icons.text_fields_rounded),
+                          onSelected: (value) {
+                            switch (value) {
+                              case 'bold':
+                                _formatSelection('**', '**');
+                                break;
+                              case 'code':
+                                _formatSelection('`', '`');
+                                break;
+                              case 'spoiler':
+                                _formatSelection('||', '||');
+                                break;
+                              case 'quote':
+                                _formatSelection('> ', '');
+                                break;
+                            }
+                          },
+                          itemBuilder: (context) => const [
+                            PopupMenuItem(value: 'bold', child: Text('Bold')),
+                            PopupMenuItem(value: 'code', child: Text('Code')),
+                            PopupMenuItem(
+                              value: 'spoiler',
+                              child: Text('Spoiler'),
+                            ),
+                            PopupMenuItem(value: 'quote', child: Text('Quote')),
+                          ],
+                        ),
                       Expanded(
                         child: TextField(
                           controller: _controller,
@@ -3378,6 +3408,22 @@ class _ComposerState extends State<Composer> {
     if (text.trim().isEmpty && widget.state.pendingAttachment == null) return;
     widget.state.sendMessage(text);
     _controller.clear();
+  }
+
+  void _formatSelection(String prefix, String suffix) {
+    final selection = _controller.selection;
+    final start = selection.isValid ? selection.start : _controller.text.length;
+    final end = selection.isValid ? selection.end : start;
+    final selected = _controller.text.substring(start, end);
+    final next =
+        '${_controller.text.substring(0, start)}$prefix$selected$suffix${_controller.text.substring(end)}';
+    _controller.value = TextEditingValue(
+      text: next,
+      selection: TextSelection(
+        baseOffset: start + prefix.length,
+        extentOffset: start + prefix.length + selected.length,
+      ),
+    );
   }
 }
 
@@ -8019,6 +8065,15 @@ class SettingsDialog extends StatelessWidget {
                         ),
                         title: const Text('Client notifications'),
                       ),
+                      ListTile(
+                        leading: const Icon(Icons.system_update_rounded),
+                        title: const Text('Client updates'),
+                        subtitle: const Text(
+                          'Download the latest signed build from webcordes.ru',
+                        ),
+                        trailing: const Icon(Icons.open_in_new_rounded),
+                        onTap: state.openClientUpdate,
+                      ),
                     ],
                   ),
                 ),
@@ -8767,6 +8822,12 @@ Future<void> showMessageSearchDialog(
                                   overflow: TextOverflow.ellipsis,
                                 ),
                                 trailing: Text(_timeLabel(message.createdAt)),
+                                onTap: () async {
+                                  await state.loadMessageContext(message.id);
+                                  if (dialogContext.mounted) {
+                                    Navigator.pop(dialogContext);
+                                  }
+                                },
                               );
                             },
                           ),

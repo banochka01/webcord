@@ -595,6 +595,219 @@
   .chat-row-menu { position: fixed; inset: auto 10px calc(12px + env(safe-area-inset-bottom)) 10px; }
 }
 
+/* Composer 2.0: one calm surface that expands only when a tool is active. */
+.app-shell .composer-tools-wrapper {
+  position: relative;
+}
+
+.app-shell .composer-tools-popover {
+  position: absolute;
+  z-index: 22;
+  bottom: calc(100% + 10px);
+  left: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(88px, 1fr));
+  gap: 6px;
+  width: 204px;
+  padding: 8px;
+  border: 1px solid color-mix(in srgb, var(--accent-color) 20%, transparent);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--panel-color) 94%, transparent);
+  box-shadow: 0 18px 48px rgb(0 0 0 / 28%);
+  backdrop-filter: blur(18px);
+  animation: composer-tools-in 180ms cubic-bezier(.2, .8, .2, 1);
+}
+
+.app-shell .composer-tools-popover button {
+  min-height: 34px;
+  border: 0;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--text-color) 6%, transparent);
+  color: var(--text-color);
+}
+
+.app-shell .composer-tools-popover button:hover {
+  background: color-mix(in srgb, var(--accent-color) 18%, transparent);
+}
+
+.settings-time-range {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  padding: 10px 14px 14px;
+}
+
+.settings-time-range label {
+  display: grid;
+  gap: 6px;
+  color: color-mix(in srgb, var(--text-color) 72%, transparent);
+  font-size: 12px;
+}
+
+.settings-time-range input {
+  min-height: 38px;
+  border: 1px solid color-mix(in srgb, var(--text-color) 12%, transparent);
+  border-radius: 10px;
+  padding: 0 10px;
+  background: color-mix(in srgb, var(--panel-color) 88%, transparent);
+  color: var(--text-color);
+}
+
+html[data-theme-mode="telegram"] .app-shell .message-bubble {
+  box-shadow: none;
+}
+
+html[data-theme-mode="telegram"] .app-shell .chat-panel,
+html[data-theme-mode="telegram"] .app-shell .sidebar {
+  border-radius: 0;
+}
+
+html[data-theme-mode="material"] .app-shell .composer-tools-popover {
+  border-radius: 24px;
+  animation-duration: 320ms;
+  animation-timing-function: cubic-bezier(.2, 0, 0, 1);
+}
+
+html[data-theme-mode="material"] .app-shell .composer-tools-popover button {
+  border-radius: 18px;
+}
+
+html[data-theme-mode="liquid"] .app-shell .composer-tools-popover {
+  border-color: rgb(255 255 255 / 18%);
+  background: color-mix(in srgb, var(--panel-color) 72%, transparent);
+  box-shadow: 0 24px 70px rgb(0 0 0 / 34%), inset 0 1px rgb(255 255 255 / 10%);
+}
+
+@keyframes composer-tools-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-shell .composer-tools-popover {
+    animation: none;
+  }
+}
+
+.global-search-backdrop {
+  position: fixed;
+  z-index: 120;
+  inset: 0;
+  display: grid;
+  place-items: start center;
+  padding: min(14vh, 120px) 18px 18px;
+  background: rgb(2 5 18 / 58%);
+  backdrop-filter: blur(10px);
+}
+
+.global-search-palette {
+  width: min(680px, 100%);
+  max-height: min(680px, 78vh);
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--accent-color) 22%, transparent);
+  border-radius: 22px;
+  background: color-mix(in srgb, var(--panel-color) 96%, transparent);
+  box-shadow: 0 34px 100px rgb(0 0 0 / 46%);
+  animation: composer-tools-in 220ms cubic-bezier(.2, .8, .2, 1);
+}
+
+.global-search-input {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 64px;
+  padding: 0 18px;
+  border-bottom: 1px solid color-mix(in srgb, var(--text-color) 10%, transparent);
+}
+
+.global-search-input input {
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text-color);
+  font-size: 17px;
+}
+
+.global-search-input kbd {
+  padding: 4px 7px;
+  border: 1px solid color-mix(in srgb, var(--text-color) 15%, transparent);
+  border-radius: 7px;
+  color: color-mix(in srgb, var(--text-color) 58%, transparent);
+  font: 11px/1 system-ui;
+}
+
+.global-search-results {
+  max-height: calc(min(680px, 78vh) - 64px);
+  overflow: auto;
+  padding: 10px;
+}
+
+.global-search-results > h4 {
+  margin: 14px 10px 6px;
+  color: color-mix(in srgb, var(--text-color) 54%, transparent);
+  font-size: 11px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.global-search-results > button {
+  display: grid;
+  grid-template-columns: 38px 1fr;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  min-height: 54px;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 13px;
+  background: transparent;
+  color: var(--text-color);
+  text-align: left;
+}
+
+.global-search-results > button:hover,
+.global-search-results > button:focus-visible {
+  background: color-mix(in srgb, var(--accent-color) 15%, transparent);
+}
+
+.global-search-results > button > span {
+  display: grid;
+  min-width: 0;
+}
+
+.global-search-results small {
+  overflow: hidden;
+  color: color-mix(in srgb, var(--text-color) 58%, transparent);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+  .global-search-backdrop {
+    padding: 0;
+  }
+
+  .global-search-palette {
+    width: 100%;
+    max-height: 100%;
+    min-height: 100%;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .global-search-results {
+    max-height: calc(100vh - 64px);
+  }
+}
+
 /* Conversation refresh: compact Telegram grouping with theme-aware personality. */
 .app-shell .message-card {
   --author-color: #6fb7ff;
@@ -1295,7 +1508,7 @@
 }
 
 .app-shell .composer.message-form {
-  grid-template-columns: auto auto auto auto minmax(0, 1fr) 44px 44px;
+  grid-template-columns: auto auto auto auto auto minmax(0, 1fr) 44px 44px;
 }
 
 .app-shell .composer-send {
@@ -1783,5 +1996,72 @@
   .composer-send .app-icon,
   .message-delivery-status {
     animation: none !important;
+  }
+}
+
+/* The right information drawer is an overlay; never reserve a phantom grid
+   column for the removed legacy activity panel on wide monitors. */
+@media (min-width: 861px) {
+  .app-shell,
+  .app-shell.desktop-shell {
+    grid-template-columns: 106px 366px minmax(0, 1fr) !important;
+    justify-content: stretch !important;
+    transform: none !important;
+    animation: none !important;
+  }
+
+  .app-shell > .rail,
+  .app-shell > .sidebar,
+  .app-shell > .chat-panel {
+    transform: none !important;
+    translate: none !important;
+    animation: none !important;
+  }
+
+  .app-shell > .rail { grid-column: 1 !important; }
+  .app-shell > .sidebar { grid-column: 2 !important; }
+  .app-shell > .chat-panel { grid-column: 3 !important; }
+}
+
+@media (max-width: 860px) {
+  .app-shell,
+  .app-shell.desktop-shell {
+    height: 100dvh !important;
+    min-height: 100dvh !important;
+    grid-template-rows: 82px minmax(0, 1fr) !important;
+    transform: none !important;
+    animation: none !important;
+    overflow: hidden !important;
+  }
+
+  .app-shell.mobile-chat-open > .chat-panel {
+    grid-column: 1 !important;
+    grid-row: 2 !important;
+    left: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    justify-self: stretch !important;
+    animation: none !important;
+  }
+
+  .app-shell > .rail {
+    grid-column: 1 !important;
+    grid-row: 1 !important;
+  }
+
+  .app-shell > .sidebar {
+    grid-column: 1 !important;
+    grid-row: 2 !important;
+  }
+
+  .app-shell .composer-tools-wrapper,
+  .app-shell .composer .emoji-wrapper {
+    display: none;
+  }
+
+  .app-shell .composer.message-form {
+    grid-template-columns: auto auto auto minmax(0, 1fr) 44px !important;
   }
 }

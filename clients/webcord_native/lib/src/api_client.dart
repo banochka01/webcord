@@ -73,6 +73,25 @@ class WebCordApi {
     return SocialSnapshot.fromJson(json);
   }
 
+  Future<Map<String, dynamic>> clientState(String token) async {
+    final json = await _send('GET', '/me/client-state', token: token);
+    if (json is! Map) return <String, dynamic>{};
+    final payload = Map<String, dynamic>.from(json);
+    final state = payload['state'];
+    return state is Map
+        ? Map<String, dynamic>.from(state)
+        : <String, dynamic>{};
+  }
+
+  Future<void> saveClientState(String token, Map<String, dynamic> state) async {
+    await _send(
+      'PUT',
+      '/me/client-state',
+      token: token,
+      body: {'state': state},
+    );
+  }
+
   Future<List<Map<String, dynamic>>> voiceIceServers(String token) async {
     final json = await _send('GET', '/voice/ice-servers', token: token);
     final servers = json is Map<String, dynamic> ? json['iceServers'] : null;
@@ -158,6 +177,32 @@ class WebCordApi {
       token: token,
     );
     return _messageList(data);
+  }
+
+  Future<List<ChatMessage>> channelMessageContext(
+    String token,
+    int channelId,
+    int messageId,
+  ) async {
+    final data = await _send(
+      'GET',
+      '/messages/$channelId/context/$messageId',
+      token: token,
+    );
+    return _messageList(data is Map ? data['messages'] : null);
+  }
+
+  Future<List<ChatMessage>> directMessageContext(
+    String token,
+    int conversationId,
+    int messageId,
+  ) async {
+    final data = await _send(
+      'GET',
+      '/dms/$conversationId/messages/$messageId/context',
+      token: token,
+    );
+    return _messageList(data is Map ? data['messages'] : null);
   }
 
   Future<ChatMessage> sendChannelMessage({
@@ -594,6 +639,7 @@ class WebCordApi {
     final response = switch (method) {
       'GET' => await http.get(uri, headers: headers),
       'POST' => await http.post(uri, headers: headers, body: encodedBody),
+      'PUT' => await http.put(uri, headers: headers, body: encodedBody),
       'PATCH' => await http.patch(uri, headers: headers, body: encodedBody),
       'DELETE' => await http.delete(uri, headers: headers),
       _ => throw ArgumentError('Unsupported method: $method'),
