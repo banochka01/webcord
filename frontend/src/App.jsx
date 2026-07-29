@@ -1398,7 +1398,7 @@ function LandingPage({
 
   useGSAP(() => {
     const root = landingRef.current;
-    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce), (max-width: 760px)').matches;
     if (!root || reduceMotion) return undefined;
 
     const intro = gsap.timeline({
@@ -2473,7 +2473,77 @@ function MediaViewer({ message, items = [], onNavigate, onClose }) {
   );
 }
 
-function MessageItem({ message, currentUserId, workspace, grouped = false, groupedWithNext = false, showDateDivider = false, showUnreadDivider = false, canModerateMessages = false, selected = false, highlighted = false, onAvatarClick, onReply, onNavigateToReply, onEdit, onDelete, onReport, onOpenMedia, onToggleReaction, onCopy, onShare, onPin, onBookmark, onHistory, onForward, onSelect }) {
+function PollCard({ poll, currentUserId, onVote }) {
+  const [pending, setPending] = useState(false);
+  const options = poll.options.map((option) => ({
+    ...option,
+    voteCount: option.voteCount ?? option.votes?.length ?? 0,
+    selected: option.selected ?? option.votes?.some((vote) => String(vote.userId) === String(currentUserId)) ?? false
+  }));
+  const totalVoters = poll.totalVoters ?? new Set(poll.options.flatMap((option) => (option.votes || []).map((vote) => vote.userId))).size;
+  const selectedIds = options.filter((option) => option.selected).map((option) => option.id);
+  const maxVotes = Math.max(1, ...options.map((option) => option.voteCount || 0));
+
+  async function choose(optionId) {
+    if (poll.closed || pending) return;
+    const alreadySelected = selectedIds.includes(optionId);
+    const optionIds = poll.allowsMultiple
+      ? alreadySelected
+        ? selectedIds.filter((id) => id !== optionId)
+        : [...selectedIds, optionId]
+      : alreadySelected ? [] : [optionId];
+    setPending(true);
+    try {
+      await onVote?.(poll, optionIds);
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <section className="poll-card" aria-label={`Poll: ${poll.question}`}>
+      <div className="poll-heading">
+        <span className="poll-kicker">Poll</span>
+        <strong>{poll.question}</strong>
+        <small>{poll.allowsMultiple ? 'Multiple choice' : 'Single choice'}{poll.anonymous ? ' · Anonymous' : ''}</small>
+      </div>
+      <div className="poll-options">
+        {options.map((option) => {
+          const percentage = totalVoters ? Math.round((option.voteCount / totalVoters) * 100) : 0;
+          return (
+            <button
+              className={option.selected ? 'poll-option selected' : 'poll-option'}
+              type="button"
+              key={option.id}
+              disabled={poll.closed || pending}
+              onClick={() => choose(option.id)}
+            >
+              <span className="poll-option-fill" style={{ transform: `scaleX(${option.voteCount / maxVotes})` }} />
+              <span className="poll-option-check">{option.selected ? '✓' : ''}</span>
+              <strong>{option.label}</strong>
+              <span>{percentage}%</span>
+            </button>
+          );
+        })}
+      </div>
+      <footer>{totalVoters} {totalVoters === 1 ? 'vote' : 'votes'}{poll.closed ? ' · Closed' : ''}</footer>
+    </section>
+  );
+}
+
+function formatRelativeDate(value) {
+  const date = new Date(value);
+  const deltaSeconds = Math.round((date.getTime() - Date.now()) / 1000);
+  const absolute = Math.abs(deltaSeconds);
+  const formatter = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' });
+  if (absolute < 60) return formatter.format(deltaSeconds, 'second');
+  if (absolute < 3_600) return formatter.format(Math.round(deltaSeconds / 60), 'minute');
+  if (absolute < 86_400) return formatter.format(Math.round(deltaSeconds / 3_600), 'hour');
+  if (absolute < 604_800) return formatter.format(Math.round(deltaSeconds / 86_400), 'day');
+  return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(date);
+}
+
+function MessageItem({ message, currentUserId, workspace, grouped = false, groupedWithNext = false, showDateDivider = false, showUnreadDivider = false, canModerateMessages = false, selected = false, highlighted = false, onAvatarClick, onReply, onNavigateToReply, onEdit, onDelete, onReport, onOpenMedia, onToggleReaction, onPollVote, onOpenThread, onCopy, onShare, onPin, onBookmark, onHistory, onForward, onSelect }) {
   const isOwn = String(message.author?.id) === String(currentUserId);
   const canDelete = isOwn || canModerateMessages;
   const pointerStartRef = useRef(null);
@@ -2597,6 +2667,7 @@ function MessageItem({ message, currentUserId, workspace, grouped = false, group
             </button>
           ) : null}
           {message.content ? <RichMessageText content={message.content} /> : null}
+          {message.poll ? <PollCard poll={message.poll} currentUserId={currentUserId} onVote={onPollVote} /> : null}
           {firstUrl ? (
             <a className="message-link-preview" href={firstUrl.href} target="_blank" rel="noreferrer">
               <span>{firstUrl.hostname.replace(/^www\./, '')}</span>
@@ -2630,6 +2701,13 @@ function MessageItem({ message, currentUserId, workspace, grouped = false, group
               })}
             </div>
           ) : null}
+          {(message.threadReplyCount || message._count?.replies) ? (
+            <button className="thread-link" type="button" onClick={() => onOpenThread?.(message)}>
+              <span className="thread-avatars" aria-hidden="true"><AppIcon name="browser" size={15} /></span>
+              <strong>{message.threadReplyCount || message._count?.replies} replies</strong>
+              <span>Open thread</span>
+            </button>
+          ) : null}
           <div className="message-footer">
             {message.queued ? <span className="message-queued">queued</span> : message.optimistic ? <span>sending</span> : null}
             {message.pinnedAt ? <span className="message-pinned-mark" title="Pinned">◆</span> : null}
@@ -2654,6 +2732,7 @@ function MessageItem({ message, currentUserId, workspace, grouped = false, group
                 ))}
               </div>
               <button type="button" role="menuitem" onClick={() => runContextAction(() => onReply?.(message))}>Reply</button>
+              <button type="button" role="menuitem" onClick={() => runContextAction(() => onOpenThread?.(message))}>Open thread</button>
               <button type="button" role="menuitem" onClick={() => runContextAction(() => onCopy?.(message))}>Copy</button>
               <button type="button" role="menuitem" onClick={() => runContextAction(() => onShare?.(message))}>Share</button>
               <button type="button" role="menuitem" onClick={() => runContextAction(() => onForward?.(message))}>Forward</button>
@@ -3899,6 +3978,299 @@ function AdminPanel({
   );
 }
 
+function ActivityCenter({ token, onNavigate }) {
+  const [data, setData] = useState({ activities: [], unreadCount: 0 });
+  const [filter, setFilter] = useState('');
+  const [loading, setLoading] = useState(true);
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    try {
+      const suffix = filter ? `?kind=${encodeURIComponent(filter)}` : '';
+      setData(await apiFetch(`/activity${suffix}`, {}, token));
+    } finally {
+      setLoading(false);
+    }
+  }, [filter, token]);
+
+  useEffect(() => { refresh().catch(() => setLoading(false)); }, [refresh]);
+
+  async function markRead(ids) {
+    await apiFetch('/activity/read', {
+      method: 'POST',
+      body: JSON.stringify({ ids })
+    }, token);
+    setData((current) => ({
+      unreadCount: ids?.length ? Math.max(0, current.unreadCount - ids.length) : 0,
+      activities: current.activities.map((item) => (
+        !ids?.length || ids.includes(item.id) ? { ...item, unread: false, readAt: new Date().toISOString() } : item
+      ))
+    }));
+  }
+
+  return (
+    <div className="activity-workspace workspace-scroll">
+      <header className="workspace-hero activity-hero">
+        <div>
+          <span className="workspace-eyebrow">Activity center</span>
+          <h2>Everything that needs you</h2>
+          <p>Mentions, replies, calls and updates—without mixing them into the chat list.</p>
+        </div>
+        <div className="hero-stat"><strong>{data.unreadCount}</strong><span>unread</span></div>
+      </header>
+      <nav className="activity-filters" aria-label="Activity filters">
+        {[['', 'All'], ['MENTION', 'Mentions'], ['REPLY', 'Replies'], ['DIRECT_MESSAGE', 'Messages'], ['CALL', 'Calls'], ['EVENT', 'Events']].map(([id, label]) => (
+          <button className={filter === id ? 'active' : ''} type="button" key={id || 'all'} onClick={() => setFilter(id)}>{label}</button>
+        ))}
+        <button className="mark-read" type="button" disabled={!data.unreadCount} onClick={() => markRead([])}>Mark all read</button>
+      </nav>
+      <section className="activity-feed" aria-live="polite">
+        {loading ? [...Array(5)].map((_, index) => <div className="activity-skeleton" key={index} />) : null}
+        {!loading && data.activities.length === 0 ? (
+          <div className="workspace-empty"><AppIcon name="check" size={30} /><h3>You’re all caught up</h3><p>New mentions and replies will appear here.</p></div>
+        ) : null}
+        {data.activities.map((activity) => (
+          <button
+            className={activity.unread ? 'activity-item unread' : 'activity-item'}
+            type="button"
+            key={activity.id}
+            onClick={() => {
+              if (activity.unread) markRead([activity.id]).catch(() => {});
+              onNavigate?.(activity);
+            }}
+          >
+            <UserAvatar user={activity.actor} />
+            <span className={`activity-kind kind-${activity.kind.toLowerCase()}`}><AppIcon name={activity.kind === 'CALL' ? 'phone' : activity.kind === 'EVENT' ? 'story' : 'send'} size={14} /></span>
+            <span className="activity-copy">
+              <strong>{activity.title}</strong>
+              <span>{activity.body || 'Open the related conversation'}</span>
+              <time>{formatRelativeDate(activity.createdAt)}</time>
+            </span>
+            {activity.unread ? <span className="activity-unread-dot" /> : null}
+          </button>
+        ))}
+      </section>
+    </div>
+  );
+}
+
+function SpacesWorkspace({ token, user, onOpenChannel }) {
+  const [data, setData] = useState(null);
+  const [scheduled, setScheduled] = useState([]);
+  const [eventOpen, setEventOpen] = useState(false);
+  const [eventDraft, setEventDraft] = useState({ title: '', description: '', location: '', startsAt: '' });
+  const [busy, setBusy] = useState(false);
+
+  const refresh = useCallback(async () => {
+    const [spaces, scheduledMessages] = await Promise.all([
+      apiFetch('/spaces', {}, token),
+      apiFetch('/scheduled-messages', {}, token)
+    ]);
+    setData(spaces);
+    setScheduled(scheduledMessages);
+  }, [token]);
+
+  useEffect(() => { refresh().catch(() => {}); }, [refresh]);
+
+  async function createEvent(event) {
+    event.preventDefault();
+    if (!data?.guild?.id) return;
+    setBusy(true);
+    try {
+      await apiFetch('/events', {
+        method: 'POST',
+        body: JSON.stringify({ ...eventDraft, guildId: data.guild.id })
+      }, token);
+      setEventOpen(false);
+      setEventDraft({ title: '', description: '', location: '', startsAt: '' });
+      await refresh();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function rsvp(eventId, status) {
+    await apiFetch(`/events/${eventId}/rsvp`, {
+      method: 'PUT',
+      body: JSON.stringify({ status })
+    }, token);
+    await refresh();
+  }
+
+  if (!data) {
+    return <div className="spaces-workspace workspace-scroll"><div className="spaces-skeleton" /><div className="spaces-card-grid">{[1, 2, 3].map((id) => <div className="spaces-card skeleton" key={id} />)}</div></div>;
+  }
+
+  return (
+    <div className="spaces-workspace workspace-scroll">
+      <header className="workspace-hero spaces-hero" style={getGuildCoverStyle(data.guild)}>
+        <div className="spaces-orbit" aria-hidden="true"><span /><span /><span /></div>
+        <div>
+          <span className="workspace-eyebrow">WebCord Spaces</span>
+          <h2>{data.guild.name}</h2>
+          <p>{data.guild.description || 'One place for conversations, decisions and live moments.'}</p>
+          <div className="spaces-hero-actions">
+            <button type="button" onClick={() => onOpenChannel?.()}><AppIcon name="hash" size={16} /> Open chats</button>
+            <button className="ghost-btn" type="button" onClick={() => setEventOpen(true)}><AppIcon name="plus" size={16} /> New event</button>
+          </div>
+        </div>
+        <div className="space-health">
+          <span><strong>{data.activePolls.length}</strong> live polls</span>
+          <span><strong>{data.events.length}</strong> events</span>
+          <span><strong>{data.activityCount}</strong> updates</span>
+        </div>
+      </header>
+
+      <div className="spaces-card-grid">
+        <section className="spaces-card events-card">
+          <header><div><span className="workspace-eyebrow">Calendar</span><h3>Upcoming events</h3></div><button className="icon-btn" type="button" aria-label="Create event" onClick={() => setEventOpen(true)}><AppIcon name="plus" /></button></header>
+          {data.events.length === 0 ? <p className="muted">No events yet. Schedule the first community moment.</p> : data.events.map((item) => (
+            <article className="event-row" key={item.id}>
+              <time><strong>{new Date(item.startsAt).getDate()}</strong><span>{new Intl.DateTimeFormat(undefined, { month: 'short' }).format(new Date(item.startsAt))}</span></time>
+              <div><strong>{item.title}</strong><span>{item.location || new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' }).format(new Date(item.startsAt))}</span></div>
+              <button className={item.rsvp === 'GOING' ? 'active' : ''} type="button" onClick={() => rsvp(item.id, item.rsvp === 'GOING' ? 'INTERESTED' : 'GOING')}>{item.rsvp === 'GOING' ? 'Going' : 'Join'}</button>
+            </article>
+          ))}
+        </section>
+        <section className="spaces-card polls-overview-card">
+          <header><div><span className="workspace-eyebrow">Decisions</span><h3>Live polls</h3></div><span>{data.activePolls.length}</span></header>
+          {data.activePolls.length === 0 ? <p className="muted">Polls from public channels will surface here.</p> : data.activePolls.slice(0, 4).map((poll) => (
+            <div className="poll-overview-row" key={poll.id}><span className="poll-pulse" /><div><strong>{poll.question}</strong><span>{poll.totalVoters} voters · {poll.options.length} options</span></div></div>
+          ))}
+        </section>
+        <section className="spaces-card scheduled-card">
+          <header><div><span className="workspace-eyebrow">Outbox</span><h3>Scheduled</h3></div><span>{scheduled.length}</span></header>
+          {scheduled.length === 0 ? <p className="muted">Long-press Send or use the composer menu to schedule a message.</p> : scheduled.slice(0, 5).map((item) => (
+            <div className="scheduled-row" key={item.id}>
+              <AppIcon name={item.silent ? 'volumeOff' : 'send'} size={16} />
+              <div><strong>{item.content}</strong><time>{new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(item.sendAt))}</time></div>
+              <button className="icon-btn" type="button" aria-label="Cancel scheduled message" onClick={async () => { await apiFetch(`/scheduled-messages/${item.id}`, { method: 'DELETE' }, token); await refresh(); }}><AppIcon name="close" size={16} /></button>
+            </div>
+          ))}
+        </section>
+      </div>
+
+      {eventOpen ? (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" onClick={() => setEventOpen(false)}>
+          <form className="modal-card event-modal" onSubmit={createEvent} onClick={(event) => event.stopPropagation()}>
+            <div className="modal-header"><div><span className="workspace-eyebrow">Community event</span><h3>Create a moment</h3></div><button className="icon-btn" type="button" aria-label="Close" onClick={() => setEventOpen(false)}><AppIcon name="close" /></button></div>
+            <label>Title<input required maxLength={120} value={eventDraft.title} onChange={(event) => setEventDraft((draft) => ({ ...draft, title: event.target.value }))} placeholder="Design review" /></label>
+            <label>Starts<input required type="datetime-local" value={eventDraft.startsAt} onChange={(event) => setEventDraft((draft) => ({ ...draft, startsAt: event.target.value }))} /></label>
+            <label>Location<input maxLength={160} value={eventDraft.location} onChange={(event) => setEventDraft((draft) => ({ ...draft, location: event.target.value }))} placeholder="Voice room or a link" /></label>
+            <label>Description<textarea rows={4} value={eventDraft.description} onChange={(event) => setEventDraft((draft) => ({ ...draft, description: event.target.value }))} placeholder="What should people know?" /></label>
+            <button type="submit" disabled={busy}>{busy ? 'Creating…' : 'Create event'}</button>
+          </form>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function ThreadPanel({ thread, loading, currentUserId, workspace, onClose, onReply, onPollVote }) {
+  if (!thread && !loading) return null;
+  return (
+    <aside className="thread-panel" aria-label="Message thread">
+      <header><div><span className="workspace-eyebrow">Thread</span><h3>{thread?.replies?.length || 0} replies</h3></div><button className="icon-btn" type="button" aria-label="Close thread" onClick={onClose}><AppIcon name="close" /></button></header>
+      {loading ? <div className="thread-loading"><span /><span /><span /></div> : (
+        <div className="thread-messages">
+          {[thread.root, ...thread.replies].filter(Boolean).map((message, index) => (
+            <div className={index === 0 ? 'thread-message root' : 'thread-message'} key={message.id}>
+              <UserAvatar user={message.author} />
+              <div><span><strong>{getDisplayName(message.author)}</strong><time>{formatRelativeDate(message.createdAt)}</time></span>{message.content ? <RichMessageText content={message.content} /> : null}{message.poll ? <PollCard poll={message.poll} currentUserId={currentUserId} onVote={onPollVote} /> : null}</div>
+            </div>
+          ))}
+        </div>
+      )}
+      {thread?.root ? <button className="thread-reply-cta" type="button" onClick={() => onReply(thread.root)}>Reply in thread <AppIcon name="send" size={15} /></button> : null}
+    </aside>
+  );
+}
+
+function PollComposerModal({ open, workspace, channelId, conversationId, token, onCreated, onClose }) {
+  const [question, setQuestion] = useState('');
+  const [options, setOptions] = useState(['', '']);
+  const [allowsMultiple, setAllowsMultiple] = useState(false);
+  const [anonymous, setAnonymous] = useState(false);
+  const [busy, setBusy] = useState(false);
+  if (!open) return null;
+
+  async function submit(event) {
+    event.preventDefault();
+    setBusy(true);
+    try {
+      const message = await apiFetch('/polls', {
+        method: 'POST',
+        body: JSON.stringify({
+          question,
+          options: options.map((item) => item.trim()).filter(Boolean),
+          allowsMultiple,
+          anonymous,
+          ...(workspace === 'dm' ? { conversationId: Number(conversationId) } : { channelId: Number(channelId) })
+        })
+      }, token);
+      onCreated(message);
+      onClose();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" role="dialog" aria-modal="true" onClick={onClose}>
+      <form className="modal-card poll-modal" onSubmit={submit} onClick={(event) => event.stopPropagation()}>
+        <div className="modal-header"><div><span className="workspace-eyebrow">Interactive message</span><h3>Create poll</h3></div><button className="icon-btn" type="button" aria-label="Close" onClick={onClose}><AppIcon name="close" /></button></div>
+        <label>Question<input required maxLength={240} value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="What should we choose?" /></label>
+        <div className="poll-draft-options">
+          {options.map((option, index) => (
+            <label key={index}>Option {index + 1}<span><input required={index < 2} maxLength={120} value={option} onChange={(event) => setOptions((current) => current.map((item, itemIndex) => itemIndex === index ? event.target.value : item))} placeholder={`Choice ${index + 1}`} />{options.length > 2 ? <button className="icon-btn" type="button" aria-label="Remove option" onClick={() => setOptions((current) => current.filter((_, itemIndex) => itemIndex !== index))}><AppIcon name="close" size={15} /></button> : null}</span></label>
+          ))}
+        </div>
+        {options.length < 10 ? <button className="ghost-btn add-poll-option" type="button" onClick={() => setOptions((current) => [...current, ''])}><AppIcon name="plus" size={15} /> Add option</button> : null}
+        <label className="setting-row"><span><strong>Multiple answers</strong><small>People can select more than one option</small></span><input type="checkbox" checked={allowsMultiple} onChange={(event) => setAllowsMultiple(event.target.checked)} /></label>
+        <label className="setting-row"><span><strong>Anonymous poll</strong><small>Hide individual voter identities</small></span><input type="checkbox" checked={anonymous} onChange={(event) => setAnonymous(event.target.checked)} /></label>
+        <button type="submit" disabled={busy}>{busy ? 'Publishing…' : 'Publish poll'}</button>
+      </form>
+    </div>
+  );
+}
+
+function ScheduleMessageModal({ open, content, workspace, channelId, conversationId, token, silent, onScheduled, onClose }) {
+  const initial = new Date(Date.now() + 60 * 60 * 1000);
+  const [sendAt, setSendAt] = useState(initial.toISOString().slice(0, 16));
+  const [busy, setBusy] = useState(false);
+  if (!open) return null;
+  async function submit(event) {
+    event.preventDefault();
+    setBusy(true);
+    try {
+      await apiFetch('/scheduled-messages', {
+        method: 'POST',
+        body: JSON.stringify({
+          content,
+          sendAt: new Date(sendAt).toISOString(),
+          silent,
+          ...(workspace === 'dm' ? { conversationId: Number(conversationId) } : { channelId: Number(channelId) })
+        })
+      }, token);
+      onScheduled();
+      onClose();
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="modal-backdrop" role="dialog" aria-modal="true" onClick={onClose}>
+      <form className="modal-card schedule-modal" onSubmit={submit} onClick={(event) => event.stopPropagation()}>
+        <div className="modal-header"><div><span className="workspace-eyebrow">Send later</span><h3>Schedule message</h3></div><button className="icon-btn" type="button" aria-label="Close" onClick={onClose}><AppIcon name="close" /></button></div>
+        <blockquote>{content}</blockquote>
+        <label>Delivery time<input required type="datetime-local" min={new Date(Date.now() + 60_000).toISOString().slice(0, 16)} value={sendAt} onChange={(event) => setSendAt(event.target.value)} /></label>
+        <p className="muted">{silent ? 'This will arrive silently, without a push alert.' : 'The message will be delivered even if this client is closed.'}</p>
+        <button type="submit" disabled={busy}>{busy ? 'Scheduling…' : 'Schedule'}</button>
+      </form>
+    </div>
+  );
+}
+
 export default function App() {
   const [mode, setMode] = useState('login');
   const [username, setUsername] = useState('');
@@ -3920,6 +4292,12 @@ export default function App() {
   const [newChannelType, setNewChannelType] = useState('TEXT');
   const [friendUsername, setFriendUsername] = useState('');
   const [newMessage, setNewMessage] = useState('');
+  const [silentMessage, setSilentMessage] = useState(false);
+  const [pollComposerOpen, setPollComposerOpen] = useState(false);
+  const [scheduleComposerOpen, setScheduleComposerOpen] = useState(false);
+  const [activeThread, setActiveThread] = useState(null);
+  const [threadLoading, setThreadLoading] = useState(false);
+  const [activityUnreadCount, setActivityUnreadCount] = useState(0);
   const [pendingAttachment, setPendingAttachment] = useState(null);
   const [pendingAttachmentQueue, setPendingAttachmentQueue] = useState([]);
   const [replyTarget, setReplyTarget] = useState(null);
@@ -4109,6 +4487,19 @@ export default function App() {
 
   const isAdminRoute = ADMIN_PATHS.has(currentPath);
   const isAuthed = Boolean(token && user);
+  useEffect(() => {
+    if (!isAuthed || isAdminRoute) return undefined;
+    let active = true;
+    const refreshActivityBadge = () => apiFetch('/activity?limit=1', {}, token)
+      .then((payload) => { if (active) setActivityUnreadCount(payload.unreadCount || 0); })
+      .catch(() => {});
+    refreshActivityBadge();
+    const timer = window.setInterval(refreshActivityBadge, 60_000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [isAuthed, isAdminRoute, token]);
   const textChannels = channels.filter((item) => item.type === 'TEXT');
   const voiceChannels = channels.filter((item) => item.type === 'VOICE');
   const activeTextChannel = textChannels.find((item) => String(item.id) === String(channelId));
@@ -4867,6 +5258,19 @@ export default function App() {
         )));
       }
     });
+    socket.on('poll:updated', (payload) => {
+      setMessages((prev) => prev.map((message) => (
+        String(message.id) === String(payload?.messageId)
+          ? { ...message, poll: payload.poll }
+          : message
+      )));
+      setActiveThread((current) => current ? {
+        ...current,
+        root: String(current.root?.id) === String(payload?.messageId) ? { ...current.root, poll: payload.poll } : current.root,
+        replies: current.replies.map((message) => String(message.id) === String(payload?.messageId) ? { ...message, poll: payload.poll } : message)
+      } : current);
+    });
+    socket.on('activity:new', () => setActivityUnreadCount((count) => count + 1));
     socket.on('channel-created', (channel) => {
       setChannels((prev) =>
         prev.some((item) => item.id === channel.id)
@@ -6555,6 +6959,57 @@ export default function App() {
     });
   }
 
+  async function openMessageThread(message) {
+    if (!message?.id) return;
+    setThreadLoading(true);
+    setActiveThread({ root: message, replies: [] });
+    try {
+      const path = workspace === 'dm'
+        ? `/threads/dm/${dmConversationId}/${message.id}`
+        : `/threads/channel/${message.id}`;
+      setActiveThread(await apiFetch(path, {}, token));
+    } catch (err) {
+      reportError(err, 'Could not load thread');
+      setActiveThread(null);
+    } finally {
+      setThreadLoading(false);
+    }
+  }
+
+  async function voteInPoll(poll, optionIds) {
+    try {
+      const updated = await apiFetch(`/polls/${poll.id}/votes`, {
+        method: 'POST',
+        body: JSON.stringify({ optionIds })
+      }, token);
+      setMessages((current) => current.map((message) => (
+        message.poll?.id === poll.id ? { ...message, poll: updated } : message
+      )));
+      setActiveThread((current) => current ? {
+        ...current,
+        root: current.root?.poll?.id === poll.id ? { ...current.root, poll: updated } : current.root,
+        replies: current.replies.map((message) => message.poll?.id === poll.id ? { ...message, poll: updated } : message)
+      } : current);
+    } catch (err) {
+      reportError(err, 'Could not update vote');
+    }
+  }
+
+  function navigateFromActivity(activity) {
+    if (activity.conversationId) {
+      setWorkspace('dm');
+      setDmConversationId(String(activity.conversationId));
+      if (isMobile) setMobileChatOpen(true);
+    } else if (activity.channelId) {
+      setWorkspace('server');
+      setChannelId(String(activity.channelId));
+      if (isMobile) setMobileChatOpen(true);
+    }
+    if (activity.messageId || activity.directMessageId) {
+      window.setTimeout(() => scrollToMessage({ id: activity.messageId || activity.directMessageId }), 240);
+    }
+  }
+
   async function sendMessage(event) {
     event.preventDefault();
     const content = newMessage.trim();
@@ -6659,7 +7114,8 @@ export default function App() {
               attachmentType: pendingAttachment?.type,
               attachmentName: pendingAttachment?.name,
               transcript: pendingAttachment?.transcript,
-              replyToId: replyTarget?.id
+              replyToId: replyTarget?.id,
+              silent: silentMessage
             })
           },
           token
@@ -6677,7 +7133,8 @@ export default function App() {
               attachmentType: pendingAttachment?.type,
               attachmentName: pendingAttachment?.name,
               transcript: pendingAttachment?.transcript,
-              replyToId: replyTarget?.id
+              replyToId: replyTarget?.id,
+              silent: silentMessage
             })
           },
           token
@@ -6712,6 +7169,7 @@ export default function App() {
       setRecordingTranscript('');
       recordingTranscriptRef.current = '';
       setReplyTarget(null);
+      setSilentMessage(false);
       setShowEmojiPicker(false);
       setShowComposerTools(false);
       announceComposerPhase('sent');
@@ -7369,9 +7827,13 @@ export default function App() {
   }
 
   const chatTitle =
-    workspace === 'friends'
-      ? 'Friends'
-      : workspace === 'dm'
+    workspace === 'spaces'
+      ? 'Spaces'
+      : workspace === 'activity'
+        ? 'Activity'
+        : workspace === 'friends'
+          ? 'Friends'
+          : workspace === 'dm'
         ? (activeConversation?.user ? getDisplayName(activeConversation.user) : 'Direct messages')
         : workspace === 'stories'
           ? 'Stories'
@@ -7506,9 +7968,11 @@ export default function App() {
             <BrandLogo className="rail-logo" />
           </div>
           {[
+            ['spaces', 'zap', 'Spaces'],
             ['server', 'menu', 'Чаты'],
             ['friends', 'smile', 'Контакты'],
             ['dm', 'browser', 'DMs'],
+            ['activity', 'wave', 'Activity'],
             ['stories', 'story', 'Сторис']
           ].map(([item, icon, label]) => (
             <button
@@ -7525,6 +7989,7 @@ export default function App() {
             >
               <span>{icon === 'brand' ? <BrandLogo className="rail-logo" /> : <AppIcon name={icon} size={22} />}</span>
               <em>{label}</em>
+              {item === 'activity' && activityUnreadCount > 0 ? <b className="rail-badge">{Math.min(99, activityUnreadCount)}</b> : null}
             </button>
           ))}
           <div className="rail-spacer" />
@@ -7720,7 +8185,18 @@ export default function App() {
             </div>
           ) : null}
 
-          {workspace === 'stories' ? (
+          {workspace === 'spaces' ? (
+            <SpacesWorkspace
+              token={token}
+              user={user}
+              onOpenChannel={() => {
+                setWorkspace('server');
+                if (isMobile) setMobileChatOpen(true);
+              }}
+            />
+          ) : workspace === 'activity' ? (
+            <ActivityCenter token={token} onNavigate={navigateFromActivity} />
+          ) : workspace === 'stories' ? (
             <div className="stack">
               <section className="sidebar-card">
                 <p className="section-label">Stories</p>
@@ -7905,6 +8381,19 @@ export default function App() {
             }}
             onClose={() => setChatInfoOpen(false)}
           />
+          <ThreadPanel
+            thread={activeThread}
+            loading={threadLoading}
+            currentUserId={user?.id}
+            workspace={workspace}
+            onClose={() => setActiveThread(null)}
+            onReply={(root) => {
+              setActiveThread(null);
+              beginReply(root);
+              window.setTimeout(() => composerInputRef.current?.focus(), 40);
+            }}
+            onPollVote={voteInPoll}
+          />
 
           {voiceJoined ? (
             <VoiceStage
@@ -7978,7 +8467,7 @@ export default function App() {
                     Math.abs(new Date(next.createdAt) - new Date(message.createdAt)) < 5 * 60 * 1000
                   );
                   const showDateDivider = !previous || new Date(previous.createdAt).toDateString() !== new Date(message.createdAt).toDateString();
-                  return <MessageItem key={message.id} message={message} workspace={workspace} currentUserId={user?.id} grouped={grouped} groupedWithNext={groupedWithNext} showDateDivider={showDateDivider} showUnreadDivider={String(unreadAnchorId) === String(message.id)} selected={selectedMessageIds.includes(String(message.id))} highlighted={String(highlightedMessageId) === String(message.id)} canModerateMessages={userCanModerateMessages} onAvatarClick={setViewedProfile} onReply={beginReply} onNavigateToReply={scrollToMessage} onEdit={beginEdit} onDelete={deleteMessage} onReport={openReportForMessage} onOpenMedia={setViewedMedia} onToggleReaction={toggleMessageReaction} onCopy={copyMessage} onShare={shareMessage} onPin={toggleMessagePin} onBookmark={toggleMessageBookmark} onHistory={openMessageHistory} onForward={beginForwardMessages} onSelect={toggleMessageSelection} />;
+                  return <MessageItem key={message.id} message={message} workspace={workspace} currentUserId={user?.id} grouped={grouped} groupedWithNext={groupedWithNext} showDateDivider={showDateDivider} showUnreadDivider={String(unreadAnchorId) === String(message.id)} selected={selectedMessageIds.includes(String(message.id))} highlighted={String(highlightedMessageId) === String(message.id)} canModerateMessages={userCanModerateMessages} onAvatarClick={setViewedProfile} onReply={beginReply} onNavigateToReply={scrollToMessage} onEdit={beginEdit} onDelete={deleteMessage} onReport={openReportForMessage} onOpenMedia={setViewedMedia} onToggleReaction={toggleMessageReaction} onPollVote={voteInPoll} onOpenThread={openMessageThread} onCopy={copyMessage} onShare={shareMessage} onPin={toggleMessagePin} onBookmark={toggleMessageBookmark} onHistory={openMessageHistory} onForward={beginForwardMessages} onSelect={toggleMessageSelection} />;
                 })}
                 <div ref={endRef} />
               </div>
@@ -8022,6 +8511,10 @@ export default function App() {
                   <button className="icon-btn composer-btn" type="button" aria-label="Formatting tools" title="Formatting tools" onClick={() => setShowComposerTools((value) => !value)}><AppIcon name="more" /></button>
                   {showComposerTools ? (
                     <div className="composer-tools-popover" role="toolbar" aria-label="Message formatting">
+                      <button type="button" onClick={() => { setPollComposerOpen(true); setShowComposerTools(false); }}><AppIcon name="wave" size={14} /> Poll</button>
+                      <button type="button" disabled={!newMessage.trim()} onClick={() => { setScheduleComposerOpen(true); setShowComposerTools(false); }}><AppIcon name="story" size={14} /> Schedule</button>
+                      <button className={silentMessage ? 'active' : ''} type="button" onClick={() => setSilentMessage((value) => !value)}><AppIcon name={silentMessage ? 'volumeOff' : 'volume'} size={14} /> {silentMessage ? 'Silent on' : 'Send silently'}</button>
+                      <span className="composer-tools-divider" />
                       <button type="button" onClick={() => formatComposerSelection('**')}>Bold</button>
                       <button type="button" onClick={() => formatComposerSelection('`')}>Code</button>
                       <button type="button" onClick={() => formatComposerSelection('||')}>Spoiler</button>
@@ -8056,7 +8549,7 @@ export default function App() {
                 <span className="composer-phase" aria-live="polite">
                   {composerPhase === 'sending' ? 'Sending' : composerPhase === 'saving' ? 'Saving' : composerPhase === 'sent' ? 'Sent' : composerPhase === 'saved' ? 'Saved' : composerPhase === 'error' ? 'Try again' : ''}
                 </span>
-                <button className="composer-send" type="submit" disabled={uploading || composerPhase === 'sending' || composerPhase === 'saving' || (!newMessage.trim() && !pendingAttachment && pendingAttachmentQueue.length === 0)}><AppIcon name={composerPhase === 'sending' || composerPhase === 'saving' ? 'wave' : 'send'} size={16} />{editingMessage ? 'Save' : 'Send'}</button>
+                <button className={silentMessage ? 'composer-send silent' : 'composer-send'} type="submit" title={silentMessage ? 'Send without push notification' : 'Send'} disabled={uploading || composerPhase === 'sending' || composerPhase === 'saving' || (!newMessage.trim() && !pendingAttachment && pendingAttachmentQueue.length === 0)}><AppIcon name={composerPhase === 'sending' || composerPhase === 'saving' ? 'wave' : silentMessage ? 'volumeOff' : 'send'} size={16} />{editingMessage ? 'Save' : silentMessage ? 'Silent' : 'Send'}</button>
               </form>
             </>
           )}
@@ -8269,6 +8762,33 @@ export default function App() {
         onPickMedia={() => storyInputRef.current?.click()}
         onPickMusic={() => storyMusicInputRef.current?.click()}
         onPublish={() => publishStoryDraft()}
+      />
+      <PollComposerModal
+        open={pollComposerOpen}
+        workspace={workspace}
+        channelId={channelId}
+        conversationId={dmConversationId}
+        token={token}
+        onCreated={(message) => {
+          setMessages((current) => mergeMessage(current, message));
+          pushToast('Poll published');
+        }}
+        onClose={() => setPollComposerOpen(false)}
+      />
+      <ScheduleMessageModal
+        open={scheduleComposerOpen}
+        content={newMessage.trim()}
+        workspace={workspace}
+        channelId={channelId}
+        conversationId={dmConversationId}
+        token={token}
+        silent={silentMessage}
+        onScheduled={() => {
+          setNewMessage('');
+          setSilentMessage(false);
+          pushToast('Message scheduled');
+        }}
+        onClose={() => setScheduleComposerOpen(false)}
       />
     </>
     </IconFamilyContext.Provider>

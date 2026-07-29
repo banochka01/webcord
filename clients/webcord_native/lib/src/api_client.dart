@@ -73,6 +73,73 @@ class WebCordApi {
     return SocialSnapshot.fromJson(json);
   }
 
+  Future<({List<ActivityItem> items, int unreadCount})> activity(
+    String token, {
+    String? kind,
+  }) async {
+    final suffix = kind == null || kind.isEmpty
+        ? ''
+        : '?kind=${Uri.encodeQueryComponent(kind)}';
+    final json = await _send('GET', '/activity$suffix', token: token);
+    final data = json is Map
+        ? Map<String, dynamic>.from(json)
+        : const <String, dynamic>{};
+    final items = (data['activities'] as List? ?? const [])
+        .whereType<Map>()
+        .map((item) => ActivityItem.fromJson(Map<String, dynamic>.from(item)))
+        .toList();
+    return (
+      items: items,
+      unreadCount: int.tryParse('${data['unreadCount'] ?? 0}') ?? 0,
+    );
+  }
+
+  Future<void> markActivityRead(
+    String token, {
+    List<int> ids = const [],
+  }) async {
+    await _send('POST', '/activity/read', token: token, body: {'ids': ids});
+  }
+
+  Future<SpacesOverview> spaces(String token) async {
+    final json = await _send('GET', '/spaces', token: token);
+    return SpacesOverview.fromJson(
+      Map<String, dynamic>.from(json as Map? ?? const {}),
+    );
+  }
+
+  Future<CommunityEventItem> rsvpEvent({
+    required String token,
+    required int eventId,
+    required String status,
+  }) async {
+    final json = await _send(
+      'PUT',
+      '/events/$eventId/rsvp',
+      token: token,
+      body: {'status': status},
+    );
+    return CommunityEventItem.fromJson(
+      Map<String, dynamic>.from(json as Map? ?? const {}),
+    );
+  }
+
+  Future<MessagePoll> votePoll({
+    required String token,
+    required int pollId,
+    required List<int> optionIds,
+  }) async {
+    final json = await _send(
+      'POST',
+      '/polls/$pollId/votes',
+      token: token,
+      body: {'optionIds': optionIds},
+    );
+    return MessagePoll.fromJson(
+      Map<String, dynamic>.from(json as Map? ?? const {}),
+    );
+  }
+
   Future<Map<String, dynamic>> clientState(String token) async {
     final json = await _send('GET', '/me/client-state', token: token);
     if (json is! Map) return <String, dynamic>{};
@@ -205,6 +272,27 @@ class WebCordApi {
     return _messageList(data is Map ? data['messages'] : null);
   }
 
+  Future<({ChatMessage root, List<ChatMessage> replies})> messageThread({
+    required String token,
+    required ChatMessage message,
+  }) async {
+    final direct = message.conversationId != null;
+    final path = direct
+        ? '/threads/dm/${message.conversationId}/${message.id}'
+        : '/threads/channel/${message.id}';
+    final json = await _send('GET', path, token: token);
+    final data = Map<String, dynamic>.from(json as Map? ?? const {});
+    return (
+      root: ChatMessage.fromJson(
+        Map<String, dynamic>.from(data['root'] as Map? ?? const {}),
+      ),
+      replies: (data['replies'] as List? ?? const [])
+          .whereType<Map>()
+          .map((item) => ChatMessage.fromJson(Map<String, dynamic>.from(item)))
+          .toList(),
+    );
+  }
+
   Future<ChatMessage> sendChannelMessage({
     required String token,
     required int channelId,
@@ -213,6 +301,7 @@ class WebCordApi {
     int? replyToId,
     String? transcript,
     String? forwardedFromName,
+    bool silent = false,
   }) async {
     final json = await _send(
       'POST',
@@ -229,6 +318,7 @@ class WebCordApi {
         if (forwardedFromName != null && forwardedFromName.isNotEmpty)
           'forwardedFromName': forwardedFromName,
         if (replyToId != null) 'replyToId': replyToId,
+        'silent': silent,
       },
     );
     return ChatMessage.fromJson(json);
@@ -242,6 +332,7 @@ class WebCordApi {
     int? replyToId,
     String? transcript,
     String? forwardedFromName,
+    bool silent = false,
   }) async {
     final json = await _send(
       'POST',
@@ -257,6 +348,7 @@ class WebCordApi {
         if (forwardedFromName != null && forwardedFromName.isNotEmpty)
           'forwardedFromName': forwardedFromName,
         if (replyToId != null) 'replyToId': replyToId,
+        'silent': silent,
       },
     );
     return ChatMessage.fromJson(json);

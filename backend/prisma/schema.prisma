@@ -107,6 +107,14 @@ model User {
   pushSubscriptions       PushSubscription[]
   callRecordsCreated      CallRecord[]         @relation("CallRecordCaller")
   callRecordMemberships   CallRecordParticipant[]
+  activityEvents          ActivityEvent[]       @relation("ActivityRecipient")
+  activityActions         ActivityEvent[]       @relation("ActivityActor")
+  pollsCreated            Poll[]
+  pollVotes               PollVote[]
+  communityEventsCreated  CommunityEvent[]
+  communityEventRsvps     CommunityEventRsvp[]
+  guildInvitesCreated     GuildInvite[]
+  scheduledMessages       ScheduledMessage[]
   createdAt               DateTime            @default(now())
 }
 
@@ -118,6 +126,8 @@ model Guild {
   bannerUrl   String?
   accentColor String    @default("#7c5cff")
   channels    Channel[]
+  events      CommunityEvent[]
+  invites     GuildInvite[]
   createdAt   DateTime  @default(now())
 }
 
@@ -128,6 +138,9 @@ model Channel {
   guildId   Int
   guild     Guild       @relation(fields: [guildId], references: [id], onDelete: Cascade)
   messages  Message[]
+  polls     Poll[]
+  scheduledMessages ScheduledMessage[]
+  slowModeSeconds Int @default(0)
   createdAt DateTime    @default(now())
 
   @@index([guildId])
@@ -146,6 +159,7 @@ model Message {
   replyToId      Int?
   editedAt       DateTime?
   deletedAt      DateTime?
+  silent         Boolean         @default(false)
   channelId      Int
   authorId       Int
   createdAt      DateTime        @default(now())
@@ -157,6 +171,7 @@ model Message {
   reports        ModerationReport[]
   bookmarks      MessageBookmark[]
   editHistory    MessageEditHistory[]
+  poll           Poll?
 
   @@index([channelId, createdAt])
   @@index([channelId, pinnedAt])
@@ -220,6 +235,8 @@ model DirectConversation {
   members    DirectConversationMember[]
   messages   DirectMessage[]
   callRecords CallRecord[]
+  polls       Poll[]
+  scheduledMessages ScheduledMessage[]
 
   @@unique([userOneId, userTwoId])
   @@index([updatedAt])
@@ -254,6 +271,7 @@ model DirectMessage {
   editedAt       DateTime?
   deletedAt      DateTime?
   readAt         DateTime?
+  silent         Boolean          @default(false)
   conversationId Int
   authorId       Int
   createdAt      DateTime        @default(now())
@@ -265,6 +283,7 @@ model DirectMessage {
   reports        ModerationReport[]
   bookmarks      MessageBookmark[]
   editHistory    MessageEditHistory[]
+  poll           Poll?
 
   @@index([conversationId, createdAt])
   @@index([conversationId, pinnedAt])
@@ -450,4 +469,145 @@ model CallRecordParticipant {
 
   @@unique([callId, userId])
   @@index([userId, callId])
+}
+
+model ActivityEvent {
+  id              Int      @id @default(autoincrement())
+  userId          Int
+  actorId         Int?
+  kind            String
+  title           String
+  body            String   @default("")
+  channelId       Int?
+  conversationId  Int?
+  messageId       Int?
+  directMessageId Int?
+  metadata        Json?
+  readAt          DateTime?
+  createdAt       DateTime @default(now())
+  user            User     @relation("ActivityRecipient", fields: [userId], references: [id], onDelete: Cascade)
+  actor           User?    @relation("ActivityActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([userId, readAt, createdAt])
+  @@index([userId, kind, createdAt])
+}
+
+model Poll {
+  id              Int                 @id @default(autoincrement())
+  question        String
+  allowsMultiple  Boolean             @default(false)
+  anonymous       Boolean             @default(false)
+  closesAt        DateTime?
+  createdById     Int
+  channelId       Int?
+  conversationId  Int?
+  messageId       Int?                @unique
+  directMessageId Int?                @unique
+  createdAt       DateTime            @default(now())
+  createdBy       User                @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  channel         Channel?            @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  conversation    DirectConversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  message         Message?            @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  directMessage   DirectMessage?      @relation(fields: [directMessageId], references: [id], onDelete: Cascade)
+  options         PollOption[]
+
+  @@index([channelId, createdAt])
+  @@index([conversationId, createdAt])
+}
+
+model PollOption {
+  id        Int        @id @default(autoincrement())
+  pollId    Int
+  label     String
+  position  Int
+  poll      Poll       @relation(fields: [pollId], references: [id], onDelete: Cascade)
+  votes     PollVote[]
+
+  @@unique([pollId, position])
+  @@index([pollId])
+}
+
+model PollVote {
+  id        Int        @id @default(autoincrement())
+  optionId  Int
+  userId    Int
+  createdAt DateTime   @default(now())
+  option    PollOption @relation(fields: [optionId], references: [id], onDelete: Cascade)
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([optionId, userId])
+  @@index([userId, createdAt])
+}
+
+model CommunityEvent {
+  id          Int                  @id @default(autoincrement())
+  guildId     Int
+  creatorId   Int
+  title       String
+  description String               @default("")
+  location    String               @default("")
+  coverUrl    String?
+  startsAt    DateTime
+  endsAt      DateTime?
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+  guild       Guild                @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  creator     User                 @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+  rsvps       CommunityEventRsvp[]
+
+  @@index([guildId, startsAt])
+}
+
+model CommunityEventRsvp {
+  id        Int            @id @default(autoincrement())
+  eventId   Int
+  userId    Int
+  status    String         @default("INTERESTED")
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+  event     CommunityEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, userId])
+  @@index([userId, createdAt])
+}
+
+model GuildInvite {
+  id        Int       @id @default(autoincrement())
+  code      String    @unique
+  guildId   Int
+  creatorId Int
+  maxUses   Int?
+  uses      Int       @default(0)
+  expiresAt DateTime?
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+  guild     Guild     @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  creator   User      @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+
+  @@index([guildId, createdAt])
+}
+
+model ScheduledMessage {
+  id              Int      @id @default(autoincrement())
+  senderId        Int
+  channelId       Int?
+  conversationId  Int?
+  content         String
+  attachmentUrl   String?
+  attachmentType  AttachmentType?
+  attachmentName  String?
+  replyToId       Int?
+  sendAt          DateTime
+  silent          Boolean  @default(false)
+  status          String   @default("PENDING")
+  failureReason   String   @default("")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  sender          User     @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  channel         Channel? @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  conversation    DirectConversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([status, sendAt])
+  @@index([senderId, createdAt])
 }

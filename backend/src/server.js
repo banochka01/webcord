@@ -16,6 +16,7 @@ import {
   isPushQuietHours,
   normalizePushPreferences
 } from './push-utils.js';
+import { installSpacesRoutes, recordActivity } from './spaces.js';
 
 const app = express();
 const server = http.createServer(app);
@@ -186,6 +187,20 @@ const publicUserSelect = {
   accentColor: true,
   mutedUntil: true,
   bannedUntil: true
+};
+const pollDetailsInclude = {
+  createdBy: { select: publicUserSelect },
+  options: {
+    orderBy: { position: 'asc' },
+    include: { votes: { select: { userId: true } } }
+  }
+};
+const messageDetailsInclude = {
+  author: { select: publicUserSelect },
+  reactions: { select: { emoji: true, userId: true } },
+  replyTo: { include: { author: { select: publicUserSelect } } },
+  poll: { include: pollDetailsInclude },
+  _count: { select: { replies: { where: { deletedAt: null } } } }
 };
 const authRateLimit = createRateLimiter({ windowMs: 60_000, max: 20, keyPrefix: 'auth' });
 const messageRateLimitConfig = { windowMs: 10_000, max: 18, keyPrefix: 'message' };
@@ -1126,6 +1141,42 @@ function serializeCallSession(call) {
   };
 }
 
+function serializeEmbeddedPoll(poll, currentUserId) {
+  if (!poll) return null;
+  const totalVoters = new Set(
+    poll.options.flatMap((option) => option.votes.map((vote) => vote.userId))
+  ).size;
+  return {
+    id: poll.id,
+    question: poll.question,
+    allowsMultiple: poll.allowsMultiple,
+    anonymous: poll.anonymous,
+    closesAt: poll.closesAt,
+    closed: Boolean(poll.closesAt && new Date(poll.closesAt).getTime() <= Date.now()),
+    createdAt: poll.createdAt,
+    createdBy: poll.createdBy,
+    totalVoters,
+    options: poll.options.map((option) => ({
+      id: option.id,
+      label: option.label,
+      position: option.position,
+      voteCount: option.votes.length,
+      selected: option.votes.some((vote) => vote.userId === currentUserId),
+      voters: poll.anonymous ? [] : option.votes.map((vote) => vote.userId)
+    }))
+  };
+}
+
+function serializeMessageDetails(message, currentUserId) {
+  if (!message) return null;
+  const { _count, ...value } = message;
+  return {
+    ...value,
+    threadReplyCount: _count?.replies || message.threadReplyCount || 0,
+    poll: serializeEmbeddedPoll(message.poll, currentUserId)
+  };
+}
+
 function serializeCallRecord(record, currentUserId) {
   if (!record) return null;
   return {
@@ -1251,26 +1302,42 @@ function emitCallSignal(socket, eventName, { callId, targetSocketId, ...payload 
   socket.to(roomKey).emit(eventName, signalPayload);
 }
 
-async function createChannelMessage({ channelId, userId, content, attachmentUrl, attachmentType, attachmentName, transcript, forwardedFromName, replyToId }) {
+async function createChannelMessage({ channelId, userId, content, attachmentUrl, attachmentType, attachmentName, transcript, forwardedFromName, replyToId, silent = false }) {
   await assertUserCanSend(userId);
 
   const channel = await prisma.channel.findUnique({
     where: { id: channelId },
-    select: { id: true, name: true, type: true, guildId: true }
+    select: { id: true, name: true, type: true, guildId: true, slowModeSeconds: true }
   });
 
   if (!channel || channel.type !== 'TEXT') {
     return null;
   }
 
+  let replyTarget = null;
   if (replyToId) {
-    const replyTarget = await prisma.message.findUnique({
+    replyTarget = await prisma.message.findUnique({
       where: { id: replyToId },
-      select: { channelId: true }
+      select: { channelId: true, authorId: true }
     });
 
     if (!replyTarget || replyTarget.channelId !== channelId) {
       throw createApiError(400, 'INVALID_REPLY_TARGET', 'Reply target was not found in this channel.');
+    }
+  }
+
+  if (channel.slowModeSeconds > 0 && !await userCanModerateMessages(userId)) {
+    const latest = await prisma.message.findFirst({
+      where: { channelId, authorId: userId, deletedAt: null },
+      orderBy: { createdAt: 'desc' },
+      select: { createdAt: true }
+    });
+    const nextAllowedAt = latest
+      ? latest.createdAt.getTime() + channel.slowModeSeconds * 1_000
+      : 0;
+    if (nextAllowedAt > Date.now()) {
+      const retryAfter = Math.ceil((nextAllowedAt - Date.now()) / 1_000);
+      throw createApiError(429, 'SLOW_MODE_ACTIVE', `Slow mode is active. Try again in ${retryAfter}s.`);
     }
   }
 
@@ -1284,27 +1351,35 @@ async function createChannelMessage({ channelId, userId, content, attachmentUrl,
       attachmentName,
       transcript: normalizeMessageMetadata(transcript, 4_000),
       forwardedFromName: normalizeMessageMetadata(forwardedFromName, 120),
-      replyToId: replyToId || null
+      replyToId: replyToId || null,
+      silent: Boolean(silent)
     },
-    include: {
-      author: { select: publicUserSelect },
-      reactions: { select: { emoji: true, userId: true } },
-      replyTo: {
-        include: {
-          author: { select: publicUserSelect }
-        }
-      }
-    }
+    include: messageDetailsInclude
   });
 
-  notifyChannelMentions(message, channel).catch((error) => {
-    console.error('Could not send channel mention push:', error);
-  });
+  if (!silent) {
+    notifyChannelMentions(message, channel).catch((error) => {
+      console.error('Could not send channel mention push:', error);
+    });
+  }
+  if (replyTarget?.authorId && replyTarget.authorId !== userId) {
+    recordActivity(prisma, {
+      userId: replyTarget.authorId,
+      actorId: userId,
+      kind: 'REPLY',
+      title: `Reply in #${channel.name}`,
+      body: content,
+      channelId,
+      messageId: message.id,
+      metadata: { rootMessageId: replyToId }
+    }).then(() => io.to(`user:${replyTarget.authorId}`).emit('activity:new'))
+      .catch((error) => console.error('Could not record reply activity:', error));
+  }
 
-  return { ...message, guildId: channel.guildId };
+  return { ...serializeMessageDetails(message, userId), guildId: channel.guildId };
 }
 
-async function createDirectConversationMessage({ conversationId, userId, content, attachmentUrl, attachmentType, attachmentName, transcript, forwardedFromName, replyToId }) {
+async function createDirectConversationMessage({ conversationId, userId, content, attachmentUrl, attachmentType, attachmentName, transcript, forwardedFromName, replyToId, silent = false }) {
   const conversation = await prisma.directConversation.findUnique({
     where: { id: conversationId },
     include: {
@@ -1329,10 +1404,11 @@ async function createDirectConversationMessage({ conversationId, userId, content
 
   await assertUserCanSend(userId);
 
+  let replyTarget = null;
   if (replyToId) {
-    const replyTarget = await prisma.directMessage.findUnique({
+    replyTarget = await prisma.directMessage.findUnique({
       where: { id: replyToId },
-      select: { conversationId: true }
+      select: { conversationId: true, authorId: true }
     });
 
     if (!replyTarget || replyTarget.conversationId !== conversationId) {
@@ -1350,17 +1426,10 @@ async function createDirectConversationMessage({ conversationId, userId, content
       attachmentName,
       transcript: normalizeMessageMetadata(transcript, 4_000),
       forwardedFromName: normalizeMessageMetadata(forwardedFromName, 120),
-      replyToId: replyToId || null
+      replyToId: replyToId || null,
+      silent: Boolean(silent)
     },
-    include: {
-      author: { select: publicUserSelect },
-      reactions: { select: { emoji: true, userId: true } },
-      replyTo: {
-        include: {
-          author: { select: publicUserSelect }
-        }
-      }
-    }
+    include: messageDetailsInclude
   });
 
   await prisma.directConversation.update({
@@ -1368,14 +1437,34 @@ async function createDirectConversationMessage({ conversationId, userId, content
     data: { updatedAt: new Date() }
   });
 
-  notifyDirectMessage(message, {
-    ...conversation,
-    title: serializeDirectConversation(conversation, userId).title
-  }).catch((error) => {
-    console.error('Could not send direct message push:', error);
-  });
+  if (!silent) {
+    notifyDirectMessage(message, {
+      ...conversation,
+      title: serializeDirectConversation(conversation, userId).title
+    }).catch((error) => {
+      console.error('Could not send direct message push:', error);
+    });
+  }
+  const activityRecipients = new Set(
+    getConversationMemberIds(conversation).filter((memberId) => memberId !== userId)
+  );
+  if (replyTarget?.authorId && replyTarget.authorId !== userId) {
+    activityRecipients.add(replyTarget.authorId);
+  }
+  Promise.all([...activityRecipients].map((recipientId) => recordActivity(prisma, {
+    userId: recipientId,
+    actorId: userId,
+    kind: replyTarget?.authorId === recipientId ? 'REPLY' : 'DIRECT_MESSAGE',
+    title: replyTarget?.authorId === recipientId ? 'New reply' : 'New message',
+    body: content,
+    conversationId,
+    directMessageId: message.id,
+    metadata: replyToId ? { rootMessageId: replyToId } : null
+  }))).then(() => {
+    for (const recipientId of activityRecipients) io.to(`user:${recipientId}`).emit('activity:new');
+  }).catch((error) => console.error('Could not record direct-message activity:', error));
 
-  return { conversation, message };
+  return { conversation, message: serializeMessageDetails(message, userId) };
 }
 
 function isAllowedCorsOrigin(origin, callback) {
@@ -2687,6 +2776,14 @@ app.post('/api/friends/request', authMiddleware, async (req, res) => {
         });
 
     emitSocialRefresh([currentUserId, targetUser.id]);
+    recordActivity(prisma, {
+      userId: targetUser.id,
+      actorId: currentUserId,
+      kind: 'FRIEND_REQUEST',
+      title: 'New friend request',
+      body: `${req.user.username} wants to connect`
+    }).then(() => io.to(`user:${targetUser.id}`).emit('activity:new'))
+      .catch((error) => console.error('Could not record friend activity:', error));
     return res.status(201).json(serializeFriendRequest(request, currentUserId));
   } catch (error) {
     console.error(error);
@@ -3170,18 +3267,10 @@ app.get('/api/dms/:conversationId/messages', authMiddleware, async (req, res) =>
       },
       orderBy: { id: 'desc' },
       take: limit,
-      include: {
-        author: { select: publicUserSelect },
-        reactions: { select: { emoji: true, userId: true } },
-        replyTo: {
-          include: {
-            author: { select: publicUserSelect }
-          }
-        }
-      }
+      include: messageDetailsInclude
     });
 
-    return res.json(messages.reverse());
+    return res.json(messages.reverse().map((message) => serializeMessageDetails(message, currentUserId)));
   } catch (error) {
     console.error(error);
     return res.status(500).json({ error: 'Failed to fetch direct messages' });
@@ -3202,11 +3291,7 @@ app.get('/api/dms/:conversationId/messages/:messageId/context', authMiddleware, 
     if (!conversation || !getConversationMemberIds(conversation).includes(req.user.userId)) {
       return sendApiError(res, 404, 'CONVERSATION_NOT_FOUND', 'Conversation not found.');
     }
-    const include = {
-      author: { select: publicUserSelect },
-      reactions: { select: { emoji: true, userId: true } },
-      replyTo: { include: { author: { select: publicUserSelect } } }
-    };
+    const include = messageDetailsInclude;
     const target = await prisma.directMessage.findFirst({
       where: { id: messageId, conversationId, deletedAt: null },
       include
@@ -3226,7 +3311,10 @@ app.get('/api/dms/:conversationId/messages/:messageId/context', authMiddleware, 
         include
       })
     ]);
-    return res.json({ targetId: messageId, messages: [...before.reverse(), target, ...after] });
+    return res.json({
+      targetId: messageId,
+      messages: [...before.reverse(), target, ...after].map((message) => serializeMessageDetails(message, req.user.userId))
+    });
   } catch (error) {
     console.error(error);
     return sendCaughtApiError(res, error, 'MESSAGE_CONTEXT_FAILED', 'Failed to load message context.');
@@ -3322,18 +3410,10 @@ app.get('/api/messages/:channelId', authMiddleware, async (req, res) => {
       },
       orderBy: { id: 'desc' },
       take: limit,
-      include: {
-        author: { select: publicUserSelect },
-        reactions: { select: { emoji: true, userId: true } },
-        replyTo: {
-          include: {
-            author: { select: publicUserSelect }
-          }
-        }
-      }
+      include: messageDetailsInclude
     });
 
-    return res.json(messages.reverse());
+    return res.json(messages.reverse().map((message) => serializeMessageDetails(message, req.user.userId)));
   } catch (error) {
     console.error(error);
     return res.status(500).json({ error: 'Failed to fetch messages' });
@@ -3347,11 +3427,7 @@ app.get('/api/messages/:channelId/context/:messageId', authMiddleware, async (re
     if (!channelId || !messageId) {
       return sendApiError(res, 400, 'INVALID_MESSAGE_CONTEXT', 'Invalid channel or message id.');
     }
-    const include = {
-      author: { select: publicUserSelect },
-      reactions: { select: { emoji: true, userId: true } },
-      replyTo: { include: { author: { select: publicUserSelect } } }
-    };
+    const include = messageDetailsInclude;
     const target = await prisma.message.findFirst({
       where: { id: messageId, channelId, deletedAt: null },
       include
@@ -3371,7 +3447,10 @@ app.get('/api/messages/:channelId/context/:messageId', authMiddleware, async (re
         include
       })
     ]);
-    return res.json({ targetId: messageId, messages: [...before.reverse(), target, ...after] });
+    return res.json({
+      targetId: messageId,
+      messages: [...before.reverse(), target, ...after].map((message) => serializeMessageDetails(message, req.user.userId))
+    });
   } catch (error) {
     console.error(error);
     return sendCaughtApiError(res, error, 'MESSAGE_CONTEXT_FAILED', 'Failed to load message context.');
@@ -3409,7 +3488,8 @@ app.post('/api/messages', authMiddleware, messageRateLimit, async (req, res) => 
       attachmentName,
       transcript,
       forwardedFromName,
-      replyToId
+      replyToId,
+      silent: Boolean(req.body.silent)
     });
 
     if (!message) {
@@ -3455,7 +3535,8 @@ app.post('/api/dms/:conversationId/messages', authMiddleware, messageRateLimit, 
       attachmentName,
       transcript,
       forwardedFromName,
-      replyToId
+      replyToId,
+      silent: Boolean(req.body.silent)
     });
 
     if (!conversation || !message) {
@@ -3565,7 +3646,7 @@ app.put('/api/messages/:messageId/reactions', authMiddleware, messageRateLimit, 
 
     const message = await prisma.message.findUnique({
       where: { id: messageId },
-      select: { id: true, channelId: true, deletedAt: true }
+      select: { id: true, channelId: true, authorId: true, content: true, deletedAt: true }
     });
     if (!message || message.deletedAt) {
       return sendApiError(res, 404, 'MESSAGE_NOT_FOUND', 'Message not found');
@@ -3579,6 +3660,17 @@ app.put('/api/messages/:messageId/reactions', authMiddleware, messageRateLimit, 
       await prisma.messageReaction.delete({ where: { id: existing.id } });
     } else {
       await prisma.messageReaction.create({ data: key });
+      recordActivity(prisma, {
+        userId: message.authorId,
+        actorId: req.user.userId,
+        kind: 'REACTION',
+        title: `Reacted ${emoji} to your message`,
+        body: message.content,
+        channelId: message.channelId,
+        messageId
+      }).then((activity) => {
+        if (activity) io.to(`user:${message.authorId}`).emit('activity:new');
+      }).catch((error) => console.error('Could not record reaction activity:', error));
     }
 
     const reactions = await prisma.messageReaction.findMany({
@@ -3758,7 +3850,7 @@ app.put('/api/dms/:conversationId/messages/:messageId/reactions', authMiddleware
       }),
       prisma.directMessage.findUnique({
         where: { id: messageId },
-        select: { id: true, conversationId: true, deletedAt: true }
+        select: { id: true, conversationId: true, authorId: true, content: true, deletedAt: true }
       })
     ]);
     if (
@@ -3779,6 +3871,17 @@ app.put('/api/dms/:conversationId/messages/:messageId/reactions', authMiddleware
       await prisma.directMessageReaction.delete({ where: { id: existing.id } });
     } else {
       await prisma.directMessageReaction.create({ data: key });
+      recordActivity(prisma, {
+        userId: message.authorId,
+        actorId: req.user.userId,
+        kind: 'REACTION',
+        title: `Reacted ${emoji} to your message`,
+        body: message.content,
+        conversationId,
+        directMessageId: messageId
+      }).then((activity) => {
+        if (activity) io.to(`user:${message.authorId}`).emit('activity:new');
+      }).catch((error) => console.error('Could not record direct reaction activity:', error));
     }
 
     const reactions = await prisma.directMessageReaction.findMany({
@@ -3895,6 +3998,19 @@ app.use((error, _req, res, next) => {
 const io = new Server(server, {
   cors: { origin: isAllowedCorsOrigin, credentials: true },
   path: '/socket.io'
+});
+
+installSpacesRoutes({
+  app,
+  prisma,
+  io,
+  authMiddleware,
+  messageRateLimit,
+  adminMiddleware,
+  publicUserSelect,
+  createChannelMessage,
+  createDirectConversationMessage,
+  getConversationMemberIds
 });
 
 io.use(async (socket, next) => {

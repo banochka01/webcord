@@ -459,17 +459,17 @@ class MobileShell extends StatelessWidget {
         indicatorColor: palette.accent.withAlpha(72),
         selectedIndex: switch (state.workspace) {
           WorkspaceKind.direct || WorkspaceKind.friends => 0,
-          WorkspaceKind.server => 1,
-          WorkspaceKind.calls => 2,
-          WorkspaceKind.stories => 3,
+          WorkspaceKind.server || WorkspaceKind.spaces => 1,
+          WorkspaceKind.activity || WorkspaceKind.stories => 2,
+          WorkspaceKind.calls => 3,
           WorkspaceKind.profile => 4,
         },
         onDestinationSelected: (index) {
           final next = [
             WorkspaceKind.direct,
-            WorkspaceKind.server,
+            WorkspaceKind.spaces,
+            WorkspaceKind.activity,
             WorkspaceKind.calls,
-            WorkspaceKind.stories,
             WorkspaceKind.profile,
           ][index];
           state.selectWorkspace(next);
@@ -487,15 +487,22 @@ class MobileShell extends StatelessWidget {
             label: 'Chats',
           ),
           NavigationDestination(
+            icon: Icon(themeSystem.icon(WebCordIconRole.spaces)),
+            selectedIcon: Icon(
+              themeSystem.icon(WebCordIconRole.spaces, selected: true),
+            ),
+            label: 'Spaces',
+          ),
+          NavigationDestination(
             icon: NavIconWithBadge(
-              icon: themeSystem.icon(WebCordIconRole.channels),
-              count: state.serverUnreadCount,
+              icon: themeSystem.icon(WebCordIconRole.activity),
+              count: state.activityUnreadCount,
             ),
             selectedIcon: NavIconWithBadge(
-              icon: themeSystem.icon(WebCordIconRole.channels, selected: true),
-              count: state.serverUnreadCount,
+              icon: themeSystem.icon(WebCordIconRole.activity, selected: true),
+              count: state.activityUnreadCount,
             ),
-            label: 'Channels',
+            label: 'Activity',
           ),
           NavigationDestination(
             icon: Icon(themeSystem.icon(WebCordIconRole.calls)),
@@ -503,19 +510,6 @@ class MobileShell extends StatelessWidget {
               themeSystem.icon(WebCordIconRole.calls, selected: true),
             ),
             label: 'Calls',
-          ),
-          NavigationDestination(
-            icon: Badge(
-              isLabelVisible: state.stories.any((story) => !story.viewed),
-              child: Icon(themeSystem.icon(WebCordIconRole.stories)),
-            ),
-            selectedIcon: Badge(
-              isLabelVisible: state.stories.any((story) => !story.viewed),
-              child: Icon(
-                themeSystem.icon(WebCordIconRole.stories, selected: true),
-              ),
-            ),
-            label: 'Stories',
           ),
           NavigationDestination(
             icon: Icon(themeSystem.icon(WebCordIconRole.profile)),
@@ -572,6 +566,15 @@ class ServerRail extends StatelessWidget {
             ),
             const SizedBox(height: 22),
             RailButton(
+              selected: state.workspace == WorkspaceKind.spaces,
+              icon: themeSystem.icon(
+                WebCordIconRole.spaces,
+                selected: state.workspace == WorkspaceKind.spaces,
+              ),
+              label: 'Spaces',
+              onTap: () => state.selectWorkspace(WorkspaceKind.spaces),
+            ),
+            RailButton(
               selected: state.workspace == WorkspaceKind.server,
               icon: themeSystem.icon(
                 WebCordIconRole.channels,
@@ -597,6 +600,17 @@ class ServerRail extends StatelessWidget {
               ),
               label: 'Directs',
               onTap: () => state.selectWorkspace(WorkspaceKind.direct),
+            ),
+            RailButton(
+              selected: state.workspace == WorkspaceKind.activity,
+              icon: themeSystem.icon(
+                WebCordIconRole.activity,
+                selected: state.workspace == WorkspaceKind.activity,
+              ),
+              label: state.activityUnreadCount > 0
+                  ? 'Activity ${state.activityUnreadCount}'
+                  : 'Activity',
+              onTap: () => state.selectWorkspace(WorkspaceKind.activity),
             ),
             RailButton(
               selected: state.workspace == WorkspaceKind.calls,
@@ -803,6 +817,8 @@ class _SidebarState extends State<Sidebar> {
                 WorkspaceKind.friends => _friendsList(context, state),
                 WorkspaceKind.direct ||
                 WorkspaceKind.calls ||
+                WorkspaceKind.spaces ||
+                WorkspaceKind.activity ||
                 WorkspaceKind.stories ||
                 WorkspaceKind.profile => _directList(state),
               },
@@ -1300,6 +1316,387 @@ class BrandHeader extends StatelessWidget {
   }
 }
 
+class SpacesHome extends StatelessWidget {
+  const SpacesHome({required this.state, super.key});
+
+  final WebCordState state;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = WebCordPalette.of(context);
+    final overview = state.spacesOverview;
+    if (overview == null) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    return RefreshIndicator(
+      onRefresh: state.refreshSpaces,
+      child: ListView(
+        padding: const EdgeInsets.all(18),
+        children: [
+          Container(
+            constraints: const BoxConstraints(minHeight: 210),
+            padding: const EdgeInsets.all(26),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(28),
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  palette.accent.withAlpha(72),
+                  palette.panelStrong,
+                  palette.bg,
+                ],
+              ),
+              border: Border.all(color: palette.accent.withAlpha(72)),
+            ),
+            child: Stack(
+              children: [
+                Positioned(
+                  right: -22,
+                  top: -34,
+                  child: Icon(
+                    WebCordThemeSystem.of(context).icon(WebCordIconRole.spaces),
+                    size: 190,
+                    color: palette.cyan.withAlpha(28),
+                  ),
+                ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'WEBCORD SPACES',
+                      style: TextStyle(
+                        color: palette.cyan,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 1.8,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      overview.guild.name,
+                      style: const TextStyle(
+                        fontSize: 38,
+                        height: .96,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -1.3,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      overview.guild.description.isEmpty
+                          ? 'Conversations, decisions and live moments in one place.'
+                          : overview.guild.description,
+                      style: TextStyle(color: palette.muted, height: 1.5),
+                    ),
+                    const SizedBox(height: 22),
+                    Wrap(
+                      spacing: 10,
+                      runSpacing: 10,
+                      children: [
+                        _SpaceMetric(
+                          value: overview.events.length,
+                          label: 'events',
+                        ),
+                        _SpaceMetric(
+                          value: overview.polls.length,
+                          label: 'live polls',
+                        ),
+                        _SpaceMetric(
+                          value: overview.activityCount,
+                          label: 'updates',
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 18),
+          Text(
+            'Upcoming events',
+            style: Theme.of(
+              context,
+            ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 10),
+          if (overview.events.isEmpty)
+            const EmptyState(
+              icon: Icons.event_available_outlined,
+              title: 'No events yet',
+              body: 'Events created on Web will appear here instantly.',
+            )
+          else
+            for (final event in overview.events)
+              Card(
+                margin: const EdgeInsets.only(bottom: 10),
+                child: ListTile(
+                  minTileHeight: 76,
+                  leading: Container(
+                    width: 48,
+                    height: 52,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: palette.accent.withAlpha(34),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Text(
+                      '${event.startsAt.day}\n${_shortMonth(event.startsAt.month)}',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                  ),
+                  title: Text(
+                    event.title,
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  subtitle: Text(
+                    event.location.isEmpty
+                        ? '${event.goingCount} going · ${event.interestedCount} interested'
+                        : event.location,
+                  ),
+                  trailing: FilledButton.tonal(
+                    onPressed: () => state.rsvpCommunityEvent(event),
+                    child: Text(event.rsvp == 'GOING' ? 'Going' : 'Join'),
+                  ),
+                ),
+              ),
+          const SizedBox(height: 16),
+          Text(
+            'Live decisions',
+            style: Theme.of(
+              context,
+            ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 10),
+          for (final poll in overview.polls)
+            Card(
+              margin: const EdgeInsets.only(bottom: 10),
+              child: ListTile(
+                leading: Icon(Icons.poll_outlined, color: palette.cyan),
+                title: Text(
+                  poll.question,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                subtitle: Text(
+                  '${poll.totalVoters} voters · ${poll.optionCount} choices',
+                ),
+              ),
+            ),
+          if (overview.scheduledCount > 0)
+            Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: Card(
+                child: ListTile(
+                  leading: const Icon(Icons.schedule_send_outlined),
+                  title: Text('${overview.scheduledCount} scheduled messages'),
+                  subtitle: const Text(
+                    'They will be delivered even while the app is closed.',
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SpaceMetric extends StatelessWidget {
+  const _SpaceMetric({required this.value, required this.label});
+
+  final int value;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
+      decoration: BoxDecoration(
+        color: Colors.black.withAlpha(48),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: Colors.white.withAlpha(18)),
+      ),
+      child: Text(
+        '$value $label',
+        style: const TextStyle(fontWeight: FontWeight.w700),
+      ),
+    );
+  }
+}
+
+class ActivityHome extends StatelessWidget {
+  const ActivityHome({required this.state, super.key});
+
+  final WebCordState state;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = WebCordPalette.of(context);
+    return RefreshIndicator(
+      onRefresh: state.refreshActivity,
+      child: CustomScrollView(
+        slivers: [
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(18, 18, 18, 10),
+              child: Container(
+                padding: const EdgeInsets.all(24),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [palette.panelStrong, palette.accent.withAlpha(52)],
+                  ),
+                  borderRadius: BorderRadius.circular(26),
+                  border: Border.all(color: palette.accent.withAlpha(60)),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'ACTIVITY CENTER',
+                            style: TextStyle(
+                              color: palette.cyan,
+                              fontSize: 11,
+                              letterSpacing: 1.5,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          const SizedBox(height: 9),
+                          const Text(
+                            'Everything that needs you',
+                            style: TextStyle(
+                              fontSize: 28,
+                              height: 1,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Badge(
+                      isLabelVisible: state.activityUnreadCount > 0,
+                      label: Text('${state.activityUnreadCount}'),
+                      child: Icon(
+                        WebCordThemeSystem.of(
+                          context,
+                        ).icon(WebCordIconRole.activity),
+                        size: 42,
+                        color: palette.cyan,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          if (state.activityUnreadCount > 0)
+            SliverToBoxAdapter(
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 18),
+                  child: TextButton.icon(
+                    onPressed: state.markAllActivityRead,
+                    icon: const Icon(Icons.done_all_rounded),
+                    label: const Text('Mark all read'),
+                  ),
+                ),
+              ),
+            ),
+          if (state.activityItems.isEmpty)
+            const SliverFillRemaining(
+              hasScrollBody: false,
+              child: EmptyState(
+                icon: Icons.notifications_none_rounded,
+                title: 'You’re all caught up',
+                body: 'Mentions, replies and calls will appear here.',
+              ),
+            )
+          else
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(18, 6, 18, 24),
+              sliver: SliverList.builder(
+                itemCount: state.activityItems.length,
+                itemBuilder: (context, index) {
+                  final item = state.activityItems[index];
+                  return Card(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    color: item.unread
+                        ? palette.accent.withAlpha(24)
+                        : palette.panel,
+                    child: ListTile(
+                      minTileHeight: 72,
+                      leading: item.actor == null
+                          ? CircleAvatar(
+                              backgroundColor: palette.accent.withAlpha(42),
+                              child: Icon(
+                                _activityIcon(item.kind),
+                                color: palette.cyan,
+                              ),
+                            )
+                          : UserAvatar(user: item.actor, size: 44),
+                      title: Text(
+                        item.title,
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                      subtitle: Text(
+                        item.body.isEmpty ? item.kind : item.body,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      trailing: item.unread
+                          ? Container(
+                              width: 8,
+                              height: 8,
+                              decoration: BoxDecoration(
+                                color: palette.cyan,
+                                shape: BoxShape.circle,
+                              ),
+                            )
+                          : null,
+                    ),
+                  );
+                },
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+IconData _activityIcon(String kind) => switch (kind) {
+  'CALL' => Icons.call_outlined,
+  'EVENT' => Icons.event_outlined,
+  'FRIEND_REQUEST' => Icons.person_add_alt_1_outlined,
+  'REACTION' => Icons.favorite_border_rounded,
+  'REPLY' => Icons.reply_rounded,
+  _ => Icons.notifications_none_rounded,
+};
+
+String _shortMonth(int month) {
+  const months = [
+    'JAN',
+    'FEB',
+    'MAR',
+    'APR',
+    'MAY',
+    'JUN',
+    'JUL',
+    'AUG',
+    'SEP',
+    'OCT',
+    'NOV',
+    'DEC',
+  ];
+  return months[(month - 1).clamp(0, 11)];
+}
+
 class MainSurface extends StatelessWidget {
   const MainSurface({required this.state, super.key});
 
@@ -1310,7 +1707,11 @@ class MainSurface extends StatelessWidget {
     final themeSystem = WebCordThemeSystem.of(context);
     final palette = WebCordPalette.of(context);
     late final Widget content;
-    if (state.workspace == WorkspaceKind.friends) {
+    if (state.workspace == WorkspaceKind.spaces) {
+      content = SpacesHome(state: state);
+    } else if (state.workspace == WorkspaceKind.activity) {
+      content = ActivityHome(state: state);
+    } else if (state.workspace == WorkspaceKind.friends) {
       content = FriendsHome(state: state);
     } else if (state.workspace == WorkspaceKind.calls) {
       content = CallsHome(state: state);
@@ -2716,6 +3117,21 @@ class _MessageTileState extends State<MessageTile> {
                                                     fontWeight: FontWeight.w400,
                                                   ),
                                                 ),
+                                              if (message.poll != null)
+                                                Padding(
+                                                  padding:
+                                                      const EdgeInsets.only(
+                                                        top: 10,
+                                                      ),
+                                                  child: NativePollCard(
+                                                    poll: message.poll!,
+                                                    onVote: (optionId) =>
+                                                        state.votePoll(
+                                                          message.poll!,
+                                                          optionId,
+                                                        ),
+                                                  ),
+                                                ),
                                               if (message.hasAttachment)
                                                 Padding(
                                                   padding:
@@ -2801,6 +3217,28 @@ class _MessageTileState extends State<MessageTile> {
                                                               ),
                                                         ),
                                                     ],
+                                                  ),
+                                                ),
+                                              if (message.threadReplyCount > 0)
+                                                Padding(
+                                                  padding:
+                                                      const EdgeInsets.only(
+                                                        top: 6,
+                                                      ),
+                                                  child: TextButton.icon(
+                                                    onPressed: () =>
+                                                        showMessageThreadSheet(
+                                                          context,
+                                                          state,
+                                                          message,
+                                                        ),
+                                                    icon: const Icon(
+                                                      Icons.forum_outlined,
+                                                      size: 16,
+                                                    ),
+                                                    label: Text(
+                                                      '${message.threadReplyCount} replies',
+                                                    ),
                                                   ),
                                                 ),
                                               Padding(
@@ -3034,6 +3472,124 @@ class _MessageTileState extends State<MessageTile> {
           ),
         );
       },
+    );
+  }
+}
+
+class NativePollCard extends StatelessWidget {
+  const NativePollCard({required this.poll, required this.onVote, super.key});
+
+  final MessagePoll poll;
+  final ValueChanged<int> onVote;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = WebCordPalette.of(context);
+    final maximumVotes = poll.options.fold<int>(
+      1,
+      (maximum, option) =>
+          option.voteCount > maximum ? option.voteCount : maximum,
+    );
+    return Container(
+      constraints: const BoxConstraints(minWidth: 250, maxWidth: 420),
+      padding: const EdgeInsets.all(13),
+      decoration: BoxDecoration(
+        color: Colors.black.withAlpha(34),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white.withAlpha(20)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'POLL',
+            style: TextStyle(
+              color: palette.cyan,
+              fontSize: 10,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 1.4,
+            ),
+          ),
+          const SizedBox(height: 5),
+          Text(
+            poll.question,
+            style: const TextStyle(fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 10),
+          for (final option in poll.options)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 7),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: poll.closed ? null : () => onVote(option.id),
+                child: Stack(
+                  children: [
+                    Positioned.fill(
+                      child: FractionallySizedBox(
+                        alignment: Alignment.centerLeft,
+                        widthFactor: option.voteCount / maximumVotes,
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            color: palette.cyan.withAlpha(24),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                      ),
+                    ),
+                    Container(
+                      constraints: const BoxConstraints(minHeight: 42),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 11,
+                        vertical: 8,
+                      ),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: option.selected
+                              ? palette.cyan.withAlpha(150)
+                              : Colors.white.withAlpha(22),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            option.selected
+                                ? Icons.check_circle_rounded
+                                : Icons.circle_outlined,
+                            size: 19,
+                            color: option.selected
+                                ? palette.cyan
+                                : palette.muted,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              option.label,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                          Text(
+                            '${option.voteCount}',
+                            style: TextStyle(
+                              color: palette.muted,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          Text(
+            '${poll.totalVoters} voters${poll.closed ? ' В· closed' : ''}',
+            style: TextStyle(color: palette.muted, fontSize: 11),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -3438,6 +3994,18 @@ class _ComposerState extends State<Composer> {
                         ),
                       ),
                       const SizedBox(width: 4),
+                      IconButton(
+                        tooltip: state.silentMessage
+                            ? 'Silent delivery enabled'
+                            : 'Send without notification',
+                        onPressed: state.toggleSilentMessage,
+                        color: state.silentMessage ? palette.cyan : null,
+                        icon: Icon(
+                          state.silentMessage
+                              ? Icons.notifications_off_rounded
+                              : Icons.notifications_none_rounded,
+                        ),
+                      ),
                       AnimatedContainer(
                         duration: themeSystem.fastMotion,
                         curve: themeSystem.curve,
@@ -3452,7 +4020,9 @@ class _ComposerState extends State<Composer> {
                               : palette.panelStrong,
                         ),
                         child: IconButton(
-                          tooltip: 'Send',
+                          tooltip: state.silentMessage
+                              ? 'Send silently'
+                              : 'Send',
                           onPressed:
                               state.busy || !state.canSend || !canSendPayload
                               ? null
@@ -9504,6 +10074,111 @@ Future<void> showForwardMessageDialog(
         ),
       ),
     ),
+  );
+}
+
+Future<void> showMessageThreadSheet(
+  BuildContext context,
+  WebCordState state,
+  ChatMessage message,
+) async {
+  final token = state.token;
+  if (token == null) return;
+  await showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    useSafeArea: true,
+    builder: (context) {
+      return DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: .78,
+        minChildSize: .45,
+        maxChildSize: .96,
+        builder: (context, controller) {
+          return FutureBuilder<({ChatMessage root, List<ChatMessage> replies})>(
+            future: state.api.messageThread(token: token, message: message),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState != ConnectionState.done) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              if (!snapshot.hasData) {
+                return const EmptyState(
+                  icon: Icons.forum_outlined,
+                  title: 'Thread unavailable',
+                  body: 'Could not load the replies.',
+                );
+              }
+              final thread = snapshot.data!;
+              final messages = [thread.root, ...thread.replies];
+              return Column(
+                children: [
+                  ListTile(
+                    title: const Text(
+                      'Thread',
+                      style: TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                    subtitle: Text('${thread.replies.length} replies'),
+                    trailing: IconButton(
+                      onPressed: () => Navigator.pop(context),
+                      icon: const Icon(Icons.close_rounded),
+                    ),
+                  ),
+                  const Divider(height: 1),
+                  Expanded(
+                    child: ListView.builder(
+                      controller: controller,
+                      padding: const EdgeInsets.all(12),
+                      itemCount: messages.length,
+                      itemBuilder: (context, index) {
+                        final item = messages[index];
+                        return Card(
+                          color: index == 0
+                              ? Theme.of(
+                                  context,
+                                ).colorScheme.primaryContainer.withAlpha(80)
+                              : null,
+                          child: ListTile(
+                            leading: UserAvatar(user: item.author, size: 38),
+                            title: Text(
+                              item.author.displayLabel,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            subtitle: Text(
+                              item.content.isEmpty
+                                  ? item.attachmentName ?? 'Attachment'
+                                  : item.content,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  SafeArea(
+                    top: false,
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: SizedBox(
+                        width: double.infinity,
+                        child: FilledButton.icon(
+                          onPressed: () {
+                            Navigator.pop(context);
+                            state.beginReply(thread.root);
+                          },
+                          icon: const Icon(Icons.reply_rounded),
+                          label: const Text('Reply in thread'),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              );
+            },
+          );
+        },
+      );
+    },
   );
 }
 

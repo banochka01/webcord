@@ -1,6 +1,15 @@
 enum ChannelKind { text, voice }
 
-enum WorkspaceKind { server, friends, direct, calls, stories, profile }
+enum WorkspaceKind {
+  server,
+  friends,
+  direct,
+  spaces,
+  activity,
+  calls,
+  stories,
+  profile,
+}
 
 enum ConversationKind { direct, group }
 
@@ -147,6 +156,75 @@ class Channel {
   }
 }
 
+class PollOptionItem {
+  const PollOptionItem({
+    required this.id,
+    required this.label,
+    required this.voteCount,
+    required this.selected,
+  });
+
+  final int id;
+  final String label;
+  final int voteCount;
+  final bool selected;
+
+  factory PollOptionItem.fromJson(Map<String, dynamic> json) {
+    final votes = _asList(json['votes']);
+    return PollOptionItem(
+      id: _asInt(json['id']),
+      label: '${json['label'] ?? 'Option'}',
+      voteCount: json['voteCount'] == null
+          ? votes.length
+          : _asInt(json['voteCount']),
+      selected:
+          json['selected'] == true ||
+          votes.any((vote) => vote['selected'] == true),
+    );
+  }
+}
+
+class MessagePoll {
+  const MessagePoll({
+    required this.id,
+    required this.question,
+    required this.allowsMultiple,
+    required this.anonymous,
+    required this.closed,
+    required this.totalVoters,
+    required this.options,
+  });
+
+  final int id;
+  final String question;
+  final bool allowsMultiple;
+  final bool anonymous;
+  final bool closed;
+  final int totalVoters;
+  final List<PollOptionItem> options;
+
+  factory MessagePoll.fromJson(Map<String, dynamic> json) {
+    final options = _asList(
+      json['options'],
+    ).map(PollOptionItem.fromJson).toList();
+    return MessagePoll(
+      id: _asInt(json['id']),
+      question: '${json['question'] ?? 'Poll'}',
+      allowsMultiple: _asBool(json['allowsMultiple']),
+      anonymous: _asBool(json['anonymous']),
+      closed: _asBool(json['closed']),
+      totalVoters: json['totalVoters'] == null
+          ? options.fold<int>(
+              0,
+              (maximum, option) =>
+                  option.voteCount > maximum ? option.voteCount : maximum,
+            )
+          : _asInt(json['totalVoters']),
+      options: options,
+    );
+  }
+}
+
 class ChatMessage {
   const ChatMessage({
     required this.id,
@@ -168,6 +246,9 @@ class ChatMessage {
     this.readAt,
     this.bookmarked = false,
     this.reactions = const [],
+    this.poll,
+    this.threadReplyCount = 0,
+    this.silent = false,
   });
 
   final int id;
@@ -189,11 +270,18 @@ class ChatMessage {
   final DateTime? readAt;
   final bool bookmarked;
   final List<MessageReaction> reactions;
+  final MessagePoll? poll;
+  final int threadReplyCount;
+  final bool silent;
 
   bool get isDeleted => deletedAt != null;
   bool get hasAttachment => attachmentUrl != null && attachmentUrl!.isNotEmpty;
 
-  ChatMessage copyWith({List<MessageReaction>? reactions, bool? bookmarked}) {
+  ChatMessage copyWith({
+    List<MessageReaction>? reactions,
+    bool? bookmarked,
+    MessagePoll? poll,
+  }) {
     return ChatMessage(
       id: id,
       content: content,
@@ -214,6 +302,9 @@ class ChatMessage {
       readAt: readAt,
       bookmarked: bookmarked ?? this.bookmarked,
       reactions: reactions ?? this.reactions,
+      poll: poll ?? this.poll,
+      threadReplyCount: threadReplyCount,
+      silent: silent,
     );
   }
 
@@ -242,6 +333,150 @@ class ChatMessage {
       reactions: _asList(
         json['reactions'],
       ).map(MessageReaction.fromJson).toList(),
+      poll: json['poll'] is Map
+          ? MessagePoll.fromJson(Map<String, dynamic>.from(json['poll'] as Map))
+          : null,
+      threadReplyCount: _asInt(json['threadReplyCount']) != 0
+          ? _asInt(json['threadReplyCount'])
+          : _asInt((json['_count'] as Map?)?['replies']),
+      silent: _asBool(json['silent']),
+    );
+  }
+}
+
+class ActivityItem {
+  const ActivityItem({
+    required this.id,
+    required this.kind,
+    required this.title,
+    required this.body,
+    required this.createdAt,
+    required this.unread,
+    this.actor,
+    this.channelId,
+    this.conversationId,
+    this.messageId,
+    this.directMessageId,
+  });
+
+  final int id;
+  final String kind;
+  final String title;
+  final String body;
+  final DateTime createdAt;
+  final bool unread;
+  final PublicUser? actor;
+  final int? channelId;
+  final int? conversationId;
+  final int? messageId;
+  final int? directMessageId;
+
+  factory ActivityItem.fromJson(Map<String, dynamic> json) {
+    return ActivityItem(
+      id: _asInt(json['id']),
+      kind: '${json['kind'] ?? 'SYSTEM'}',
+      title: '${json['title'] ?? 'Activity'}',
+      body: '${json['body'] ?? ''}',
+      createdAt: _asDate(json['createdAt']),
+      unread: json['unread'] == true || json['readAt'] == null,
+      actor: json['actor'] is Map
+          ? PublicUser.fromJson(Map<String, dynamic>.from(json['actor'] as Map))
+          : null,
+      channelId: _asNullableInt(json['channelId']),
+      conversationId: _asNullableInt(json['conversationId']),
+      messageId: _asNullableInt(json['messageId']),
+      directMessageId: _asNullableInt(json['directMessageId']),
+    );
+  }
+}
+
+class CommunityEventItem {
+  const CommunityEventItem({
+    required this.id,
+    required this.title,
+    required this.description,
+    required this.location,
+    required this.startsAt,
+    required this.rsvp,
+    required this.goingCount,
+    required this.interestedCount,
+  });
+
+  final int id;
+  final String title;
+  final String description;
+  final String location;
+  final DateTime startsAt;
+  final String? rsvp;
+  final int goingCount;
+  final int interestedCount;
+
+  factory CommunityEventItem.fromJson(Map<String, dynamic> json) {
+    final counts = Map<String, dynamic>.from(
+      json['rsvpCounts'] as Map? ?? const {},
+    );
+    return CommunityEventItem(
+      id: _asInt(json['id']),
+      title: '${json['title'] ?? 'Community event'}',
+      description: '${json['description'] ?? ''}',
+      location: '${json['location'] ?? ''}',
+      startsAt: _asDate(json['startsAt']),
+      rsvp: _asNullableString(json['rsvp']),
+      goingCount: _asInt(counts['GOING']),
+      interestedCount: _asInt(counts['INTERESTED']),
+    );
+  }
+}
+
+class SpacePollSummary {
+  const SpacePollSummary({
+    required this.id,
+    required this.question,
+    required this.totalVoters,
+    required this.optionCount,
+  });
+
+  final int id;
+  final String question;
+  final int totalVoters;
+  final int optionCount;
+
+  factory SpacePollSummary.fromJson(Map<String, dynamic> json) {
+    return SpacePollSummary(
+      id: _asInt(json['id']),
+      question: '${json['question'] ?? 'Poll'}',
+      totalVoters: _asInt(json['totalVoters']),
+      optionCount: _asList(json['options']).length,
+    );
+  }
+}
+
+class SpacesOverview {
+  const SpacesOverview({
+    required this.guild,
+    this.activityCount = 0,
+    this.scheduledCount = 0,
+    this.events = const [],
+    this.polls = const [],
+  });
+
+  final Guild guild;
+  final int activityCount;
+  final int scheduledCount;
+  final List<CommunityEventItem> events;
+  final List<SpacePollSummary> polls;
+
+  factory SpacesOverview.fromJson(Map<String, dynamic> json) {
+    return SpacesOverview(
+      guild: Guild.fromJson(
+        Map<String, dynamic>.from(json['guild'] as Map? ?? const {}),
+      ),
+      activityCount: _asInt(json['activityCount']),
+      scheduledCount: _asInt(json['scheduledCount']),
+      events: _asList(json['events']).map(CommunityEventItem.fromJson).toList(),
+      polls: _asList(
+        json['activePolls'],
+      ).map(SpacePollSummary.fromJson).toList(),
     );
   }
 }

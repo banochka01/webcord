@@ -182,6 +182,9 @@ class WebCordState extends ChangeNotifier {
   ChatMessage? replyingTo;
   List<VoiceParticipant> voiceParticipants = [];
   List<StoryItem> stories = [];
+  List<ActivityItem> activityItems = [];
+  SpacesOverview? spacesOverview;
+  int activityUnreadCount = 0;
   List<ClientMediaDevice> mediaDevices = [];
   final Set<int> unreadChannelIds = {};
   final Set<int> unreadConversationIds = {};
@@ -222,6 +225,7 @@ class WebCordState extends ChangeNotifier {
   bool notificationsEnabled = true;
   bool compactMessages = false;
   bool inlineMediaPreviews = true;
+  bool silentMessage = false;
   VoiceAudioProfile voiceAudioProfile = VoiceAudioProfile.voiceFocus;
   bool recordingVoice = false;
   int inputVolume = 100;
@@ -331,6 +335,8 @@ class WebCordState extends ChangeNotifier {
   }
 
   String get title {
+    if (workspace == WorkspaceKind.spaces) return 'Spaces';
+    if (workspace == WorkspaceKind.activity) return 'Activity';
     if (workspace == WorkspaceKind.friends) return 'Friends';
     if (workspace == WorkspaceKind.calls) return 'Calls';
     if (workspace == WorkspaceKind.stories) return 'Stories';
@@ -342,6 +348,12 @@ class WebCordState extends ChangeNotifier {
   }
 
   String get subtitle {
+    if (workspace == WorkspaceKind.spaces) {
+      return 'Events, decisions and community pulse';
+    }
+    if (workspace == WorkspaceKind.activity) {
+      return '$activityUnreadCount updates need your attention';
+    }
     if (workspace == WorkspaceKind.friends) {
       return '${social.friends.length} friends, ${social.requests.where((r) => r.isPending).length} requests';
     }
@@ -457,6 +469,9 @@ class WebCordState extends ChangeNotifier {
     loadingOlderMessages = false;
     voiceParticipants = [];
     stories = [];
+    activityItems = [];
+    spacesOverview = null;
+    activityUnreadCount = 0;
     savedMessages = [];
     callHistory = [];
     activeCall = null;
@@ -530,6 +545,8 @@ class WebCordState extends ChangeNotifier {
     _connectSocket(currentToken);
     unawaited(refreshMediaDevices());
     unawaited(refreshStories());
+    unawaited(refreshActivity(notify: false));
+    unawaited(refreshSpaces(notify: false));
     await refreshSavedMessages(notify: false);
     unawaited(refreshCallHistory());
     if (workspace == WorkspaceKind.direct && selectedConversationId != null) {
@@ -556,6 +573,74 @@ class WebCordState extends ChangeNotifier {
     try {
       stories = await api.stories(currentToken);
       notifyListeners();
+    } catch (exception) {
+      error = '$exception';
+      notifyListeners();
+    }
+  }
+
+  Future<void> refreshActivity({bool notify = true}) async {
+    final currentToken = token;
+    if (currentToken == null) return;
+    try {
+      final result = await api.activity(currentToken);
+      activityItems = result.items;
+      activityUnreadCount = result.unreadCount;
+    } catch (exception) {
+      error = '$exception';
+    }
+    if (notify) notifyListeners();
+  }
+
+  Future<void> markAllActivityRead() async {
+    final currentToken = token;
+    if (currentToken == null || activityUnreadCount == 0) return;
+    try {
+      await api.markActivityRead(currentToken);
+      activityItems = [
+        for (final item in activityItems)
+          ActivityItem(
+            id: item.id,
+            kind: item.kind,
+            title: item.title,
+            body: item.body,
+            createdAt: item.createdAt,
+            unread: false,
+            actor: item.actor,
+            channelId: item.channelId,
+            conversationId: item.conversationId,
+            messageId: item.messageId,
+            directMessageId: item.directMessageId,
+          ),
+      ];
+      activityUnreadCount = 0;
+    } catch (exception) {
+      error = '$exception';
+    }
+    notifyListeners();
+  }
+
+  Future<void> refreshSpaces({bool notify = true}) async {
+    final currentToken = token;
+    if (currentToken == null) return;
+    try {
+      spacesOverview = await api.spaces(currentToken);
+    } catch (exception) {
+      error = '$exception';
+    }
+    if (notify) notifyListeners();
+  }
+
+  Future<void> rsvpCommunityEvent(CommunityEventItem event) async {
+    final currentToken = token;
+    if (currentToken == null) return;
+    try {
+      await api.rsvpEvent(
+        token: currentToken,
+        eventId: event.id,
+        status: event.rsvp == 'GOING' ? 'INTERESTED' : 'GOING',
+      );
+      await refreshSpaces();
     } catch (exception) {
       error = '$exception';
       notifyListeners();
@@ -728,6 +813,16 @@ class WebCordState extends ChangeNotifier {
       await _loadCurrentChatWallpaper();
       await loadDirectMessages(selectedConversationId!);
       _joinRooms();
+    } else if (next == WorkspaceKind.spaces) {
+      await refreshSpaces();
+      messages = [];
+      hasOlderMessages = false;
+      notifyListeners();
+    } else if (next == WorkspaceKind.activity) {
+      await refreshActivity();
+      messages = [];
+      hasOlderMessages = false;
+      notifyListeners();
     } else if (next == WorkspaceKind.stories) {
       await refreshStories();
       messages = [];
@@ -1026,6 +1121,7 @@ class WebCordState extends ChangeNotifier {
           content: trimmed,
           attachment: attachmentToSend,
           replyToId: replyingTo?.id,
+          silent: silentMessage,
         );
         _upsertMessage(message);
       } else if (selectedTextChannelId != null) {
@@ -1035,11 +1131,13 @@ class WebCordState extends ChangeNotifier {
           content: trimmed,
           attachment: attachmentToSend,
           replyToId: replyingTo?.id,
+          silent: silentMessage,
         );
         _upsertMessage(message);
       }
       pendingAttachment = null;
       replyingTo = null;
+      silentMessage = false;
     });
   }
 
@@ -1410,6 +1508,45 @@ class WebCordState extends ChangeNotifier {
       error = '$exception';
       notifyListeners();
     }
+  }
+
+  void toggleSilentMessage() {
+    silentMessage = !silentMessage;
+    notifyListeners();
+  }
+
+  Future<void> votePoll(MessagePoll poll, int optionId) async {
+    final currentToken = token;
+    if (currentToken == null || poll.closed) return;
+    final selected = poll.options
+        .where((option) => option.selected)
+        .map((option) => option.id)
+        .toList();
+    final alreadySelected = selected.contains(optionId);
+    final optionIds = poll.allowsMultiple
+        ? alreadySelected
+              ? selected.where((id) => id != optionId).toList()
+              : [...selected, optionId]
+        : alreadySelected
+        ? <int>[]
+        : <int>[optionId];
+    try {
+      final updated = await api.votePoll(
+        token: currentToken,
+        pollId: poll.id,
+        optionIds: optionIds,
+      );
+      messages = [
+        for (final message in messages)
+          if (message.poll?.id == poll.id)
+            message.copyWith(poll: updated)
+          else
+            message,
+      ];
+    } catch (exception) {
+      error = '$exception';
+    }
+    notifyListeners();
   }
 
   Future<void> pickAttachment() async {
@@ -3324,6 +3461,14 @@ class WebCordState extends ChangeNotifier {
       })
       ..on('stories:refresh', (_) {
         unawaited(refreshStories());
+      })
+      ..on('activity:new', (_) {
+        activityUnreadCount += 1;
+        notifyListeners();
+        unawaited(refreshActivity());
+      })
+      ..on('spaces:refresh', (_) {
+        unawaited(refreshSpaces());
       })
       ..on('call:incoming', (payload) {
         if (payload is Map) {
