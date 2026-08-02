@@ -5,10 +5,12 @@ import 'package:media_kit/media_kit.dart';
 import 'src/app_shell.dart';
 import 'src/app_state.dart';
 import 'src/app_theme.dart';
+import 'src/push_service.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   MediaKit.ensureInitialized();
+  await PushService.instance.initialize();
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
       statusBarColor: Color(0xFF11172A),

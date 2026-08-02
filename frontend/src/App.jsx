@@ -1,33 +1,33 @@
-import React, { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
+import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useGSAP } from '@gsap/react';
 import gsap from 'gsap';
 import { io } from 'socket.io-client';
 import {
   TbArrowLeft, TbArrowsMaximize, TbArrowsMinimize, TbBolt, TbBrowser, TbCameraRotate,
-  TbBookmark, TbCircleCheck, TbCircleDashed, TbDotsVertical, TbHash, TbMenu2, TbMicrophone, TbMicrophoneOff,
+  TbBookmark, TbCircleCheck, TbCircleDashed, TbCopy, TbDotsVertical, TbHash, TbMenu2, TbMicrophone, TbMicrophoneOff,
   TbMinus, TbMoodSmile, TbMusic, TbPalette, TbPaperclip, TbPhone, TbPhoneOff, TbPlayerPause,
   TbPlayerPlay, TbPlayerStop, TbPlus, TbPinned, TbScreenShare, TbSearch, TbSend2, TbSettings,
-  TbSun, TbMoon, TbVideo, TbVideoOff, TbVolume, TbVolumeOff, TbWaveSine, TbX
+  TbSun, TbMoon, TbShield, TbVideo, TbVideoOff, TbVolume, TbVolumeOff, TbWaveSine, TbX
 } from 'react-icons/tb';
 import {
-  MdAdd, MdArrowBackIosNew, MdBookmarkBorder, MdClose, MdFullscreen, MdFullscreenExit, MdMenu,
+  MdAdd, MdArrowBackIosNew, MdBookmarkBorder, MdClose, MdContentCopy, MdFullscreen, MdFullscreenExit, MdMenu,
   MdMoreVert, MdOutlineAttachFile, MdOutlineAutoStories, MdOutlineBolt,
   MdOutlineCall, MdOutlineCallEnd, MdOutlineCameraswitch, MdOutlineCheckCircle,
   MdOutlineChatBubbleOutline, MdOutlineGraphicEq, MdOutlineGroup, MdOutlineMic,
   MdOutlineDarkMode, MdOutlineLightMode, MdOutlineMicOff, MdOutlineMusicNote, MdOutlinePalette, MdOutlinePublic, MdOutlineScreenShare,
   MdOutlineSearch, MdOutlineSend, MdOutlineSentimentSatisfiedAlt,
-  MdOutlineSettings, MdOutlineTag, MdOutlineVideocam, MdOutlineVideocamOff,
+  MdOutlineSettings, MdOutlineShield, MdOutlineTag, MdOutlineVideocam, MdOutlineVideocamOff,
   MdOutlineVolumeOff, MdOutlineVolumeUp, MdOutlineWallpaper, MdPause,
   MdOutlinePushPin, MdPlayArrow, MdRemove, MdStop
 } from 'react-icons/md';
 import {
-  PiArrowLeft, PiBookmarkSimple, PiBrowser, PiCameraRotate, PiChatCircleDots, PiCheckCircle,
+  PiArrowLeft, PiBookmarkSimple, PiBrowser, PiCameraRotate, PiChatCircleDots, PiCheckCircle, PiCopy,
   PiCornersIn, PiCornersOut, PiDotsThreeVertical, PiGear, PiHash, PiImageSquare,
   PiImagesSquare, PiList, PiMagnifyingGlass, PiMicrophone, PiMicrophoneSlash, PiMoon,
   PiMinus, PiMonitorArrowUp, PiMusicNotes, PiPalette, PiPaperPlaneTilt,
   PiPaperclip, PiPause, PiPhoneCall, PiPhoneSlash, PiPlay, PiPlus, PiPushPin, PiSignOut,
-  PiSmiley, PiSpeakerHigh, PiSpeakerSlash, PiStop, PiSun, PiUserCircle, PiUsersThree,
+  PiShield, PiSmiley, PiSpeakerHigh, PiSpeakerSlash, PiStop, PiSun, PiUserCircle, PiUsersThree,
   PiVideoCamera, PiVideoCameraSlash, PiWaveform, PiX
 } from 'react-icons/pi';
 
@@ -54,6 +54,7 @@ const API_URL = import.meta.env.VITE_API_URL || (IS_NATIVE_CLIENT ? `${REMOTE_OR
 const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || (API_URL.startsWith('http') ? new URL(API_URL).origin : window.location.origin);
 const SOCKET_TRANSPORTS = IS_NATIVE_CLIENT ? ['polling', 'websocket'] : ['websocket', 'polling'];
 const MESSAGE_POLL_INTERVAL_MS = 6000;
+const CIRCLE_RECORDING_MAX_SECONDS = 60;
 const SOCKET_STATUS_LABELS = {
   connecting: 'Connecting',
   connected: 'Live',
@@ -1257,7 +1258,7 @@ const APP_ICONS = {
 const ICON_FAMILIES = {
   telegram: {
     arrowLeft: TbArrowLeft, bookmark: TbBookmark, browser: TbBrowser, camera: TbVideo, cameraOff: TbVideoOff,
-    check: TbCircleCheck,
+    check: TbCircleCheck, copy: TbCopy,
     close: TbX, expand: TbArrowsMaximize, hash: TbHash, menu: TbMenu2, more: TbDotsVertical,
     mic: TbMicrophone, micOff: TbMicrophoneOff, minus: TbMinus, music: TbMusic,
     paperclip: TbPaperclip, pause: TbPlayerPause, phone: TbPhone, phoneOff: TbPhoneOff,
@@ -1265,11 +1266,11 @@ const ICON_FAMILIES = {
     settings: TbSettings, search: TbSearch, shrink: TbArrowsMinimize, smile: TbMoodSmile,
     stop: TbPlayerStop, story: TbCircleDashed, switchCamera: TbCameraRotate,
     volume: TbVolume, volumeOff: TbVolumeOff, wave: TbWaveSine, zap: TbBolt,
-    sun: TbSun, moon: TbMoon, theme: TbPalette
+    shield: TbShield, sun: TbSun, moon: TbMoon, theme: TbPalette
   },
   material: {
     arrowLeft: MdArrowBackIosNew, bookmark: MdBookmarkBorder, browser: MdOutlinePublic, camera: MdOutlineVideocam,
-    cameraOff: MdOutlineVideocamOff, check: MdOutlineCheckCircle, close: MdClose,
+    cameraOff: MdOutlineVideocamOff, check: MdOutlineCheckCircle, copy: MdContentCopy, close: MdClose,
     expand: MdFullscreen, hash: MdOutlineTag, menu: MdMenu, more: MdMoreVert,
     mic: MdOutlineMic, micOff: MdOutlineMicOff, minus: MdRemove,
     music: MdOutlineMusicNote, paperclip: MdOutlineAttachFile, pause: MdPause,
@@ -1280,11 +1281,11 @@ const ICON_FAMILIES = {
     switchCamera: MdOutlineCameraswitch, volume: MdOutlineVolumeUp,
     volumeOff: MdOutlineVolumeOff, wave: MdOutlineGraphicEq, zap: MdOutlineBolt,
     wallpaper: MdOutlineWallpaper, theme: MdOutlinePalette,
-    sun: MdOutlineLightMode, moon: MdOutlineDarkMode
+    shield: MdOutlineShield, sun: MdOutlineLightMode, moon: MdOutlineDarkMode
   },
   atmosphere: {
     arrowLeft: PiArrowLeft, bookmark: PiBookmarkSimple, browser: PiBrowser, camera: PiVideoCamera,
-    check: PiCheckCircle, cameraOff: PiVideoCameraSlash, close: PiX,
+    check: PiCheckCircle, copy: PiCopy, cameraOff: PiVideoCameraSlash, close: PiX,
     expand: PiCornersOut, hash: PiHash, menu: PiList, more: PiDotsThreeVertical,
     mic: PiMicrophone, micOff: PiMicrophoneSlash, minus: PiMinus,
     music: PiMusicNotes, paperclip: PiPaperclip, pause: PiPause, pin: PiPushPin,
@@ -1295,7 +1296,7 @@ const ICON_FAMILIES = {
     volumeOff: PiSpeakerSlash, wave: PiWaveform, zap: PiPalette,
     channels: PiHash, friends: PiUsersThree, direct: PiChatCircleDots,
     profile: PiUserCircle, wallpaper: PiImageSquare, logout: PiSignOut,
-    sun: PiSun, moon: PiMoon
+    shield: PiShield, sun: PiSun, moon: PiMoon
   }
 };
 
@@ -2043,6 +2044,9 @@ function CircleRecordingOverlay({
   onSwitchCamera
 }) {
   const onCancelRef = useRef(onCancel);
+  const recordingProgress = phase === 'uploading'
+    ? Math.max(0, Math.min(100, uploadProgress))
+    : Math.max(0, Math.min(100, (elapsed / CIRCLE_RECORDING_MAX_SECONDS) * 100));
 
   useEffect(() => {
     onCancelRef.current = onCancel;
@@ -2079,17 +2083,36 @@ function CircleRecordingOverlay({
     <div className="circle-recording-overlay" role="dialog" aria-modal="true">
       <div className="circle-recording-backdrop" aria-hidden="true" />
       <div className="circle-recording-stage">
-        <span className="circle-recording-grabber" aria-hidden="true" />
-        <div className="circle-recording-preview">
-          {stream ? <StreamPreviewVideo stream={stream} /> : <span className="circle-recording-empty"><AppIcon name="camera" size={42} /></span>}
-          {countdown > 0 ? <strong className="circle-recording-countdown" aria-live="assertive">{countdown}</strong> : null}
-          {phase === 'uploading' ? (
-            <div className="circle-recording-upload" aria-live="polite">
-              <span>Uploading circle</span>
-              <strong>{uploadProgress}%</strong>
-              <progress max="100" value={uploadProgress} />
-            </div>
-          ) : null}
+        <div
+          className={`circle-recording-preview-shell phase-${phase}`}
+          role="progressbar"
+          aria-label={phase === 'uploading' ? 'Uploading video circle' : 'Video circle recording progress'}
+          aria-valuemin="0"
+          aria-valuemax="100"
+          aria-valuenow={Math.round(recordingProgress)}
+        >
+          <svg className="circle-recording-progress" viewBox="0 0 100 100" aria-hidden="true">
+            <circle className="circle-recording-progress-track" cx="50" cy="50" r="47" pathLength="100" />
+            <circle
+              className="circle-recording-progress-value"
+              cx="50"
+              cy="50"
+              r="47"
+              pathLength="100"
+              style={{ strokeDashoffset: 100 - recordingProgress }}
+            />
+          </svg>
+          <div className="circle-recording-preview">
+            {stream ? <StreamPreviewVideo stream={stream} /> : <span className="circle-recording-empty"><AppIcon name="camera" size={42} /></span>}
+            {countdown > 0 ? <strong className="circle-recording-countdown" aria-live="assertive">{countdown}</strong> : null}
+            {phase === 'uploading' ? (
+              <div className="circle-recording-upload" aria-live="polite">
+                <span>Uploading circle</span>
+                <strong>{uploadProgress}%</strong>
+                <progress max="100" value={uploadProgress} />
+              </div>
+            ) : null}
+          </div>
         </div>
         <div className="circle-recording-side-actions">
           <button type="button" aria-label="Pause recording" title={paused ? 'Resume recording' : 'Pause recording'} onClick={onPauseToggle}>
@@ -2956,12 +2979,15 @@ function ChatInfoPanel({ open, conversation, channel, messages, mediaItems = [],
   );
 }
 
-function GlobalSearchPalette({ open, query, loading, results, onQueryChange, onOpenResult, onClose }) {
+function GlobalSearchPalette({ open, query, scope, loading, results, onQueryChange, onScopeChange, onOpenResult, onClose }) {
   if (!open) return null;
   const users = results?.users || [];
+  const channels = results?.channels || [];
+  const conversations = results?.conversations || [];
   const channelMessages = results?.channelMessages || [];
   const directMessages = results?.directMessages || [];
-  const empty = query.trim().length >= 2 && !loading && users.length + channelMessages.length + directMessages.length === 0;
+  const resultCount = users.length + channels.length + conversations.length + channelMessages.length + directMessages.length;
+  const empty = query.trim().length >= 2 && !loading && resultCount === 0;
   return (
     <div className="global-search-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <section className="global-search-palette" role="dialog" aria-modal="true" aria-label="Search WebCord">
@@ -2970,6 +2996,17 @@ function GlobalSearchPalette({ open, query, loading, results, onQueryChange, onO
           <input autoFocus value={query} onChange={(event) => onQueryChange(event.target.value)} placeholder="People, chats and messages" />
           <kbd>Esc</kbd>
         </div>
+        <nav className="global-search-scopes" aria-label="Search scope">
+          {[
+            ['all', 'All'],
+            ['people', 'People'],
+            ['channels', 'Channels'],
+            ['dm', 'Chats'],
+            ['files', 'Files']
+          ].map(([id, label]) => (
+            <button key={id} className={scope === id ? 'active' : ''} type="button" onClick={() => onScopeChange(id)}>{label}</button>
+          ))}
+        </nav>
         <div className="global-search-results">
           {query.trim().length < 2 ? <p className="muted">Type at least two characters. Press Ctrl K anywhere to return here.</p> : null}
           {loading ? <p className="muted">Searching across WebCord…</p> : null}
@@ -2980,7 +3017,21 @@ function GlobalSearchPalette({ open, query, loading, results, onQueryChange, onO
               <span><strong>{getDisplayName(profile)}</strong><small>{getUsernameTag(profile)}</small></span>
             </button>
           ))}
-          {channelMessages.length ? <h4>Channels</h4> : null}
+          {channels.length ? <h4>Channels</h4> : null}
+          {channels.map((channel) => (
+            <button type="button" key={`channel-target-${channel.id}`} onClick={() => onOpenResult({ type: 'channel', channel })}>
+              <AppIcon name={channel.type === 'VOICE' ? 'wave' : 'hash'} />
+              <span><strong>{channel.name}</strong><small>{channel.type === 'VOICE' ? 'Voice channel' : 'Text channel'}</small></span>
+            </button>
+          ))}
+          {conversations.length ? <h4>Chats</h4> : null}
+          {conversations.map((conversation) => (
+            <button type="button" key={`conversation-${conversation.id}`} onClick={() => onOpenResult({ type: 'conversation', conversation })}>
+              <UserAvatar user={conversation.user || conversation.members?.[0]} />
+              <span><strong>{getConversationTitle(conversation)}</strong><small>{getConversationSubtitle(conversation)}</small></span>
+            </button>
+          ))}
+          {channelMessages.length ? <h4>Messages in channels</h4> : null}
           {channelMessages.map((message) => (
             <button type="button" key={`channel-${message.id}`} onClick={() => onOpenResult({ type: 'channel-message', message })}>
               <AppIcon name="hash" />
@@ -3982,12 +4033,16 @@ function ActivityCenter({ token, onNavigate }) {
   const [data, setData] = useState({ activities: [], unreadCount: 0 });
   const [filter, setFilter] = useState('');
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
 
   const refresh = useCallback(async () => {
     setLoading(true);
+    setLoadError('');
     try {
       const suffix = filter ? `?kind=${encodeURIComponent(filter)}` : '';
       setData(await apiFetch(`/activity${suffix}`, {}, token));
+    } catch (error) {
+      setLoadError(error?.message || 'Could not load activity.');
     } finally {
       setLoading(false);
     }
@@ -4026,10 +4081,13 @@ function ActivityCenter({ token, onNavigate }) {
       </nav>
       <section className="activity-feed" aria-live="polite">
         {loading ? [...Array(5)].map((_, index) => <div className="activity-skeleton" key={index} />) : null}
-        {!loading && data.activities.length === 0 ? (
+        {!loading && loadError ? (
+          <div className="workspace-empty workspace-error" role="alert"><AppIcon name="wave" size={30} /><h3>Activity is unavailable</h3><p>{loadError}</p><button type="button" onClick={refresh}>Try again</button></div>
+        ) : null}
+        {!loading && !loadError && data.activities.length === 0 ? (
           <div className="workspace-empty"><AppIcon name="check" size={30} /><h3>You’re all caught up</h3><p>New mentions and replies will appear here.</p></div>
         ) : null}
-        {data.activities.map((activity) => (
+        {!loadError ? data.activities.map((activity) => (
           <button
             className={activity.unread ? 'activity-item unread' : 'activity-item'}
             type="button"
@@ -4048,7 +4106,7 @@ function ActivityCenter({ token, onNavigate }) {
             </span>
             {activity.unread ? <span className="activity-unread-dot" /> : null}
           </button>
-        ))}
+        )) : null}
       </section>
     </div>
   );
@@ -4057,20 +4115,63 @@ function ActivityCenter({ token, onNavigate }) {
 function SpacesWorkspace({ token, user, onOpenChannel }) {
   const [data, setData] = useState(null);
   const [scheduled, setScheduled] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [eventOpen, setEventOpen] = useState(false);
   const [eventDraft, setEventDraft] = useState({ title: '', description: '', location: '', startsAt: '' });
   const [busy, setBusy] = useState(false);
+  const [invites, setInvites] = useState([]);
+  const [members, setMembers] = useState([]);
+  const [auditLog, setAuditLog] = useState([]);
+  const [managementError, setManagementError] = useState('');
+  const [inviteBusy, setInviteBusy] = useState(false);
+  const [slowModeBusy, setSlowModeBusy] = useState(null);
 
   const refresh = useCallback(async () => {
-    const [spaces, scheduledMessages] = await Promise.all([
-      apiFetch('/spaces', {}, token),
-      apiFetch('/scheduled-messages', {}, token)
-    ]);
-    setData(spaces);
-    setScheduled(scheduledMessages);
+    setLoading(true);
+    setLoadError('');
+    try {
+      const [spaces, scheduledMessages] = await Promise.all([
+        apiFetch('/spaces', {}, token),
+        apiFetch('/scheduled-messages', {}, token)
+      ]);
+      setData({
+        ...spaces,
+        events: Array.isArray(spaces?.events) ? spaces.events : [],
+        activePolls: Array.isArray(spaces?.activePolls) ? spaces.activePolls : [],
+        activityCount: Number(spaces?.activityCount || 0),
+        scheduledCount: Number(spaces?.scheduledCount || 0)
+      });
+      setScheduled(Array.isArray(scheduledMessages) ? scheduledMessages : []);
+      const role = String(spaces?.membership?.role || 'MEMBER').toUpperCase();
+      const roleRank = { MEMBER: 0, MODERATOR: 1, ADMIN: 2, OWNER: 3 };
+      if (spaces?.guild?.id) {
+        try {
+          const requests = [apiFetch(`/spaces/${spaces.guild.id}/members`, {}, token)];
+          if ((roleRank[role] || 0) >= roleRank.MODERATOR) requests.push(apiFetch(`/spaces/${spaces.guild.id}/audit-log`, {}, token));
+          if ((roleRank[role] || 0) >= roleRank.ADMIN) requests.push(apiFetch(`/invites?guildId=${spaces.guild.id}`, {}, token));
+          const [memberItems, auditItems = [], inviteItems = []] = await Promise.all(requests);
+          setMembers(Array.isArray(memberItems) ? memberItems : []);
+          setAuditLog(Array.isArray(auditItems) ? auditItems : []);
+          setInvites(Array.isArray(inviteItems) ? inviteItems : []);
+          setManagementError('');
+        } catch (error) {
+          setManagementError(error?.message || 'Community controls did not load.');
+        }
+      }
+    } catch (error) {
+      setLoadError(error?.message || 'Could not load Spaces.');
+    } finally {
+      setLoading(false);
+    }
   }, [token]);
 
-  useEffect(() => { refresh().catch(() => {}); }, [refresh]);
+  const membershipRole = String(data?.membership?.role || 'MEMBER').toUpperCase();
+  const membershipRank = { MEMBER: 0, MODERATOR: 1, ADMIN: 2, OWNER: 3 }[membershipRole] || 0;
+  const canModerateSpace = membershipRank >= 1;
+  const canAdminSpace = membershipRank >= 2;
+
+  useEffect(() => { refresh(); }, [refresh]);
 
   async function createEvent(event) {
     event.preventDefault();
@@ -4097,8 +4198,126 @@ function SpacesWorkspace({ token, user, onOpenChannel }) {
     await refresh();
   }
 
-  if (!data) {
+  async function createInvite() {
+    if (!data?.guild?.id || inviteBusy) return;
+    setInviteBusy(true);
+    try {
+      const invite = await apiFetch('/invites', {
+        method: 'POST',
+        body: JSON.stringify({ guildId: data.guild.id, expiresInHours: 168 })
+      }, token);
+      setInvites((current) => [invite, ...current]);
+      setManagementError('');
+    } catch (error) {
+      setManagementError(error?.message || 'Could not create invite.');
+    } finally {
+      setInviteBusy(false);
+    }
+  }
+
+  async function copyInvite(invite) {
+    const inviteUrl = `${window.location.origin}/?invite=${encodeURIComponent(invite.code)}`;
+    try {
+      await navigator.clipboard.writeText(inviteUrl);
+      setManagementError('');
+    } catch {
+      setManagementError(`Copy this invite manually: ${inviteUrl}`);
+    }
+  }
+
+  async function revokeInvite(inviteId) {
+    setInviteBusy(true);
+    try {
+      await apiFetch(`/invites/${inviteId}`, { method: 'DELETE' }, token);
+      setInvites((current) => current.map((item) => item.id === inviteId ? { ...item, revokedAt: new Date().toISOString() } : item));
+      setManagementError('');
+    } catch (error) {
+      setManagementError(error?.message || 'Could not revoke invite.');
+    } finally {
+      setInviteBusy(false);
+    }
+  }
+
+  async function updateSlowMode(channelId, seconds) {
+    setSlowModeBusy(channelId);
+    try {
+      const channel = await apiFetch(`/channels/${channelId}/slow-mode`, {
+        method: 'PATCH',
+        body: JSON.stringify({ seconds: Number(seconds) })
+      }, token);
+      setData((current) => ({
+        ...current,
+        guild: {
+          ...current.guild,
+          channels: current.guild.channels.map((item) => item.id === channel.id ? channel : item)
+        }
+      }));
+      setManagementError('');
+    } catch (error) {
+      setManagementError(error?.message || 'Could not update slow mode.');
+    } finally {
+      setSlowModeBusy(null);
+    }
+  }
+
+  async function updateMemberRole(userId, role) {
+    if (!data?.guild?.id) return;
+    setInviteBusy(true);
+    try {
+      const member = await apiFetch(`/spaces/${data.guild.id}/members/${userId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ role })
+      }, token);
+      setMembers((current) => current.map((item) => item.userId === member.userId ? member : item));
+      setManagementError('');
+    } catch (error) {
+      setManagementError(error?.message || 'Could not update member role.');
+    } finally {
+      setInviteBusy(false);
+    }
+  }
+
+  async function removeMember(userId) {
+    if (!data?.guild?.id || !window.confirm('Remove this member from the community?')) return;
+    setInviteBusy(true);
+    try {
+      await apiFetch(`/spaces/${data.guild.id}/members/${userId}`, { method: 'DELETE' }, token);
+      setMembers((current) => current.filter((item) => item.userId !== userId));
+      setManagementError('');
+    } catch (error) {
+      setManagementError(error?.message || 'Could not remove member.');
+    } finally {
+      setInviteBusy(false);
+    }
+  }
+
+  if (loading && !data) {
     return <div className="spaces-workspace workspace-scroll"><div className="spaces-skeleton" /><div className="spaces-card-grid">{[1, 2, 3].map((id) => <div className="spaces-card skeleton" key={id} />)}</div></div>;
+  }
+
+  if (loadError && !data) {
+    return (
+      <div className="spaces-workspace workspace-scroll">
+        <div className="workspace-empty workspace-error" role="alert">
+          <AppIcon name="wave" size={30} />
+          <h3>Spaces did not load</h3>
+          <p>{loadError}</p>
+          <button type="button" onClick={refresh}>Try again</button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!data?.guild) {
+    return (
+      <div className="spaces-workspace workspace-scroll">
+        <div className="workspace-empty">
+          <AppIcon name="zap" size={30} />
+          <h3>No community space yet</h3>
+          <p>Create the first community from the administration panel.</p>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -4111,13 +4330,15 @@ function SpacesWorkspace({ token, user, onOpenChannel }) {
           <p>{data.guild.description || 'One place for conversations, decisions and live moments.'}</p>
           <div className="spaces-hero-actions">
             <button type="button" onClick={() => onOpenChannel?.()}><AppIcon name="hash" size={16} /> Open chats</button>
-            <button className="ghost-btn" type="button" onClick={() => setEventOpen(true)}><AppIcon name="plus" size={16} /> New event</button>
+            {canModerateSpace ? <button className="ghost-btn" type="button" onClick={() => setEventOpen(true)}><AppIcon name="plus" size={16} /> New event</button> : null}
+            <span className="space-role-badge"><AppIcon name="shield" size={14} /> {membershipRole.toLowerCase()}</span>
           </div>
         </div>
         <div className="space-health">
           <span><strong>{data.activePolls.length}</strong> live polls</span>
           <span><strong>{data.events.length}</strong> events</span>
           <span><strong>{data.activityCount}</strong> updates</span>
+          <span><strong>{members.length}</strong> members</span>
         </div>
       </header>
 
@@ -4148,9 +4369,64 @@ function SpacesWorkspace({ token, user, onOpenChannel }) {
             </div>
           ))}
         </section>
+        {canModerateSpace ? (
+          <section className="spaces-card community-controls-card">
+            <header><div><span className="workspace-eyebrow">Administration</span><h3>Community controls</h3></div>{canAdminSpace ? <button className="icon-btn" type="button" aria-label="Create invite link" disabled={inviteBusy} onClick={createInvite}><AppIcon name="plus" /></button> : null}</header>
+            {managementError ? <p className="inline-error" role="alert">{managementError}</p> : null}
+            {canAdminSpace ? <div className="community-control-section">
+              <strong>Invite links</strong>
+              {invites.filter((invite) => !invite.revokedAt && (!invite.expiresAt || new Date(invite.expiresAt) > new Date())).slice(0, 3).map((invite) => (
+                <div className="invite-control-row" key={invite.id}>
+                  <code>{invite.code}</code>
+                  <span>{invite.uses}{invite.maxUses ? ` / ${invite.maxUses}` : ''} uses</span>
+                  <button type="button" onClick={() => copyInvite(invite)} aria-label={`Copy invite ${invite.code}`}><AppIcon name="copy" size={15} /></button>
+                  <button type="button" disabled={inviteBusy} onClick={() => revokeInvite(invite.id)} aria-label={`Revoke invite ${invite.code}`}><AppIcon name="close" size={15} /></button>
+                </div>
+              ))}
+              {invites.filter((invite) => !invite.revokedAt && (!invite.expiresAt || new Date(invite.expiresAt) > new Date())).length === 0 ? <p className="muted">No active links. Create a seven-day invite.</p> : null}
+            </div> : null}
+            <div className="community-control-section">
+              <strong>Channel slow mode</strong>
+              {(data.guild.channels || []).filter((channel) => channel.type === 'TEXT').map((channel) => (
+                <label className="slow-mode-row" key={channel.id}>
+                  <span><AppIcon name="hash" size={15} />{channel.name}</span>
+                  <select disabled={slowModeBusy === channel.id} value={channel.slowModeSeconds || 0} onChange={(event) => updateSlowMode(channel.id, event.target.value)}>
+                    <option value="0">Off</option><option value="5">5 sec</option><option value="15">15 sec</option><option value="30">30 sec</option><option value="60">1 min</option><option value="300">5 min</option>
+                  </select>
+                </label>
+              ))}
+            </div>
+            <div className="community-control-section">
+              <strong>Members and roles</strong>
+              <div className="space-member-list">
+                {members.slice(0, 12).map((member) => (
+                  <div className="space-member-row" key={member.id}>
+                    <UserAvatar user={member.user} className="space-member-avatar" />
+                    <div><strong>{getDisplayName(member.user)}</strong><span>@{member.user?.username}</span></div>
+                    {canAdminSpace && member.userId !== user?.id ? (
+                      <select disabled={inviteBusy} value={member.role} onChange={(event) => updateMemberRole(member.userId, event.target.value)} aria-label={`Role for ${member.user?.username}`}>
+                        <option value="MEMBER">Member</option><option value="MODERATOR">Moderator</option><option value="ADMIN">Admin</option>{membershipRole === 'OWNER' ? <option value="OWNER">Owner</option> : null}
+                      </select>
+                    ) : <span className="space-member-role">{member.role.toLowerCase()}</span>}
+                    {canAdminSpace && member.userId !== user?.id && member.role !== 'OWNER' ? <button className="icon-btn" type="button" aria-label={`Remove ${member.user?.username}`} onClick={() => removeMember(member.userId)}><AppIcon name="close" size={15} /></button> : null}
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="community-control-section">
+              <strong>Recent moderation</strong>
+              {auditLog.length ? auditLog.slice(0, 6).map((entry) => (
+                <div className="space-audit-row" key={entry.id}>
+                  <AppIcon name="shield" size={15} />
+                  <div><strong>{String(entry.action || '').replaceAll('_', ' ').toLowerCase()}</strong><span>{entry.actor ? getDisplayName(entry.actor) : 'System'} · {new Intl.DateTimeFormat(undefined, { dateStyle: 'short', timeStyle: 'short' }).format(new Date(entry.createdAt))}</span></div>
+                </div>
+              )) : <p className="muted">No moderation actions yet.</p>}
+            </div>
+          </section>
+        ) : null}
       </div>
 
-      {eventOpen ? (
+      {eventOpen && canModerateSpace ? (
         <div className="modal-backdrop" role="dialog" aria-modal="true" onClick={() => setEventOpen(false)}>
           <form className="modal-card event-modal" onSubmit={createEvent} onClick={(event) => event.stopPropagation()}>
             <div className="modal-header"><div><span className="workspace-eyebrow">Community event</span><h3>Create a moment</h3></div><button className="icon-btn" type="button" aria-label="Close" onClick={() => setEventOpen(false)}><AppIcon name="close" /></button></div>
@@ -4376,7 +4652,8 @@ export default function App() {
   const [messageSearchLoading, setMessageSearchLoading] = useState(false);
   const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
   const [globalSearchQuery, setGlobalSearchQuery] = useState('');
-  const [globalSearchResults, setGlobalSearchResults] = useState({ users: [], channelMessages: [], directMessages: [] });
+  const [globalSearchScope, setGlobalSearchScope] = useState('all');
+  const [globalSearchResults, setGlobalSearchResults] = useState({ users: [], channels: [], conversations: [], channelMessages: [], directMessages: [] });
   const [globalSearchLoading, setGlobalSearchLoading] = useState(false);
   const [pinnedPanelOpen, setPinnedPanelOpen] = useState(false);
   const [pinnedMessages, setPinnedMessages] = useState([]);
@@ -4484,6 +4761,7 @@ export default function App() {
   const clientStateSyncTimerRef = useRef(null);
   const chatPreferencesRef = useRef(chatPreferences);
   const browserDeepLinkHandledRef = useRef(false);
+  const browserInviteHandledRef = useRef(false);
 
   const isAdminRoute = ADMIN_PATHS.has(currentPath);
   const isAuthed = Boolean(token && user);
@@ -4563,14 +4841,17 @@ export default function App() {
     const root = appShellRef.current;
     if (!root || !isAuthed || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
 
-    gsap.fromTo('.channel-btn, .conversation-btn', { autoAlpha: 0, x: -9 }, {
-      autoAlpha: 1,
-      x: 0,
-      duration: 0.3,
-      ease: 'power3.out',
-      stagger: 0.018,
-      clearProps: 'transform,visibility,opacity'
-    });
+    const navigationItems = root.querySelectorAll('.channel-btn, .conversation-btn');
+    if (navigationItems.length) {
+      gsap.fromTo(navigationItems, { autoAlpha: 0, x: -9 }, {
+        autoAlpha: 1,
+        x: 0,
+        duration: 0.3,
+        ease: 'power3.out',
+        stagger: 0.018,
+        clearProps: 'transform,visibility,opacity'
+      });
+    }
   }, { scope: appShellRef, dependencies: [isAuthed, workspace], revertOnUpdate: true });
 
   useGSAP(() => {
@@ -4585,19 +4866,22 @@ export default function App() {
     }[theme.mode] || { duration: 0.3, ease: 'power3.out', y: 8, scale: 0.995, stagger: 0.02 };
 
     if (!reducedMotion) {
-      gsap.fromTo(
-        '.chat-header, .message-form, .mobile-bottom-nav',
-        { autoAlpha: 0.72, y: profile.y, scale: profile.scale },
-        {
-          autoAlpha: 1,
-          y: 0,
-          scale: 1,
-          duration: profile.duration,
-          ease: profile.ease,
-          stagger: profile.stagger,
-          clearProps: 'transform,visibility,opacity'
-        }
-      );
+      const chromeItems = root.querySelectorAll('.chat-header, .message-form, .mobile-bottom-nav');
+      if (chromeItems.length) {
+        gsap.fromTo(
+          chromeItems,
+          { autoAlpha: 0.72, y: profile.y, scale: profile.scale },
+          {
+            autoAlpha: 1,
+            y: 0,
+            scale: 1,
+            duration: profile.duration,
+            ease: profile.ease,
+            stagger: profile.stagger,
+            clearProps: 'transform,visibility,opacity'
+          }
+        );
+      }
     }
 
     const ambient = root.querySelector('.theme-ambient');
@@ -5043,19 +5327,19 @@ export default function App() {
     window.clearTimeout(globalSearchTimerRef.current);
     const query = globalSearchQuery.trim();
     if (!globalSearchOpen || query.length < 2 || !token) {
-      setGlobalSearchResults({ users: [], channelMessages: [], directMessages: [] });
+      setGlobalSearchResults({ users: [], channels: [], conversations: [], channelMessages: [], directMessages: [] });
       setGlobalSearchLoading(false);
       return undefined;
     }
     setGlobalSearchLoading(true);
     globalSearchTimerRef.current = window.setTimeout(() => {
-      apiFetch(`/search?q=${encodeURIComponent(query)}`, {}, token)
+      apiFetch(`/search?q=${encodeURIComponent(query)}&scope=${encodeURIComponent(globalSearchScope)}`, {}, token)
         .then(setGlobalSearchResults)
         .catch((err) => reportError(err, 'Could not search WebCord'))
         .finally(() => setGlobalSearchLoading(false));
     }, 260);
     return () => window.clearTimeout(globalSearchTimerRef.current);
-  }, [globalSearchOpen, globalSearchQuery, token]);
+  }, [globalSearchOpen, globalSearchQuery, globalSearchScope, token]);
 
   useEffect(() => {
     if (pinnedPanelOpen) refreshPinnedMessages();
@@ -5091,6 +5375,23 @@ export default function App() {
     clientSettings.quietHoursStart,
     clientSettings.quietHoursEnd
   ]);
+
+  useEffect(() => {
+    if (!isAuthed || browserInviteHandledRef.current) return;
+    const params = new URLSearchParams(window.location.search);
+    const inviteCode = params.get('invite');
+    if (!inviteCode) return;
+    browserInviteHandledRef.current = true;
+    apiFetch(`/invites/${encodeURIComponent(inviteCode)}/accept`, { method: 'POST' }, token)
+      .then(() => {
+        setWorkspace('spaces');
+        setMobileChatOpen(true);
+        window.history.replaceState({}, '', window.location.pathname);
+      })
+      .catch((inviteError) => {
+        setError(inviteError?.message || 'Could not join this community.');
+      });
+  }, [isAuthed, token]);
 
   useEffect(() => {
     if (!isAuthed || browserDeepLinkHandledRef.current) return;
@@ -5157,8 +5458,14 @@ export default function App() {
       refreshSocialData().catch(() => {});
       refreshCurrentMessages({ silent: true }).catch(() => {});
       if (voiceJoinedRef.current) {
+        const resumeChannelId = voiceChannelIdRef.current;
         cleanupVoice({ emitLeave: false });
-        setVoiceStatus('Voice reconnected. Join the channel again.');
+        setVoiceStatus('Restoring voice session…');
+        window.setTimeout(() => {
+          handleJoinVoice(resumeChannelId)
+            .then(() => pushToast('Voice session restored', 'success'))
+            .catch(() => setVoiceStatus('Could not restore voice automatically'));
+        }, 240);
       }
     });
     socket.io.on('reconnect_attempt', () => setSocketStatus(networkOnline ? 'reconnecting' : 'offline'));
@@ -5790,6 +6097,22 @@ export default function App() {
     if (result.type === 'user') {
       setViewedProfile(result.profile);
       setGlobalSearchOpen(false);
+      return;
+    }
+    if (result.type === 'channel') {
+      setWorkspace('server');
+      setChannelId(String(result.channel.id));
+      setGlobalSearchOpen(false);
+      setGlobalSearchQuery('');
+      setMobileChatOpen(true);
+      return;
+    }
+    if (result.type === 'conversation') {
+      setWorkspace('dm');
+      setDmConversationId(String(result.conversation.id));
+      setGlobalSearchOpen(false);
+      setGlobalSearchQuery('');
+      setMobileChatOpen(true);
       return;
     }
     const message = result.message;
@@ -6863,7 +7186,15 @@ export default function App() {
       setCircleRecording(kind === 'circle');
       setRecordingPhase('recording');
       messageRecordingTimerRef.current = window.setInterval(() => {
-        setRecordingElapsed((value) => value + 1);
+        setRecordingElapsed((value) => {
+          if (messageRecorderRef.current?.state === 'paused') return value;
+          const next = value + 1;
+          if (kind === 'circle' && next >= CIRCLE_RECORDING_MAX_SECONDS) {
+            window.queueMicrotask(() => cleanupMessageRecording());
+            return CIRCLE_RECORDING_MAX_SECONDS;
+          }
+          return next;
+        });
       }, 1000);
     } catch (err) {
       cleanupMessageRecording({ cancel: true });
@@ -7868,8 +8199,9 @@ export default function App() {
             : 'Connected'
     }))
   ];
-  const userCanManageChannels = canManageChannels(user);
-  const userCanModerateMessages = Boolean(user?.isAdmin) || ['ADMIN', 'OWNER'].includes(normalizeUserRole(user?.role));
+  const spaceRole = String(guild?.membership?.role || 'MEMBER').toUpperCase();
+  const userCanManageChannels = canManageChannels(user) || ['ADMIN', 'OWNER'].includes(spaceRole);
+  const userCanModerateMessages = Boolean(user?.isAdmin) || ['ADMIN', 'OWNER'].includes(normalizeUserRole(user?.role)) || ['MODERATOR', 'ADMIN', 'OWNER'].includes(spaceRole);
   const visibleVoiceChannelForJoin = hasMobileFolderFilter
     ? (filteredVoiceChannels.find((channel) => String(channel.id) === String(voiceChannelId)) || filteredVoiceChannels[0] || null)
     : activeVoiceChannel;
@@ -7977,6 +8309,7 @@ export default function App() {
           ].map(([item, icon, label]) => (
             <button
               key={item}
+              data-workspace={item}
               className={workspace === item ? 'rail-btn active' : 'rail-btn'}
               type="button"
               title={label}
@@ -7984,7 +8317,7 @@ export default function App() {
               onClick={() => {
                 setWorkspace(item);
                 setMobileSidebarOpen(false);
-                if (isMobile) setMobileChatOpen(false);
+                if (isMobile) setMobileChatOpen(['spaces', 'activity', 'stories', 'friends'].includes(item));
               }}
             >
               <span>{icon === 'brand' ? <BrandLogo className="rail-logo" /> : <AppIcon name={icon} size={22} />}</span>
@@ -8186,16 +8519,21 @@ export default function App() {
           ) : null}
 
           {workspace === 'spaces' ? (
-            <SpacesWorkspace
-              token={token}
-              user={user}
-              onOpenChannel={() => {
-                setWorkspace('server');
-                if (isMobile) setMobileChatOpen(true);
-              }}
-            />
+            <div className="stack workspace-sidebar-summary">
+              <section className="sidebar-card">
+                <p className="section-label">Spaces</p>
+                <strong>Community overview</strong>
+                <p className="muted">Events, decisions and scheduled messages are open in the main panel.</p>
+              </section>
+            </div>
           ) : workspace === 'activity' ? (
-            <ActivityCenter token={token} onNavigate={navigateFromActivity} />
+            <div className="stack workspace-sidebar-summary">
+              <section className="sidebar-card">
+                <p className="section-label">Activity</p>
+                <strong>Updates that need you</strong>
+                <p className="muted">Mentions, replies, calls and event reminders.</p>
+              </section>
+            </div>
           ) : workspace === 'stories' ? (
             <div className="stack">
               <section className="sidebar-card">
@@ -8421,7 +8759,18 @@ export default function App() {
             />
           ) : null}
 
-          {workspace === 'stories' ? (
+          {workspace === 'spaces' ? (
+            <SpacesWorkspace
+              token={token}
+              user={user}
+              onOpenChannel={() => {
+                setWorkspace('server');
+                if (isMobile) setMobileChatOpen(true);
+              }}
+            />
+          ) : workspace === 'activity' ? (
+            <ActivityCenter token={token} onNavigate={navigateFromActivity} />
+          ) : workspace === 'stories' ? (
             <StoriesPanel
               stories={stories}
               user={user}
@@ -8648,9 +8997,11 @@ export default function App() {
       <GlobalSearchPalette
         open={globalSearchOpen}
         query={globalSearchQuery}
+        scope={globalSearchScope}
         loading={globalSearchLoading}
         results={globalSearchResults}
         onQueryChange={setGlobalSearchQuery}
+        onScopeChange={setGlobalSearchScope}
         onOpenResult={openGlobalSearchResult}
         onClose={() => setGlobalSearchOpen(false)}
       />

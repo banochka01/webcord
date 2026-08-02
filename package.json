@@ -1,6 +1,6 @@
 {
   "name": "webcord-native-clients",
-  "version": "4.0.0",
+  "version": "4.1.0",
   "private": true,
   "scripts": {
     "postinstall": "node scripts/patch-capacitor-gradle.cjs",
@@ -27,9 +27,12 @@
     "native:test": "powershell -ExecutionPolicy Bypass -File scripts/flutter-native.ps1 test",
     "native:android:debug": "powershell -ExecutionPolicy Bypass -File scripts/flutter-native.ps1 build apk --debug --dart-define=WEBCORD_API_URL=https://webcordes.ru/api",
     "native:android:release": "powershell -ExecutionPolicy Bypass -File scripts/flutter-native.ps1 build apk --release --dart-define=WEBCORD_API_URL=https://webcordes.ru/api",
-    "native:windows:release": "powershell -ExecutionPolicy Bypass -File scripts/flutter-native.ps1 build windows --release --dart-define=WEBCORD_API_URL=https://webcordes.ru/api",
+    "native:windows:release": "powershell -ExecutionPolicy Bypass -File scripts/flutter-native.ps1 pub get && powershell -ExecutionPolicy Bypass -File scripts/prepare-flutter-windows.ps1 && powershell -ExecutionPolicy Bypass -File scripts/flutter-native.ps1 build windows --release --no-pub --dart-define=WEBCORD_API_URL=https://webcordes.ru/api",
     "native:release": "npm.cmd run native:android:release && npm.cmd run native:windows:release",
-    "clients:release": "npm.cmd run native:release"
+    "clients:release": "npm.cmd run native:release",
+    "clients:package": "powershell -ExecutionPolicy Bypass -File scripts/package-native-release.ps1 -SkipBuild",
+    "clients:release:package": "powershell -ExecutionPolicy Bypass -File scripts/package-native-release.ps1",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@capacitor/android": "^8.0.0",
@@ -39,6 +42,7 @@
     "@capacitor/status-bar": "^8.0.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "@capacitor/cli": "^8.0.0",
     "@tauri-apps/cli": "^2.10.1"
   }

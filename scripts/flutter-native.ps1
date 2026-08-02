@@ -75,6 +75,10 @@ if ($FlutterArgs.Count -eq 0) {
   $FlutterArgs = @("doctor", "-v")
 }
 
+if ($FlutterArgs[0] -eq 'build') {
+  & (Join-Path $PSScriptRoot 'sync-native-icons.ps1')
+}
+
 Push-Location $clientRoot
 try {
   & (Join-Path $flutterRoot "bin\flutter.bat") @FlutterArgs

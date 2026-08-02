@@ -159,6 +159,30 @@ class WebCordApi {
     );
   }
 
+  Future<void> saveDevicePushToken({
+    required String authToken,
+    required String token,
+  }) async {
+    await _send(
+      'PUT',
+      '/push/device-token',
+      token: authToken,
+      body: {'token': token, 'platform': 'ANDROID'},
+    );
+  }
+
+  Future<void> removeDevicePushToken({
+    required String authToken,
+    required String token,
+  }) async {
+    await _send(
+      'DELETE',
+      '/push/device-token',
+      token: authToken,
+      body: {'token': token},
+    );
+  }
+
   Future<List<Map<String, dynamic>>> voiceIceServers(String token) async {
     final json = await _send('GET', '/voice/ice-servers', token: token);
     final servers = json is Map<String, dynamic> ? json['iceServers'] : null;
@@ -827,7 +851,7 @@ class WebCordApi {
       'POST' => await http.post(uri, headers: headers, body: encodedBody),
       'PUT' => await http.put(uri, headers: headers, body: encodedBody),
       'PATCH' => await http.patch(uri, headers: headers, body: encodedBody),
-      'DELETE' => await http.delete(uri, headers: headers),
+      'DELETE' => await http.delete(uri, headers: headers, body: encodedBody),
       _ => throw ArgumentError('Unsupported method: $method'),
     };
 

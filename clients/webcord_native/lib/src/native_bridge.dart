@@ -47,6 +47,18 @@ class NativeBridge {
     }
     return null;
   }
+
+  static Future<bool> showNotification({
+    required String title,
+    required String body,
+  }) async {
+    if (!Platform.isAndroid) return false;
+    return await _channel.invokeMethod<bool>('showNotification', {
+          'title': title,
+          'body': body,
+        }) ??
+        false;
+  }
 }
 
 class NativeStore {

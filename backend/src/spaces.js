@@ -11,6 +11,8 @@ const ACTIVITY_KINDS = new Set([
   'SYSTEM'
 ]);
 const RSVP_STATUSES = new Set(['GOING', 'INTERESTED', 'NOT_GOING']);
+const SPACE_ROLE_RANK = Object.freeze({ MEMBER: 0, MODERATOR: 1, ADMIN: 2, OWNER: 3 });
+const SPACE_ROLES = new Set(Object.keys(SPACE_ROLE_RANK));
 
 function positiveInt(value) {
   const parsed = Number(value);
@@ -139,6 +141,45 @@ export function installSpacesRoutes({
   createDirectConversationMessage,
   getConversationMemberIds
 }) {
+  function spaceAccessError(minimumRole = 'MEMBER') {
+    const error = new Error(minimumRole === 'MEMBER'
+      ? 'You do not have access to this community.'
+      : 'Your community role does not allow this action.');
+    error.status = 403;
+    error.code = 'SPACE_ACCESS_DENIED';
+    return error;
+  }
+
+  async function membershipFor(guildId, userId) {
+    if (!guildId || !userId) return null;
+    return prisma.guildMember.findUnique({
+      where: { guildId_userId: { guildId: Number(guildId), userId: Number(userId) } },
+      include: { user: { select: publicUserSelect } }
+    });
+  }
+
+  async function requireSpaceRole(guildId, userId, minimumRole = 'MEMBER') {
+    const membership = await membershipFor(guildId, userId);
+    if (!membership || SPACE_ROLE_RANK[membership.role] < SPACE_ROLE_RANK[minimumRole]) {
+      throw spaceAccessError(minimumRole);
+    }
+    return membership;
+  }
+
+  async function guildIdForChannel(channelId) {
+    const channel = await prisma.channel.findUnique({
+      where: { id: Number(channelId) },
+      select: { guildId: true }
+    });
+    return channel?.guildId || null;
+  }
+
+  async function recordSpaceAudit({ guildId, actorId = null, targetUserId = null, action, metadata = null }) {
+    return prisma.guildAuditLog.create({
+      data: { guildId, actorId, targetUserId, action, metadata }
+    });
+  }
+
   const messageInclude = {
     author: { select: publicUserSelect },
     reactions: { select: { emoji: true, userId: true } },
@@ -237,6 +278,7 @@ export function installSpacesRoutes({
         include: messageInclude
       });
       if (!root) return apiError(res, 404, 'MESSAGE_NOT_FOUND', 'Message not found.');
+      await requireSpaceRole(await guildIdForChannel(root.channelId), req.user.userId);
       const replies = await prisma.message.findMany({
         where: { replyToId: messageId, channelId: root.channelId, deletedAt: null },
         orderBy: { createdAt: 'asc' },
@@ -249,7 +291,7 @@ export function installSpacesRoutes({
       });
     } catch (error) {
       console.error('Thread fetch failed:', error);
-      return apiError(res, 500, 'THREAD_FETCH_FAILED', 'Failed to load thread.');
+      return apiError(res, error?.status || 500, error?.code || 'THREAD_FETCH_FAILED', error?.message || 'Failed to load thread.');
     }
   });
 
@@ -394,6 +436,9 @@ export function installSpacesRoutes({
       if (poll.conversationId && !await conversationForMember(poll.conversationId, req.user.userId)) {
         return apiError(res, 404, 'POLL_NOT_FOUND', 'Poll not found.');
       }
+      if (poll.channelId) {
+        await requireSpaceRole(await guildIdForChannel(poll.channelId), req.user.userId);
+      }
       const validIds = new Set(poll.options.map((option) => option.id));
       const selected = optionIds.filter((id) => validIds.has(id));
       if (!poll.allowsMultiple && selected.length > 1) {
@@ -424,14 +469,27 @@ export function installSpacesRoutes({
       return res.json(serialized);
     } catch (error) {
       console.error('Poll vote failed:', error);
-      return apiError(res, 500, 'POLL_VOTE_FAILED', 'Failed to update vote.');
+      return apiError(res, error?.status || 500, error?.code || 'POLL_VOTE_FAILED', error?.message || 'Failed to update vote.');
     }
   });
 
   app.get('/api/spaces', authMiddleware, async (req, res) => {
     try {
-      const guild = await prisma.guild.findFirst({ orderBy: { id: 'asc' } });
-      if (!guild) return apiError(res, 404, 'SPACE_NOT_FOUND', 'Community not found.');
+      const requestedGuildId = positiveInt(req.query.guildId);
+      const memberships = await prisma.guildMember.findMany({
+        where: { userId: req.user.userId },
+        orderBy: { joinedAt: 'asc' },
+        include: {
+          guild: { include: { channels: { orderBy: [{ type: 'asc' }, { id: 'asc' }] } } }
+        }
+      });
+      const selected = requestedGuildId
+        ? memberships.find((item) => item.guildId === requestedGuildId)
+        : memberships[0];
+      if (!selected) {
+        return res.json({ guild: null, guilds: [], membership: null, activityCount: 0, scheduledCount: 0, events: [], activePolls: [] });
+      }
+      const guild = selected.guild;
       const [events, activePolls, activityCount, scheduledCount] = await Promise.all([
         prisma.communityEvent.findMany({
           where: { guildId: guild.id, startsAt: { gte: new Date(Date.now() - 86_400_000) } },
@@ -456,6 +514,14 @@ export function installSpacesRoutes({
       ]);
       return res.json({
         guild,
+        guilds: memberships.map((item) => ({
+          id: item.guild.id,
+          name: item.guild.name,
+          iconUrl: item.guild.iconUrl,
+          accentColor: item.guild.accentColor,
+          membership: { role: item.role, joinedAt: item.joinedAt }
+        })),
+        membership: { role: selected.role, joinedAt: selected.joinedAt },
         activityCount,
         scheduledCount,
         events: events.map((item) => serializeEvent(item, req.user.userId)),
@@ -463,7 +529,7 @@ export function installSpacesRoutes({
       });
     } catch (error) {
       console.error('Spaces fetch failed:', error);
-      return apiError(res, 500, 'SPACES_FETCH_FAILED', 'Failed to load Spaces.');
+      return apiError(res, error?.status || 500, error?.code || 'SPACES_FETCH_FAILED', error?.message || 'Failed to load Spaces.');
     }
   });
 
@@ -476,6 +542,7 @@ export function installSpacesRoutes({
       if (!guildId || !title || !startsAt || startsAt.getTime() < Date.now() - 60_000) {
         return apiError(res, 400, 'INVALID_EVENT', 'Choose a title and a future start time.');
       }
+      await requireSpaceRole(guildId, req.user.userId, 'MODERATOR');
       const event = await prisma.communityEvent.create({
         data: {
           guildId,
@@ -493,7 +560,7 @@ export function installSpacesRoutes({
       return res.status(201).json(serializeEvent(event, req.user.userId));
     } catch (error) {
       console.error('Event create failed:', error);
-      return apiError(res, 500, 'EVENT_CREATE_FAILED', 'Failed to create event.');
+      return apiError(res, error?.status || 500, error?.code || 'EVENT_CREATE_FAILED', error?.message || 'Failed to create event.');
     }
   });
 
@@ -506,6 +573,7 @@ export function installSpacesRoutes({
       }
       const event = await prisma.communityEvent.findUnique({ where: { id: eventId } });
       if (!event) return apiError(res, 404, 'EVENT_NOT_FOUND', 'Event not found.');
+      await requireSpaceRole(event.guildId, req.user.userId);
       await prisma.communityEventRsvp.upsert({
         where: { eventId_userId: { eventId, userId: req.user.userId } },
         create: { eventId, userId: req.user.userId, status },
@@ -519,13 +587,17 @@ export function installSpacesRoutes({
       return res.json(serializeEvent(updated, req.user.userId));
     } catch (error) {
       console.error('Event RSVP failed:', error);
-      return apiError(res, 500, 'EVENT_RSVP_FAILED', 'Failed to update RSVP.');
+      return apiError(res, error?.status || 500, error?.code || 'EVENT_RSVP_FAILED', error?.message || 'Failed to update RSVP.');
     }
   });
 
-  app.get('/api/invites', authMiddleware, adminMiddleware, async (req, res) => {
+  app.get('/api/invites', authMiddleware, async (req, res) => {
     try {
+      const guildId = positiveInt(req.query.guildId);
+      if (!guildId) return apiError(res, 400, 'INVALID_GUILD_ID', 'Invalid community id.');
+      await requireSpaceRole(guildId, req.user.userId, 'ADMIN');
       const invites = await prisma.guildInvite.findMany({
+        where: { guildId },
         orderBy: { createdAt: 'desc' },
         take: 50,
         include: { guild: true, creator: { select: publicUserSelect } }
@@ -533,14 +605,15 @@ export function installSpacesRoutes({
       return res.json(invites);
     } catch (error) {
       console.error('Invite fetch failed:', error);
-      return apiError(res, 500, 'INVITE_FETCH_FAILED', 'Failed to load invite links.');
+      return apiError(res, error?.status || 500, error?.code || 'INVITE_FETCH_FAILED', error?.message || 'Failed to load invite links.');
     }
   });
 
-  app.post('/api/invites', authMiddleware, adminMiddleware, async (req, res) => {
+  app.post('/api/invites', authMiddleware, async (req, res) => {
     try {
       const guildId = positiveInt(req.body.guildId);
       if (!guildId) return apiError(res, 400, 'INVALID_GUILD_ID', 'Invalid community id.');
+      await requireSpaceRole(guildId, req.user.userId, 'ADMIN');
       const expiresInHours = Math.min(24 * 365, Math.max(1, Number(req.body.expiresInHours) || 168));
       const maxUses = positiveInt(req.body.maxUses);
       const invite = await prisma.guildInvite.create({
@@ -553,10 +626,31 @@ export function installSpacesRoutes({
         },
         include: { guild: true, creator: { select: publicUserSelect } }
       });
+      await recordSpaceAudit({ guildId, actorId: req.user.userId, action: 'INVITE_CREATED', metadata: { inviteId: invite.id, expiresAt: invite.expiresAt, maxUses: invite.maxUses } });
       return res.status(201).json(invite);
     } catch (error) {
       console.error('Invite create failed:', error);
-      return apiError(res, 500, 'INVITE_CREATE_FAILED', 'Failed to create invite link.');
+      return apiError(res, error?.status || 500, error?.code || 'INVITE_CREATE_FAILED', error?.message || 'Failed to create invite link.');
+    }
+  });
+
+  app.delete('/api/invites/:inviteId', authMiddleware, async (req, res) => {
+    try {
+      const inviteId = positiveInt(req.params.inviteId);
+      if (!inviteId) return apiError(res, 400, 'INVALID_INVITE_ID', 'Invalid invite id.');
+      const existing = await prisma.guildInvite.findUnique({ where: { id: inviteId } });
+      if (!existing) return apiError(res, 404, 'INVITE_NOT_FOUND', 'Invite link was not found.');
+      await requireSpaceRole(existing.guildId, req.user.userId, 'ADMIN');
+      const invite = await prisma.guildInvite.update({
+        where: { id: inviteId },
+        data: { revokedAt: new Date() },
+        include: { guild: true, creator: { select: publicUserSelect } }
+      });
+      await recordSpaceAudit({ guildId: existing.guildId, actorId: req.user.userId, action: 'INVITE_REVOKED', metadata: { inviteId } });
+      return res.json(invite);
+    } catch (error) {
+      console.error('Invite revoke failed:', error);
+      return apiError(res, error?.status || 500, error?.code || 'INVITE_REVOKE_FAILED', error?.message || 'Failed to revoke invite link.');
     }
   });
 
@@ -586,20 +680,136 @@ export function installSpacesRoutes({
     }
   });
 
-  app.patch('/api/channels/:channelId/slow-mode', authMiddleware, adminMiddleware, async (req, res) => {
+  app.post('/api/invites/:code/accept', authMiddleware, async (req, res) => {
+    try {
+      const code = cleanText(req.params.code, 80);
+      const membership = await prisma.$transaction(async (tx) => {
+        const invite = await tx.guildInvite.findUnique({ where: { code } });
+        const unavailable = !invite
+          || invite.revokedAt
+          || (invite.expiresAt && invite.expiresAt.getTime() <= Date.now())
+          || (invite.maxUses && invite.uses >= invite.maxUses);
+        if (unavailable) {
+          const error = new Error('Invite link is unavailable.');
+          error.status = 404;
+          error.code = 'INVITE_NOT_FOUND';
+          throw error;
+        }
+        const existing = await tx.guildMember.findUnique({
+          where: { guildId_userId: { guildId: invite.guildId, userId: req.user.userId } }
+        });
+        const member = existing || await tx.guildMember.create({
+          data: { guildId: invite.guildId, userId: req.user.userId }
+        });
+        if (!existing) {
+          await tx.guildInvite.update({ where: { id: invite.id }, data: { uses: { increment: 1 } } });
+          await tx.guildAuditLog.create({
+            data: { guildId: invite.guildId, actorId: req.user.userId, targetUserId: req.user.userId, action: 'MEMBER_JOINED', metadata: { inviteId: invite.id } }
+          });
+        }
+        return member;
+      });
+      return res.json({ ok: true, membership });
+    } catch (error) {
+      console.error('Invite accept failed:', error);
+      return apiError(res, error?.status || 500, error?.code || 'INVITE_ACCEPT_FAILED', error?.message || 'Failed to join community.');
+    }
+  });
+
+  app.get('/api/spaces/:guildId/members', authMiddleware, async (req, res) => {
+    try {
+      const guildId = positiveInt(req.params.guildId);
+      await requireSpaceRole(guildId, req.user.userId);
+      const members = await prisma.guildMember.findMany({
+        where: { guildId },
+        orderBy: [{ role: 'desc' }, { joinedAt: 'asc' }],
+        include: { user: { select: publicUserSelect } }
+      });
+      return res.json(members);
+    } catch (error) {
+      return apiError(res, error?.status || 500, error?.code || 'SPACE_MEMBERS_FETCH_FAILED', error?.message || 'Failed to load members.');
+    }
+  });
+
+  app.patch('/api/spaces/:guildId/members/:userId', authMiddleware, async (req, res) => {
+    try {
+      const guildId = positiveInt(req.params.guildId);
+      const targetUserId = positiveInt(req.params.userId);
+      const role = cleanText(req.body.role, 20).toUpperCase();
+      const actor = await requireSpaceRole(guildId, req.user.userId, 'ADMIN');
+      if (!targetUserId || !SPACE_ROLES.has(role)) return apiError(res, 400, 'INVALID_SPACE_ROLE', 'Choose a valid community role.');
+      if (role === 'OWNER' && actor.role !== 'OWNER') throw spaceAccessError('OWNER');
+      const target = await membershipFor(guildId, targetUserId);
+      if (!target) return apiError(res, 404, 'SPACE_MEMBER_NOT_FOUND', 'Community member not found.');
+      if (SPACE_ROLE_RANK[target.role] >= SPACE_ROLE_RANK[actor.role] && targetUserId !== req.user.userId) throw spaceAccessError(target.role);
+      if (target.role === 'OWNER' && role !== 'OWNER') {
+        const ownerCount = await prisma.guildMember.count({ where: { guildId, role: 'OWNER' } });
+        if (ownerCount <= 1) return apiError(res, 409, 'LAST_SPACE_OWNER_REQUIRED', 'At least one community owner must remain.');
+      }
+      const updated = await prisma.guildMember.update({
+        where: { guildId_userId: { guildId, userId: targetUserId } },
+        data: { role },
+        include: { user: { select: publicUserSelect } }
+      });
+      await recordSpaceAudit({ guildId, actorId: req.user.userId, targetUserId, action: 'MEMBER_ROLE_CHANGED', metadata: { from: target.role, to: role } });
+      io.to(`guild:${guildId}`).emit('spaces:refresh');
+      return res.json(updated);
+    } catch (error) {
+      return apiError(res, error?.status || 500, error?.code || 'SPACE_ROLE_UPDATE_FAILED', error?.message || 'Failed to update member role.');
+    }
+  });
+
+  app.delete('/api/spaces/:guildId/members/:userId', authMiddleware, async (req, res) => {
+    try {
+      const guildId = positiveInt(req.params.guildId);
+      const targetUserId = positiveInt(req.params.userId);
+      const actor = await requireSpaceRole(guildId, req.user.userId, 'ADMIN');
+      const target = await membershipFor(guildId, targetUserId);
+      if (!target) return apiError(res, 404, 'SPACE_MEMBER_NOT_FOUND', 'Community member not found.');
+      if (target.role === 'OWNER' || SPACE_ROLE_RANK[target.role] >= SPACE_ROLE_RANK[actor.role]) throw spaceAccessError(target.role);
+      await prisma.guildMember.delete({ where: { guildId_userId: { guildId, userId: targetUserId } } });
+      await recordSpaceAudit({ guildId, actorId: req.user.userId, targetUserId, action: 'MEMBER_REMOVED' });
+      io.to(`guild:${guildId}`).emit('spaces:refresh');
+      return res.json({ ok: true });
+    } catch (error) {
+      return apiError(res, error?.status || 500, error?.code || 'SPACE_MEMBER_REMOVE_FAILED', error?.message || 'Failed to remove member.');
+    }
+  });
+
+  app.get('/api/spaces/:guildId/audit-log', authMiddleware, async (req, res) => {
+    try {
+      const guildId = positiveInt(req.params.guildId);
+      await requireSpaceRole(guildId, req.user.userId, 'MODERATOR');
+      const entries = await prisma.guildAuditLog.findMany({
+        where: { guildId },
+        orderBy: { createdAt: 'desc' },
+        take: 80,
+        include: { actor: { select: publicUserSelect }, targetUser: { select: publicUserSelect } }
+      });
+      return res.json(entries);
+    } catch (error) {
+      return apiError(res, error?.status || 500, error?.code || 'SPACE_AUDIT_FETCH_FAILED', error?.message || 'Failed to load audit log.');
+    }
+  });
+
+  app.patch('/api/channels/:channelId/slow-mode', authMiddleware, async (req, res) => {
     try {
       const channelId = positiveInt(req.params.channelId);
       const slowModeSeconds = Math.min(21_600, Math.max(0, Math.round(Number(req.body.seconds) || 0)));
       if (!channelId) return apiError(res, 400, 'INVALID_CHANNEL_ID', 'Invalid channel id.');
+      const guildId = await guildIdForChannel(channelId);
+      if (!guildId) return apiError(res, 404, 'CHANNEL_NOT_FOUND', 'Channel not found.');
+      await requireSpaceRole(guildId, req.user.userId, 'MODERATOR');
       const channel = await prisma.channel.update({
         where: { id: channelId },
         data: { slowModeSeconds }
       });
+      await recordSpaceAudit({ guildId, actorId: req.user.userId, action: 'SLOW_MODE_CHANGED', metadata: { channelId, seconds: slowModeSeconds } });
       io.to(`guild:${channel.guildId}`).emit('channel-updated', channel);
       return res.json(channel);
     } catch (error) {
       console.error('Slow mode update failed:', error);
-      return apiError(res, 500, 'SLOW_MODE_UPDATE_FAILED', 'Failed to update slow mode.');
+      return apiError(res, error?.status || 500, error?.code || 'SLOW_MODE_UPDATE_FAILED', error?.message || 'Failed to update slow mode.');
     }
   });
 
@@ -629,6 +839,11 @@ export function installSpacesRoutes({
       if (conversationId && !await conversationForMember(conversationId, req.user.userId)) {
         return apiError(res, 404, 'CONVERSATION_NOT_FOUND', 'Conversation not found.');
       }
+      if (channelId) {
+        const guildId = await guildIdForChannel(channelId);
+        if (!guildId) return apiError(res, 404, 'CHANNEL_NOT_FOUND', 'Channel not found.');
+        await requireSpaceRole(guildId, req.user.userId);
+      }
       const scheduled = await prisma.scheduledMessage.create({
         data: {
           senderId: req.user.userId,
@@ -646,7 +861,7 @@ export function installSpacesRoutes({
       return res.status(201).json(scheduled);
     } catch (error) {
       console.error('Schedule create failed:', error);
-      return apiError(res, 500, 'SCHEDULE_CREATE_FAILED', 'Failed to schedule message.');
+      return apiError(res, error?.status || 500, error?.code || 'SCHEDULE_CREATE_FAILED', error?.message || 'Failed to schedule message.');
     }
   });
 
@@ -661,80 +876,6 @@ export function installSpacesRoutes({
     } catch (error) {
       console.error('Schedule delete failed:', error);
       return apiError(res, 500, 'SCHEDULE_DELETE_FAILED', 'Failed to cancel scheduled message.');
-    }
-  });
-
-  app.get('/api/search', authMiddleware, async (req, res) => {
-    try {
-      const query = cleanText(req.query.q, 120);
-      const authorId = positiveInt(req.query.authorId);
-      const before = parseDate(req.query.before);
-      const after = parseDate(req.query.after);
-      const type = cleanText(req.query.type, 20).toLowerCase();
-      if (query.length < 2) return res.json({ results: [] });
-      const dateFilter = {
-        ...(before ? { lte: before } : {}),
-        ...(after ? { gte: after } : {})
-      };
-      const textWhere = {
-        deletedAt: null,
-        ...(authorId ? { authorId } : {}),
-        ...(before || after ? { createdAt: dateFilter } : {}),
-        OR: [
-          { content: { contains: query, mode: 'insensitive' } },
-          { attachmentName: { contains: query, mode: 'insensitive' } },
-          { transcript: { contains: query, mode: 'insensitive' } }
-        ]
-      };
-      const conversations = await prisma.directConversation.findMany({
-        where: {
-          OR: [
-            { userOneId: req.user.userId },
-            { userTwoId: req.user.userId },
-            { members: { some: { userId: req.user.userId } } }
-          ]
-        },
-        select: { id: true }
-      });
-      const conversationIds = conversations.map((item) => item.id);
-      const [channelMessages, directMessages] = await Promise.all([
-        type === 'dm' ? [] : prisma.message.findMany({
-          where: textWhere,
-          orderBy: { createdAt: 'desc' },
-          take: 40,
-          include: { author: { select: publicUserSelect }, channel: true }
-        }),
-        type === 'channel' ? [] : prisma.directMessage.findMany({
-          where: { ...textWhere, conversationId: { in: conversationIds } },
-          orderBy: { createdAt: 'desc' },
-          take: 40,
-          include: { author: { select: publicUserSelect }, conversation: true }
-        })
-      ]);
-      const results = [
-        ...channelMessages.map((message) => ({
-          type: 'channel',
-          id: message.id,
-          channelId: message.channelId,
-          title: `#${message.channel.name}`,
-          content: message.content || message.transcript || message.attachmentName,
-          createdAt: message.createdAt,
-          author: message.author
-        })),
-        ...directMessages.map((message) => ({
-          type: 'dm',
-          id: message.id,
-          conversationId: message.conversationId,
-          title: message.conversation.title || 'Direct message',
-          content: message.content || message.transcript || message.attachmentName,
-          createdAt: message.createdAt,
-          author: message.author
-        }))
-      ].sort((left, right) => new Date(right.createdAt) - new Date(left.createdAt)).slice(0, 60);
-      return res.json({ results });
-    } catch (error) {
-      console.error('Global search failed:', error);
-      return apiError(res, 500, 'SEARCH_FAILED', 'Failed to search messages.');
     }
   });
 

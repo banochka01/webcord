@@ -16,7 +16,14 @@ import {
   isPushQuietHours,
   normalizePushPreferences
 } from './push-utils.js';
+import { firebasePushConfigured, sendFirebasePushToUsers } from './firebase-push.js';
 import { installSpacesRoutes, recordActivity } from './spaces.js';
+import {
+  buildMessageSearchWhere,
+  conversationMatchesQuery,
+  normalizeSearchScope,
+  parseSearchDate
+} from './search-utils.js';
 
 const app = express();
 const server = http.createServer(app);
@@ -214,6 +221,7 @@ const ATTACHMENT_TYPES = new Set(['IMAGE', 'VIDEO', 'AUDIO', 'CIRCLE_VIDEO', 'FI
 const STORY_MEDIA_TYPES = new Set(['IMAGE', 'VIDEO']);
 const USER_ROLES = new Set(['USER', 'ADMIN', 'OWNER']);
 const ADMIN_ROLES = new Set(['ADMIN', 'OWNER']);
+const GUILD_ROLE_RANK = Object.freeze({ MEMBER: 0, MODERATOR: 1, ADMIN: 2, OWNER: 3 });
 const REPORT_TARGET_TYPES = new Set(['USER', 'MESSAGE', 'DIRECT_MESSAGE']);
 const REPORT_STATUSES = new Set(['OPEN', 'REVIEWED', 'RESOLVED', 'DISMISSED']);
 const MODERATION_ACTIONS = new Set(['MUTE', 'UNMUTE', 'BAN', 'UNBAN']);
@@ -250,6 +258,46 @@ function isAdminUser(user = {}) {
 
 function canManageUserRoles(user = {}) {
   return getEffectiveUserRole(user) === 'OWNER';
+}
+
+function guildRoleFromUser(user = {}) {
+  const role = getEffectiveUserRole(user);
+  return role === 'OWNER' ? 'OWNER' : role === 'ADMIN' ? 'ADMIN' : 'MEMBER';
+}
+
+async function getGuildMembership(guildId, userId) {
+  if (!guildId || !userId) return null;
+  return prisma.guildMember.findUnique({
+    where: { guildId_userId: { guildId: Number(guildId), userId: Number(userId) } }
+  });
+}
+
+async function assertGuildRole(guildId, userId, minimumRole = 'MEMBER') {
+  const membership = await getGuildMembership(guildId, userId);
+  if (!membership || GUILD_ROLE_RANK[membership.role] < GUILD_ROLE_RANK[minimumRole]) {
+    throw createApiError(403, 'SPACE_ACCESS_DENIED', 'You do not have access to this community.');
+  }
+  return membership;
+}
+
+async function assertChannelMembership(channelId, userId, minimumRole = 'MEMBER') {
+  const channel = await prisma.channel.findUnique({
+    where: { id: Number(channelId) },
+    select: { id: true, guildId: true, type: true }
+  });
+  if (!channel) throw createApiError(404, 'CHANNEL_NOT_FOUND', 'Channel not found.');
+  await assertGuildRole(channel.guildId, userId, minimumRole);
+  return channel;
+}
+
+async function assertMessageMembership(messageId, userId, minimumRole = 'MEMBER') {
+  const message = await prisma.message.findUnique({
+    where: { id: Number(messageId) },
+    select: { id: true, channel: { select: { guildId: true } } }
+  });
+  if (!message) throw createApiError(404, 'MESSAGE_NOT_FOUND', 'Message not found.');
+  await assertGuildRole(message.channel.guildId, userId, minimumRole);
+  return message;
 }
 
 function getVoiceIceServers() {
@@ -410,33 +458,33 @@ async function getReadinessSnapshot() {
 }
 
 async function sendPushToUsers(userIds, payload, { direct = false, mention = false } = {}) {
-  if (!WEB_PUSH_ENABLED) return;
   const uniqueIds = [...new Set(userIds.map(Number).filter(Boolean))];
   if (uniqueIds.length === 0) return;
-
-  const subscriptions = await prisma.pushSubscription.findMany({
-    where: { userId: { in: uniqueIds } }
-  });
-
-  await Promise.allSettled(subscriptions.map(async (subscription) => {
-    if (isPushQuietHours(subscription)) return;
-    if (subscription.notificationMode === 'mentions' && !direct && !mention) return;
-    try {
-      await webPush.sendNotification({
-        endpoint: subscription.endpoint,
-        keys: { p256dh: subscription.p256dh, auth: subscription.auth }
-      }, JSON.stringify(payload), {
-        TTL: 120,
-        urgency: direct || mention ? 'high' : 'normal'
-      });
-    } catch (error) {
-      if ([404, 410].includes(Number(error?.statusCode))) {
-        await prisma.pushSubscription.deleteMany({ where: { endpoint: subscription.endpoint } });
-        return;
+  const tasks = [sendFirebasePushToUsers(prisma, uniqueIds, {
+    ...payload,
+    urgent: direct || mention,
+    data: payload.data || payload
+  })];
+  if (WEB_PUSH_ENABLED) {
+    const subscriptions = await prisma.pushSubscription.findMany({ where: { userId: { in: uniqueIds } } });
+    tasks.push(Promise.allSettled(subscriptions.map(async (subscription) => {
+      if (isPushQuietHours(subscription)) return;
+      if (subscription.notificationMode === 'mentions' && !direct && !mention) return;
+      try {
+        await webPush.sendNotification({
+          endpoint: subscription.endpoint,
+          keys: { p256dh: subscription.p256dh, auth: subscription.auth }
+        }, JSON.stringify(payload), { TTL: 120, urgency: direct || mention ? 'high' : 'normal' });
+      } catch (error) {
+        if ([404, 410].includes(Number(error?.statusCode))) {
+          await prisma.pushSubscription.deleteMany({ where: { endpoint: subscription.endpoint } });
+          return;
+        }
+        console.error('Web push notification failed:', error?.message || error);
       }
-      console.error('Push notification failed:', error?.message || error);
-    }
-  }));
+    })));
+  }
+  await Promise.allSettled(tasks);
 }
 
 async function notifyChannelMentions(message, channel) {
@@ -741,12 +789,19 @@ async function assertUserCanSend(userId) {
   if (isFutureDate(user.mutedUntil)) throw createApiError(403, 'ACCOUNT_MUTED', 'This account is muted.');
 }
 
-async function userCanModerateMessages(userId) {
+async function userCanModerateMessages(userId, channelId = null) {
   const user = await prisma.user.findUnique({
     where: { id: Number(userId) },
     select: publicUserSelect
   });
-  return isAdminUser(user);
+  if (isAdminUser(user)) return true;
+  if (!channelId) return false;
+  const channel = await prisma.channel.findUnique({
+    where: { id: Number(channelId) },
+    select: { guildId: true }
+  });
+  const membership = channel ? await getGuildMembership(channel.guildId, userId) : null;
+  return Boolean(membership && GUILD_ROLE_RANK[membership.role] >= GUILD_ROLE_RANK.MODERATOR);
 }
 
 function normalizeTargetSocketId(value) {
@@ -1005,7 +1060,7 @@ function sanitizeStoryMusicPayload(body = {}) {
   };
 }
 
-async function ensureBootstrapData() {
+async function ensureBootstrapData(user = null) {
   let guild = await prisma.guild.findFirst({ orderBy: { id: 'asc' } });
 
   if (!guild) {
@@ -1031,6 +1086,14 @@ async function ensureBootstrapData() {
   if (!voiceChannel) {
     voiceChannel = await prisma.channel.create({
       data: { guildId: guild.id, name: 'General Voice', type: 'VOICE' }
+    });
+  }
+
+  if (user?.id) {
+    await prisma.guildMember.upsert({
+      where: { guildId_userId: { guildId: guild.id, userId: user.id } },
+      create: { guildId: guild.id, userId: user.id, role: guildRoleFromUser(user) },
+      update: {}
     });
   }
 
@@ -1313,6 +1376,7 @@ async function createChannelMessage({ channelId, userId, content, attachmentUrl,
   if (!channel || channel.type !== 'TEXT') {
     return null;
   }
+  await assertGuildRole(channel.guildId, userId);
 
   let replyTarget = null;
   if (replyToId) {
@@ -1326,7 +1390,7 @@ async function createChannelMessage({ channelId, userId, content, attachmentUrl,
     }
   }
 
-  if (channel.slowModeSeconds > 0 && !await userCanModerateMessages(userId)) {
+  if (channel.slowModeSeconds > 0 && !await userCanModerateMessages(userId, channel.id)) {
     const latest = await prisma.message.findFirst({
       where: { channelId, authorId: userId, deletedAt: null },
       orderBy: { createdAt: 'desc' },
@@ -1516,7 +1580,7 @@ app.get('/api/ready', async (_req, res) => {
 });
 
 app.get('/api/push/vapid-public-key', (_req, res) => {
-  res.json({ enabled: WEB_PUSH_ENABLED, publicKey: WEB_PUSH_ENABLED ? VAPID_PUBLIC_KEY : '' });
+  res.json({ enabled: WEB_PUSH_ENABLED, nativeEnabled: firebasePushConfigured(), publicKey: WEB_PUSH_ENABLED ? VAPID_PUBLIC_KEY : '' });
 });
 
 app.get('/api/voice/ice-servers', authMiddleware, (_req, res) => {
@@ -1585,7 +1649,7 @@ app.post('/api/auth/register', authRateLimit, async (req, res) => {
       }
     });
 
-    await ensureBootstrapData();
+    await ensureBootstrapData(user);
 
     return res.status(201).json({
       token: signToken(user),
@@ -1615,7 +1679,7 @@ app.post('/api/auth/login', authRateLimit, async (req, res) => {
       return sendApiError(res, 403, 'ACCOUNT_BANNED', 'This account is banned.');
     }
 
-    await ensureBootstrapData();
+    await ensureBootstrapData(user);
 
     return res.json({
       token: signToken(user),
@@ -1952,6 +2016,8 @@ app.post('/api/admin/users/:userId/moderation', authMiddleware, adminMiddleware,
 app.get('/api/bootstrap', authMiddleware, async (req, res) => {
   try {
     const { guild, textChannel, voiceChannel } = await ensureBootstrapData();
+    const membership = await getGuildMembership(guild.id, req.user.userId);
+    if (!membership) return sendApiError(res, 403, 'SPACE_ACCESS_DENIED', 'You do not have access to this community.');
     const channels = await prisma.channel.findMany({
       where: { guildId: guild.id },
       orderBy: [{ type: 'asc' }, { id: 'asc' }]
@@ -1973,7 +2039,7 @@ app.get('/api/bootstrap', authMiddleware, async (req, res) => {
     }
 
     return res.json({
-      guild,
+      guild: { ...guild, membership: { role: membership.role, joinedAt: membership.joinedAt } },
       channels,
       social,
       currentUser: serializePublicUser(currentUser),
@@ -2094,6 +2160,35 @@ app.delete('/api/push/subscriptions', authMiddleware, async (req, res) => {
   } catch (error) {
     console.error(error);
     return sendCaughtApiError(res, error, 'PUSH_UNSUBSCRIBE_FAILED', 'Failed to remove push subscription.');
+  }
+});
+
+app.put('/api/push/device-token', authMiddleware, async (req, res) => {
+  try {
+    const token = String(req.body?.token || '').trim();
+    const platform = String(req.body?.platform || 'ANDROID').trim().toUpperCase();
+    if (token.length < 32 || token.length > 4_096 || !['ANDROID', 'IOS'].includes(platform)) {
+      return sendApiError(res, 400, 'INVALID_DEVICE_TOKEN', 'Invalid device push token.');
+    }
+    const record = await prisma.devicePushToken.upsert({
+      where: { token },
+      create: { token, platform, userId: req.user.userId },
+      update: { platform, userId: req.user.userId }
+    });
+    return res.json({ ok: true, id: record.id, nativeEnabled: firebasePushConfigured() });
+  } catch (error) {
+    return sendCaughtApiError(res, error, 'DEVICE_TOKEN_SAVE_FAILED', 'Failed to save device push token.');
+  }
+});
+
+app.delete('/api/push/device-token', authMiddleware, async (req, res) => {
+  try {
+    const token = String(req.body?.token || '').trim();
+    if (!token) return sendApiError(res, 400, 'DEVICE_TOKEN_REQUIRED', 'Device push token is required.');
+    await prisma.devicePushToken.deleteMany({ where: { token, userId: req.user.userId } });
+    return res.json({ ok: true });
+  } catch (error) {
+    return sendCaughtApiError(res, error, 'DEVICE_TOKEN_REMOVE_FAILED', 'Failed to remove device push token.');
   }
 });
 
@@ -2405,34 +2500,57 @@ app.get('/api/social', authMiddleware, async (req, res) => {
 
 app.get('/api/search', authMiddleware, async (req, res) => {
   try {
-    const query = normalizeMessageMetadata(req.query.q, 80);
+    const query = normalizeMessageMetadata(req.query.q, 120);
+    const scope = normalizeSearchScope(req.query.scope);
+    const authorId = Number.isInteger(Number(req.query.authorId)) && Number(req.query.authorId) > 0
+      ? Number(req.query.authorId)
+      : null;
+    const before = parseSearchDate(req.query.before);
+    const after = parseSearchDate(req.query.after);
     if (!query || query.length < 2) {
-      return res.json({ users: [], channelMessages: [], directMessages: [] });
+      return res.json({ scope, users: [], channels: [], conversations: [], channelMessages: [], directMessages: [] });
     }
     const social = await getSocialSnapshot(req.user.userId);
     const conversationIds = social.conversations.map((conversation) => conversation.id);
     const blockedUserIds = social.blockedUserIds || [];
-    const [users, channelMessages, directMessages] = await Promise.all([
-      prisma.user.findMany({
+    const accessibleGuildIds = (await prisma.guildMember.findMany({
+      where: { userId: req.user.userId },
+      select: { guildId: true }
+    })).map((membership) => membership.guildId);
+    const searchMessages = ['all', 'channels', 'dm', 'files'].includes(scope);
+    const messageWhere = buildMessageSearchWhere({
+      query,
+      authorId,
+      before,
+      after,
+      blockedUserIds,
+      filesOnly: scope === 'files'
+    });
+    const [users, channels, channelMessages, directMessages] = await Promise.all([
+      ['all', 'people'].includes(scope) ? prisma.user.findMany({
         where: {
           id: { notIn: blockedUserIds },
           OR: [
-            { username: { contains: query } },
-            { displayName: { contains: query } }
+            { username: { contains: query, mode: 'insensitive' } },
+            { displayName: { contains: query, mode: 'insensitive' } }
           ]
         },
         take: 12,
         select: publicUserSelect
-      }),
-      prisma.message.findMany({
+      }) : Promise.resolve([]),
+      ['all', 'channels'].includes(scope) ? prisma.channel.findMany({
         where: {
-          deletedAt: null,
-          ...(blockedUserIds.length > 0 ? { authorId: { notIn: blockedUserIds } } : {}),
-          OR: [
-            { content: { contains: query } },
-            { attachmentName: { contains: query } },
-            { transcript: { contains: query } }
-          ]
+          guildId: { in: accessibleGuildIds },
+          name: { contains: query, mode: 'insensitive' }
+        },
+        orderBy: { name: 'asc' },
+        take: 12,
+        select: { id: true, name: true, type: true, guildId: true, slowModeSeconds: true }
+      }) : Promise.resolve([]),
+      searchMessages && scope !== 'dm' ? prisma.message.findMany({
+        where: {
+          ...messageWhere,
+          channel: { guildId: { in: accessibleGuildIds } }
         },
         orderBy: { id: 'desc' },
         take: 24,
@@ -2440,26 +2558,27 @@ app.get('/api/search', authMiddleware, async (req, res) => {
           author: { select: publicUserSelect },
           channel: { select: { id: true, name: true, guildId: true } }
         }
-      }),
-      conversationIds.length === 0
+      }) : Promise.resolve([]),
+      !searchMessages || scope === 'channels' || conversationIds.length === 0
         ? Promise.resolve([])
         : prisma.directMessage.findMany({
             where: {
+              ...messageWhere,
               conversationId: { in: conversationIds },
-              deletedAt: null,
-              OR: [
-                { content: { contains: query } },
-                { attachmentName: { contains: query } },
-                { transcript: { contains: query } }
-              ]
             },
             orderBy: { id: 'desc' },
             take: 24,
             include: { author: { select: publicUserSelect } }
           })
     ]);
+    const conversations = ['all', 'dm'].includes(scope)
+      ? social.conversations.filter((conversation) => conversationMatchesQuery(conversation, query)).slice(0, 12)
+      : [];
     return res.json({
+      scope,
       users: users.map(serializePublicUser),
+      channels,
+      conversations,
       channelMessages: channelMessages.map((message) => ({
         ...message,
         author: serializePublicUser(message.author)
@@ -2542,6 +2661,7 @@ app.put('/api/messages/:messageId/bookmark', authMiddleware, messageRateLimit, a
   try {
     const messageId = parsePositiveInt(req.params.messageId);
     if (!messageId) return sendApiError(res, 400, 'INVALID_MESSAGE_ID', 'Invalid message id.');
+    await assertMessageMembership(messageId, req.user.userId);
     const message = await prisma.message.findFirst({
       where: { id: messageId, deletedAt: null },
       select: { id: true, channelId: true }
@@ -2596,6 +2716,7 @@ app.put('/api/dms/:conversationId/messages/:messageId/bookmark', authMiddleware,
 app.get('/api/messages/:messageId/history', authMiddleware, async (req, res) => {
   try {
     const messageId = parsePositiveInt(req.params.messageId);
+    await assertMessageMembership(messageId, req.user.userId);
     if (!messageId) return sendApiError(res, 400, 'INVALID_MESSAGE_ID', 'Invalid message id.');
     const message = await prisma.message.findFirst({
       where: { id: messageId, deletedAt: null },
@@ -2665,6 +2786,7 @@ app.get('/api/media', authMiddleware, async (req, res) => {
     };
     let items;
     if (channelId) {
+      await assertChannelMembership(channelId, req.user.userId);
       items = await prisma.message.findMany({
         where: { channelId, ...commonWhere },
         orderBy: { id: 'desc' },
@@ -3321,10 +3443,14 @@ app.get('/api/dms/:conversationId/messages/:messageId/context', authMiddleware, 
   }
 });
 
-app.get('/api/guilds', authMiddleware, async (_req, res) => {
+app.get('/api/guilds', authMiddleware, async (req, res) => {
   try {
-    const guilds = await prisma.guild.findMany({ orderBy: { id: 'asc' } });
-    return res.json(guilds);
+    const memberships = await prisma.guildMember.findMany({
+      where: { userId: req.user.userId },
+      orderBy: { joinedAt: 'asc' },
+      include: { guild: true }
+    });
+    return res.json(memberships.map(({ guild, role, joinedAt }) => ({ ...guild, membership: { role, joinedAt } })));
   } catch (error) {
     console.error(error);
     return res.status(500).json({ error: 'Failed to fetch guilds' });
@@ -3337,6 +3463,7 @@ app.get('/api/channels/:guildId', authMiddleware, async (req, res) => {
     if (!guildId || Number.isNaN(guildId)) {
       return res.status(400).json({ error: 'Invalid guild id' });
     }
+    await assertGuildRole(guildId, req.user.userId);
 
     const channels = await prisma.channel.findMany({
       where: { guildId },
@@ -3346,11 +3473,11 @@ app.get('/api/channels/:guildId', authMiddleware, async (req, res) => {
     return res.json(channels);
   } catch (error) {
     console.error(error);
-    return res.status(500).json({ error: 'Failed to fetch channels' });
+    return sendCaughtApiError(res, error, 'CHANNEL_FETCH_FAILED', 'Failed to fetch channels');
   }
 });
 
-app.post('/api/channels', authMiddleware, adminMiddleware, async (req, res) => {
+app.post('/api/channels', authMiddleware, async (req, res) => {
   try {
     const name = String(req.body.name || '').trim();
     const guildId = Number(req.body.guildId);
@@ -3363,6 +3490,7 @@ app.post('/api/channels', authMiddleware, adminMiddleware, async (req, res) => {
     if (!['TEXT', 'VOICE'].includes(type)) {
       return res.status(400).json({ error: 'Invalid channel type' });
     }
+    await assertGuildRole(guildId, req.user.userId, 'ADMIN');
 
     const guild = await prisma.guild.findUnique({ where: { id: guildId } });
     if (!guild) {
@@ -3377,7 +3505,7 @@ app.post('/api/channels', authMiddleware, adminMiddleware, async (req, res) => {
     return res.status(201).json(channel);
   } catch (error) {
     console.error(error);
-    return res.status(500).json({ error: 'Failed to create channel' });
+    return sendCaughtApiError(res, error, 'CHANNEL_CREATE_FAILED', 'Failed to create channel');
   }
 });
 
@@ -3387,6 +3515,7 @@ app.get('/api/messages/:channelId', authMiddleware, async (req, res) => {
     if (!channelId || Number.isNaN(channelId)) {
       return res.status(400).json({ error: 'Invalid channel id' });
     }
+    await assertChannelMembership(channelId, req.user.userId);
 
     const { limit, beforeId } = parseMessagePagination(req.query);
     const search = normalizeMessageMetadata(req.query.search, 120);
@@ -3416,7 +3545,7 @@ app.get('/api/messages/:channelId', authMiddleware, async (req, res) => {
     return res.json(messages.reverse().map((message) => serializeMessageDetails(message, req.user.userId)));
   } catch (error) {
     console.error(error);
-    return res.status(500).json({ error: 'Failed to fetch messages' });
+    return sendCaughtApiError(res, error, 'MESSAGE_FETCH_FAILED', 'Failed to fetch messages');
   }
 });
 
@@ -3427,6 +3556,7 @@ app.get('/api/messages/:channelId/context/:messageId', authMiddleware, async (re
     if (!channelId || !messageId) {
       return sendApiError(res, 400, 'INVALID_MESSAGE_CONTEXT', 'Invalid channel or message id.');
     }
+    await assertChannelMembership(channelId, req.user.userId);
     const include = messageDetailsInclude;
     const target = await prisma.message.findFirst({
       where: { id: messageId, channelId, deletedAt: null },
@@ -3567,6 +3697,7 @@ app.patch('/api/messages/:messageId', authMiddleware, messageRateLimit, async (r
     if (!messageId || Number.isNaN(messageId)) {
       return sendApiError(res, 400, 'INVALID_MESSAGE_ID', 'Invalid message id');
     }
+    await assertMessageMembership(messageId, req.user.userId);
     if (!content) {
       return sendApiError(res, 400, 'MESSAGE_EMPTY', 'Message content is required');
     }
@@ -3610,6 +3741,7 @@ app.put('/api/messages/:messageId/pin', authMiddleware, messageRateLimit, async 
     if (!messageId || Number.isNaN(messageId)) {
       return sendApiError(res, 400, 'INVALID_MESSAGE_ID', 'Invalid message id');
     }
+    await assertMessageMembership(messageId, req.user.userId, 'MODERATOR');
     const existing = await prisma.message.findUnique({ where: { id: messageId } });
     if (!existing || existing.deletedAt) {
       return sendApiError(res, 404, 'MESSAGE_NOT_FOUND', 'Message not found');
@@ -3640,6 +3772,7 @@ app.put('/api/messages/:messageId/reactions', authMiddleware, messageRateLimit, 
     if (!messageId || Number.isNaN(messageId)) {
       return sendApiError(res, 400, 'INVALID_MESSAGE_ID', 'Invalid message id');
     }
+    await assertMessageMembership(messageId, req.user.userId);
     if (!emoji) {
       return sendApiError(res, 400, 'INVALID_REACTION', 'Unsupported message reaction');
     }
@@ -3693,11 +3826,10 @@ app.delete('/api/messages/:messageId', authMiddleware, messageRateLimit, async (
     if (!messageId || Number.isNaN(messageId)) {
       return sendApiError(res, 400, 'INVALID_MESSAGE_ID', 'Invalid message id');
     }
+    await assertMessageMembership(messageId, req.user.userId);
 
-    const [existing, canModerate] = await Promise.all([
-      prisma.message.findUnique({ where: { id: messageId } }),
-      userCanModerateMessages(req.user.userId)
-    ]);
+    const existing = await prisma.message.findUnique({ where: { id: messageId } });
+    const canModerate = await userCanModerateMessages(req.user.userId, existing?.channelId);
     if (!existing || existing.deletedAt || (existing.authorId !== req.user.userId && !canModerate)) {
       return sendApiError(res, 404, 'MESSAGE_NOT_FOUND', 'Message not found');
     }
@@ -4108,23 +4240,29 @@ function emitVoiceSignal(socket, eventName, { channelId, targetSocketId, ...payl
 io.on('connection', (socket) => {
   socket.join(`user:${socket.user.userId}`);
 
-  socket.on('join-guild', ({ guildId }) => {
-    const parsedGuildId = Number(guildId);
-    if (!parsedGuildId || Number.isNaN(parsedGuildId)) return;
-    socket.join(`guild:${parsedGuildId}`);
+  socket.on('join-guild', async ({ guildId }) => {
+    try {
+      const parsedGuildId = Number(guildId);
+      if (!parsedGuildId || Number.isNaN(parsedGuildId)) return;
+      await assertGuildRole(parsedGuildId, socket.user.userId);
+      socket.join(`guild:${parsedGuildId}`);
+    } catch (error) {
+      socket.emit('socket-error', { code: error?.code, error: error?.message || 'Community access denied' });
+    }
   });
 
-  socket.on('join-channel', ({ channelId }) => {
-    const parsedChannelId = Number(channelId);
-    if (!parsedChannelId || Number.isNaN(parsedChannelId)) return;
-
-    if (socket.data.textRoomKey) {
-      socket.leave(socket.data.textRoomKey);
+  socket.on('join-channel', async ({ channelId }) => {
+    try {
+      const parsedChannelId = Number(channelId);
+      if (!parsedChannelId || Number.isNaN(parsedChannelId)) return;
+      await assertChannelMembership(parsedChannelId, socket.user.userId);
+      if (socket.data.textRoomKey) socket.leave(socket.data.textRoomKey);
+      const roomKey = `channel:${parsedChannelId}`;
+      socket.join(roomKey);
+      socket.data.textRoomKey = roomKey;
+    } catch (error) {
+      socket.emit('socket-error', { code: error?.code, error: error?.message || 'Channel access denied' });
     }
-
-    const roomKey = `channel:${parsedChannelId}`;
-    socket.join(roomKey);
-    socket.data.textRoomKey = roomKey;
   });
 
   socket.on('join-direct-conversation', async ({ conversationId }) => {
@@ -4370,13 +4508,14 @@ io.on('connection', (socket) => {
 
       const channel = await prisma.channel.findUnique({
         where: { id: parsedChannelId },
-        select: { id: true, type: true }
+        select: { id: true, type: true, guildId: true }
       });
 
       if (!channel || channel.type !== 'VOICE') {
         socket.emit('socket-error', { error: 'Voice channel not found' });
         return;
       }
+      await assertGuildRole(channel.guildId, socket.user.userId);
 
       const participantUser = await prisma.user.findUnique({
         where: { id: socket.user.userId },

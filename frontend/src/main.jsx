@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client';
 import App from './App.jsx';
 import './styles.css';
 import './theme-systems.css';
+import './quality-4-1.css';
 
 const isNativeClient = Boolean(
   window.__TAURI__?.window ||

@@ -27,7 +27,13 @@ Thumbs.db
 .vite/
 .cache/
 coverage/
+playwright-report/
+test-results/
 clients/webcord_native/test/failures/
+clients/webcord_native/android/key.properties
+clients/webcord_native/android/*.jks
+clients/webcord_native/android/*.keystore
+clients/webcord_native/android/app/google-services.json
 
 android/.gradle/
 android/app/build/

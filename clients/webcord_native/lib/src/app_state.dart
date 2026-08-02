@@ -11,6 +11,7 @@ import 'api_client.dart';
 import 'app_theme.dart';
 import 'models.dart';
 import 'native_bridge.dart';
+import 'push_service.dart';
 
 class ClientMediaDevice {
   const ClientMediaDevice({
@@ -188,6 +189,7 @@ class WebCordState extends ChangeNotifier {
   List<ClientMediaDevice> mediaDevices = [];
   final Set<int> unreadChannelIds = {};
   final Set<int> unreadConversationIds = {};
+  final Set<int> _notifiedMessageIds = {};
   final Set<int> pinnedConversationIds = {};
   final Set<int> archivedConversationIds = {};
   final Set<int> mutedConversationIds = {};
@@ -456,6 +458,10 @@ class WebCordState extends ChangeNotifier {
   }
 
   Future<void> logout({bool silent = false}) async {
+    final currentToken = token;
+    if (currentToken != null) {
+      await PushService.instance.clearSession(api: api, authToken: currentToken);
+    }
     await _cleanupVoice(emitLeave: true);
     _socket?.dispose();
     _socket = null;
@@ -504,6 +510,7 @@ class WebCordState extends ChangeNotifier {
       renderer.dispose();
     }
     _socket?.dispose();
+    unawaited(PushService.instance.dispose());
     super.dispose();
   }
 
@@ -554,6 +561,38 @@ class WebCordState extends ChangeNotifier {
     } else {
       workspace = WorkspaceKind.server;
       await loadChannelMessages(selectedTextChannelId);
+    }
+    await _configurePush(currentToken);
+  }
+
+  Future<void> _configurePush(String currentToken) async {
+    try {
+      await PushService.instance.configureSession(
+        api: api,
+        authToken: currentToken,
+        notificationsEnabled: notificationsEnabled,
+        onOpen: (data) => unawaited(_openPushTarget(data)),
+      );
+    } catch (_) {}
+  }
+
+  Future<void> _openPushTarget(Map<String, dynamic> data) async {
+    try {
+      final url = '${data['url'] ?? ''}'.trim();
+      if (url.isEmpty) return;
+      final uri = Uri.parse(url);
+      final targetWorkspace = uri.queryParameters['workspace'];
+      final channelId = int.tryParse(uri.queryParameters['channel'] ?? '');
+      final conversationId = int.tryParse(uri.queryParameters['conversation'] ?? '');
+      if (targetWorkspace == 'dm' && conversationId != null) {
+        await selectConversation(conversationId);
+      } else if (targetWorkspace == 'server' && channelId != null) {
+        await selectTextChannel(channelId);
+      }
+      notifyListeners();
+    } catch (exception) {
+      error = 'Could not open notification: $exception';
+      notifyListeners();
     }
   }
 
@@ -2264,6 +2303,14 @@ class WebCordState extends ChangeNotifier {
     notificationsEnabled = value;
     await _store?.setInt(_notificationsKey, value ? 1 : 0);
     _scheduleClientStateSync();
+    final currentToken = token;
+    if (currentToken != null) {
+      if (value) {
+        await _configurePush(currentToken);
+      } else {
+        await PushService.instance.clearSession(api: api, authToken: currentToken);
+      }
+    }
     notifyListeners();
   }
 
@@ -3475,6 +3522,14 @@ class WebCordState extends ChangeNotifier {
           final call = CallSession.fromJson(Map<String, dynamic>.from(payload));
           if (activeCall?.id != call.id) {
             incomingCall = call;
+            if (notificationsEnabled) {
+              unawaited(
+                NativeBridge.showNotification(
+                  title: call.video ? 'Incoming video call' : 'Incoming call',
+                  body: call.title,
+                ),
+              );
+            }
             notifyListeners();
           }
         }
@@ -3740,6 +3795,19 @@ class WebCordState extends ChangeNotifier {
       }
       if (!direct && message.channelId != null) {
         unreadChannelIds.add(message.channelId!);
+      }
+      if (notificationsEnabled && _notifiedMessageIds.add(message.id)) {
+        if (_notifiedMessageIds.length > 300) {
+          _notifiedMessageIds.remove(_notifiedMessageIds.first);
+        }
+        unawaited(
+          NativeBridge.showNotification(
+            title: message.author.displayLabel,
+            body: message.content.trim().isNotEmpty
+                ? message.content
+                : 'Sent an attachment',
+          ),
+        );
       }
       notifyListeners();
     }

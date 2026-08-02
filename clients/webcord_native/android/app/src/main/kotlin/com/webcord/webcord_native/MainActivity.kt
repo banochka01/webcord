@@ -2,6 +2,11 @@ package com.webcord.webcord_native
 
 import android.Manifest
 import android.app.Activity
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.Context
 import android.content.ContentValues
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -23,6 +28,10 @@ class MainActivity : FlutterActivity() {
     private var pendingVideoUri: Uri? = null
     private var audioRecorder: MediaRecorder? = null
     private var audioOutputPath: String? = null
+    private var pendingNotificationResult: MethodChannel.Result? = null
+    private var pendingNotificationTitle: String = "WebCord"
+    private var pendingNotificationBody: String = ""
+    private var notificationId = 4100
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -60,6 +69,11 @@ class MainActivity : FlutterActivity() {
                 "stopAudioRecording" -> stopAudioRecording(result)
                 "cancelAudioRecording" -> cancelAudioRecording(result)
                 "captureCircleVideo" -> captureCircleVideo(result)
+                "showNotification" -> showNotification(
+                    call.argument<String>("title") ?: "WebCord",
+                    call.argument<String>("body") ?: "",
+                    result
+                )
                 else -> result.notImplemented()
             }
         }
@@ -133,6 +147,16 @@ class MainActivity : FlutterActivity() {
                     result.error("CAMERA_PERMISSION_DENIED", "Camera permission was denied.", null)
                 }
             }
+            NOTIFICATION_PERMISSION_REQUEST -> {
+                val result = pendingNotificationResult ?: return
+                pendingNotificationResult = null
+                if (granted) {
+                    postNotification(pendingNotificationTitle, pendingNotificationBody)
+                    result.success(true)
+                } else {
+                    result.success(false)
+                }
+            }
         }
     }
 
@@ -160,6 +184,59 @@ class MainActivity : FlutterActivity() {
         } catch (_: Exception) {
             false
         }
+    }
+
+    private fun showNotification(title: String, body: String, result: MethodChannel.Result) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            !hasPermission(Manifest.permission.POST_NOTIFICATIONS)) {
+            if (pendingNotificationResult != null) {
+                result.success(false)
+                return
+            }
+            pendingNotificationResult = result
+            pendingNotificationTitle = title
+            pendingNotificationBody = body
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), NOTIFICATION_PERMISSION_REQUEST)
+            return
+        }
+        postNotification(title, body)
+        result.success(true)
+    }
+
+    private fun postNotification(title: String, body: String) {
+        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            manager.createNotificationChannel(
+                NotificationChannel(
+                    NOTIFICATION_CHANNEL_ID,
+                    "Messages and activity",
+                    NotificationManager.IMPORTANCE_HIGH
+                ).apply { description = "WebCord messages, mentions and calls" }
+            )
+        }
+        val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
+        val pendingIntent = launchIntent?.let {
+            PendingIntent.getActivity(
+                this,
+                0,
+                it,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+        }
+        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            Notification.Builder(this, NOTIFICATION_CHANNEL_ID)
+        } else {
+            @Suppress("DEPRECATION")
+            Notification.Builder(this)
+        }
+        builder
+            .setSmallIcon(applicationInfo.icon)
+            .setContentTitle(title.take(120))
+            .setContentText(body.take(240))
+            .setStyle(Notification.BigTextStyle().bigText(body.take(1000)))
+            .setAutoCancel(true)
+            .setContentIntent(pendingIntent)
+        manager.notify(notificationId++, builder.build())
     }
 
     private fun startAudioRecording(result: MethodChannel.Result) {
@@ -318,5 +395,7 @@ class MainActivity : FlutterActivity() {
         private const val CAPTURE_VIDEO_REQUEST = 4802
         private const val RECORD_AUDIO_PERMISSION_REQUEST = 4803
         private const val CAMERA_PERMISSION_REQUEST = 4804
+        private const val NOTIFICATION_PERMISSION_REQUEST = 4805
+        private const val NOTIFICATION_CHANNEL_ID = "webcord_activity"
     }
 }

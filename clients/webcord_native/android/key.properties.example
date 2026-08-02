@@ -1,0 +1,4 @@
+storeFile=C:\secure\webcord-upload.jks
+storePassword=replace-me
+keyAlias=webcord-upload
+keyPassword=replace-me

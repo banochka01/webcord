@@ -42,6 +42,13 @@ enum UserRole {
   OWNER
 }
 
+enum GuildMemberRole {
+  MEMBER
+  MODERATOR
+  ADMIN
+  OWNER
+}
+
 enum ReportStatus {
   OPEN
   REVIEWED
@@ -105,6 +112,7 @@ model User {
   messageBookmarks        MessageBookmark[]
   messageEditHistory      MessageEditHistory[]
   pushSubscriptions       PushSubscription[]
+  devicePushTokens        DevicePushToken[]
   callRecordsCreated      CallRecord[]         @relation("CallRecordCaller")
   callRecordMemberships   CallRecordParticipant[]
   activityEvents          ActivityEvent[]       @relation("ActivityRecipient")
@@ -114,6 +122,9 @@ model User {
   communityEventsCreated  CommunityEvent[]
   communityEventRsvps     CommunityEventRsvp[]
   guildInvitesCreated     GuildInvite[]
+  guildMemberships        GuildMember[]
+  guildAuditActions       GuildAuditLog[]      @relation("GuildAuditActor")
+  guildAuditTargets       GuildAuditLog[]      @relation("GuildAuditTarget")
   scheduledMessages       ScheduledMessage[]
   createdAt               DateTime            @default(now())
 }
@@ -128,7 +139,40 @@ model Guild {
   channels    Channel[]
   events      CommunityEvent[]
   invites     GuildInvite[]
+  members     GuildMember[]
+  auditLog    GuildAuditLog[]
   createdAt   DateTime  @default(now())
+}
+
+model GuildMember {
+  id        Int             @id @default(autoincrement())
+  guildId   Int
+  userId    Int
+  role      GuildMemberRole @default(MEMBER)
+  joinedAt  DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+  guild     Guild           @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([guildId, userId])
+  @@index([userId, joinedAt])
+  @@index([guildId, role])
+}
+
+model GuildAuditLog {
+  id           Int      @id @default(autoincrement())
+  guildId      Int
+  actorId      Int?
+  targetUserId Int?
+  action       String
+  metadata     Json?
+  createdAt    DateTime @default(now())
+  guild        Guild    @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  actor        User?    @relation("GuildAuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+  targetUser   User?    @relation("GuildAuditTarget", fields: [targetUserId], references: [id], onDelete: SetNull)
+
+  @@index([guildId, createdAt])
+  @@index([targetUserId, createdAt])
 }
 
 model Channel {
@@ -436,6 +480,18 @@ model PushSubscription {
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+}
+
+model DevicePushToken {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  token     String   @unique
+  platform  String   @default("ANDROID")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, updatedAt])
 }
 
 model CallRecord {
