@@ -174,6 +174,28 @@ export function installSpacesRoutes({
     return channel?.guildId || null;
   }
 
+  async function requireChannelAccess(channelId, userId, action = 'view') {
+    const channel = await prisma.channel.findUnique({
+      where: { id: Number(channelId) },
+      include: { permissions: { where: { userId: Number(userId) } } }
+    });
+    if (!channel) {
+      const error = new Error('Channel not found.');
+      error.status = 404;
+      error.code = 'CHANNEL_NOT_FOUND';
+      throw error;
+    }
+    const membership = await requireSpaceRole(channel.guildId, userId);
+    const permission = channel.permissions[0] || null;
+    const privileged = SPACE_ROLE_RANK[membership.role] >= SPACE_ROLE_RANK.MODERATOR;
+    if (!privileged && (SPACE_ROLE_RANK[membership.role] < SPACE_ROLE_RANK[channel.minimumRole]
+      || (channel.isPrivate && !permission?.canView)
+      || (action === 'post' && permission && !permission.canPost))) {
+      throw spaceAccessError(channel.minimumRole);
+    }
+    return { channel, membership, permission };
+  }
+
   async function recordSpaceAudit({ guildId, actorId = null, targetUserId = null, action, metadata = null }) {
     return prisma.guildAuditLog.create({
       data: { guildId, actorId, targetUserId, action, metadata }
@@ -278,7 +300,7 @@ export function installSpacesRoutes({
         include: messageInclude
       });
       if (!root) return apiError(res, 404, 'MESSAGE_NOT_FOUND', 'Message not found.');
-      await requireSpaceRole(await guildIdForChannel(root.channelId), req.user.userId);
+      await requireChannelAccess(root.channelId, req.user.userId);
       const replies = await prisma.message.findMany({
         where: { replyToId: messageId, channelId: root.channelId, deletedAt: null },
         orderBy: { createdAt: 'asc' },
@@ -437,7 +459,7 @@ export function installSpacesRoutes({
         return apiError(res, 404, 'POLL_NOT_FOUND', 'Poll not found.');
       }
       if (poll.channelId) {
-        await requireSpaceRole(await guildIdForChannel(poll.channelId), req.user.userId);
+        await requireChannelAccess(poll.channelId, req.user.userId, 'post');
       }
       const validIds = new Set(poll.options.map((option) => option.id));
       const selected = optionIds.filter((id) => validIds.has(id));
@@ -473,6 +495,128 @@ export function installSpacesRoutes({
     }
   });
 
+  app.post('/api/spaces', authMiddleware, messageRateLimit, async (req, res) => {
+    try {
+      const name = cleanText(req.body.name, 80);
+      if (name.length < 2) return apiError(res, 400, 'INVALID_SPACE_NAME', 'Community name is too short.');
+      const ownedSpaces = await prisma.guildMember.count({ where: { userId: req.user.userId, role: 'OWNER' } });
+      if (ownedSpaces >= 10) return apiError(res, 409, 'SPACE_LIMIT_REACHED', 'A user can own up to 10 communities.');
+      const description = cleanText(req.body.description, 600);
+      const guild = await prisma.$transaction(async (tx) => {
+        const created = await tx.guild.create({
+          data: {
+            name,
+            description,
+            accentColor: cleanText(req.body.accentColor, 20) || '#7c5cff',
+            iconUrl: cleanText(req.body.iconUrl, 800) || null,
+            members: { create: { userId: req.user.userId, role: 'OWNER' } },
+            channels: {
+              create: [
+                { name: 'general', type: 'TEXT' },
+                { name: 'Voice lounge', type: 'VOICE' }
+              ]
+            }
+          },
+          include: { channels: true, members: true }
+        });
+        await tx.guildAuditLog.create({
+          data: { guildId: created.id, actorId: req.user.userId, action: 'SPACE_CREATED' }
+        });
+        return created;
+      });
+      return res.status(201).json(guild);
+    } catch (error) {
+      console.error('Space create failed:', error);
+      return apiError(res, 500, 'SPACE_CREATE_FAILED', 'Failed to create community.');
+    }
+  });
+
+  app.delete('/api/spaces/:guildId', authMiddleware, async (req, res) => {
+    try {
+      const guildId = positiveInt(req.params.guildId);
+      const membership = await requireSpaceRole(guildId, req.user.userId, 'OWNER');
+      if (membership.role !== 'OWNER') throw spaceAccessError('OWNER');
+      const guild = await prisma.guild.findUnique({ where: { id: guildId } });
+      if (!guild) return apiError(res, 404, 'SPACE_NOT_FOUND', 'Community not found.');
+      if (cleanText(req.body.confirmName, 80) !== guild.name) {
+        return apiError(res, 400, 'SPACE_NAME_CONFIRMATION_REQUIRED', 'Enter the exact community name to delete it.');
+      }
+      await prisma.guild.delete({ where: { id: guildId } });
+      return res.json({ ok: true });
+    } catch (error) {
+      return apiError(res, error?.status || 500, error?.code || 'SPACE_DELETE_FAILED', error?.message || 'Failed to delete community.');
+    }
+  });
+
+  app.get('/api/channels/:channelId/permissions', authMiddleware, async (req, res) => {
+    try {
+      const channelId = positiveInt(req.params.channelId);
+      const guildId = await guildIdForChannel(channelId);
+      await requireSpaceRole(guildId, req.user.userId, 'ADMIN');
+      const channel = await prisma.channel.findUnique({
+        where: { id: channelId },
+        include: { permissions: { include: { user: { select: publicUserSelect } }, orderBy: { updatedAt: 'desc' } } }
+      });
+      return res.json(channel);
+    } catch (error) {
+      return apiError(res, error?.status || 500, error?.code || 'CHANNEL_PERMISSIONS_FETCH_FAILED', error?.message || 'Failed to load channel permissions.');
+    }
+  });
+
+  app.patch('/api/channels/:channelId/permissions', authMiddleware, async (req, res) => {
+    try {
+      const channelId = positiveInt(req.params.channelId);
+      const guildId = await guildIdForChannel(channelId);
+      await requireSpaceRole(guildId, req.user.userId, 'ADMIN');
+      const minimumRole = cleanText(req.body.minimumRole, 20).toUpperCase() || 'MEMBER';
+      if (!SPACE_ROLES.has(minimumRole)) return apiError(res, 400, 'INVALID_SPACE_ROLE', 'Choose a valid minimum role.');
+      const channel = await prisma.channel.update({
+        where: { id: channelId },
+        data: { isPrivate: Boolean(req.body.isPrivate), minimumRole }
+      });
+      await recordSpaceAudit({ guildId, actorId: req.user.userId, action: 'CHANNEL_ACCESS_CHANGED', metadata: { channelId, isPrivate: channel.isPrivate, minimumRole } });
+      io.to(`guild:${guildId}`).emit('spaces:refresh');
+      return res.json(channel);
+    } catch (error) {
+      return apiError(res, error?.status || 500, error?.code || 'CHANNEL_PERMISSIONS_UPDATE_FAILED', error?.message || 'Failed to update channel permissions.');
+    }
+  });
+
+  app.put('/api/channels/:channelId/permissions/:userId', authMiddleware, async (req, res) => {
+    try {
+      const channelId = positiveInt(req.params.channelId);
+      const userId = positiveInt(req.params.userId);
+      const guildId = await guildIdForChannel(channelId);
+      await requireSpaceRole(guildId, req.user.userId, 'ADMIN');
+      const target = await membershipFor(guildId, userId);
+      if (!target) return apiError(res, 404, 'SPACE_MEMBER_NOT_FOUND', 'Community member not found.');
+      const permission = await prisma.channelPermission.upsert({
+        where: { channelId_userId: { channelId, userId } },
+        create: { channelId, userId, canView: req.body.canView !== false, canPost: req.body.canPost !== false, canManage: Boolean(req.body.canManage) },
+        update: { canView: req.body.canView !== false, canPost: req.body.canPost !== false, canManage: Boolean(req.body.canManage) }
+      });
+      await recordSpaceAudit({ guildId, actorId: req.user.userId, targetUserId: userId, action: 'CHANNEL_MEMBER_ACCESS_CHANGED', metadata: { channelId, canView: permission.canView, canPost: permission.canPost } });
+      io.to(`guild:${guildId}`).emit('spaces:refresh');
+      return res.json(permission);
+    } catch (error) {
+      return apiError(res, error?.status || 500, error?.code || 'CHANNEL_MEMBER_ACCESS_UPDATE_FAILED', error?.message || 'Failed to update member access.');
+    }
+  });
+
+  app.delete('/api/channels/:channelId/permissions/:userId', authMiddleware, async (req, res) => {
+    try {
+      const channelId = positiveInt(req.params.channelId);
+      const userId = positiveInt(req.params.userId);
+      const guildId = await guildIdForChannel(channelId);
+      await requireSpaceRole(guildId, req.user.userId, 'ADMIN');
+      await prisma.channelPermission.deleteMany({ where: { channelId, userId } });
+      io.to(`guild:${guildId}`).emit('spaces:refresh');
+      return res.json({ ok: true });
+    } catch (error) {
+      return apiError(res, error?.status || 500, error?.code || 'CHANNEL_MEMBER_ACCESS_DELETE_FAILED', error?.message || 'Failed to remove member access.');
+    }
+  });
+
   app.get('/api/spaces', authMiddleware, async (req, res) => {
     try {
       const requestedGuildId = positiveInt(req.query.guildId);
@@ -480,7 +624,14 @@ export function installSpacesRoutes({
         where: { userId: req.user.userId },
         orderBy: { joinedAt: 'asc' },
         include: {
-          guild: { include: { channels: { orderBy: [{ type: 'asc' }, { id: 'asc' }] } } }
+          guild: {
+            include: {
+              channels: {
+                orderBy: [{ type: 'asc' }, { id: 'asc' }],
+                include: { permissions: { where: { userId: req.user.userId } } }
+              }
+            }
+          }
         }
       });
       const selected = requestedGuildId
@@ -490,6 +641,11 @@ export function installSpacesRoutes({
         return res.json({ guild: null, guilds: [], membership: null, activityCount: 0, scheduledCount: 0, events: [], activePolls: [] });
       }
       const guild = selected.guild;
+      const visibleChannels = guild.channels.filter((channel) => (
+        SPACE_ROLE_RANK[selected.role] >= SPACE_ROLE_RANK.MODERATOR
+        || (SPACE_ROLE_RANK[selected.role] >= SPACE_ROLE_RANK[channel.minimumRole]
+          && (!channel.isPrivate || channel.permissions?.some((permission) => permission.userId === req.user.userId && permission.canView)))
+      ));
       const [events, activePolls, activityCount, scheduledCount] = await Promise.all([
         prisma.communityEvent.findMany({
           where: { guildId: guild.id, startsAt: { gte: new Date(Date.now() - 86_400_000) } },
@@ -502,7 +658,7 @@ export function installSpacesRoutes({
         }),
         prisma.poll.findMany({
           where: {
-            channel: { guildId: guild.id },
+            channelId: { in: visibleChannels.map((channel) => channel.id) },
             OR: [{ closesAt: null }, { closesAt: { gt: new Date() } }]
           },
           orderBy: { createdAt: 'desc' },
@@ -513,7 +669,7 @@ export function installSpacesRoutes({
         prisma.scheduledMessage.count({ where: { senderId: req.user.userId, status: 'PENDING' } })
       ]);
       return res.json({
-        guild,
+        guild: { ...guild, channels: visibleChannels.map(({ permissions, ...channel }) => channel) },
         guilds: memberships.map((item) => ({
           id: item.guild.id,
           name: item.guild.name,
@@ -840,9 +996,7 @@ export function installSpacesRoutes({
         return apiError(res, 404, 'CONVERSATION_NOT_FOUND', 'Conversation not found.');
       }
       if (channelId) {
-        const guildId = await guildIdForChannel(channelId);
-        if (!guildId) return apiError(res, 404, 'CHANNEL_NOT_FOUND', 'Channel not found.');
-        await requireSpaceRole(guildId, req.user.userId);
+        await requireChannelAccess(channelId, req.user.userId, 'post');
       }
       const scheduled = await prisma.scheduledMessage.create({
         data: {

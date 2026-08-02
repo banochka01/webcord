@@ -73,75 +73,117 @@ enum ModerationActionType {
 }
 
 model User {
-  id                      Int                 @id @default(autoincrement())
-  username                String              @unique
-  password                String
-  role                    UserRole            @default(USER)
-  displayName             String?
-  avatarUrl               String?
-  bannerUrl               String?
-  bio                     String              @default("")
-  statusText              String              @default("Online")
-  favoriteTrack           String              @default("")
-  favoriteTrackUrl        String?
-  favoriteTrackName       String?
-  accentColor             String              @default("#7c5cff")
-  mutedUntil              DateTime?
-  bannedUntil             DateTime?
-  messages                Message[]
-  directMessages          DirectMessage[]
-  messageReactions        MessageReaction[]
-  directMessageReactions  DirectMessageReaction[]
-  sentFriendRequests      FriendRequest[]     @relation("FriendRequestSender")
-  receivedFriendRequests  FriendRequest[]     @relation("FriendRequestReceiver")
-  friendshipsLeft         Friendship[]        @relation("FriendshipLeftUser")
-  friendshipsRight        Friendship[]        @relation("FriendshipRightUser")
-  directConversationsLeft DirectConversation[] @relation("DirectConversationLeftUser")
-  directConversationsRight DirectConversation[] @relation("DirectConversationRightUser")
-  ownedDirectConversations DirectConversation[] @relation("DirectConversationOwner")
+  id                            Int                        @id @default(autoincrement())
+  username                      String                     @unique
+  password                      String
+  role                          UserRole                   @default(USER)
+  displayName                   String?
+  avatarUrl                     String?
+  bannerUrl                     String?
+  bio                           String                     @default("")
+  statusText                    String                     @default("Online")
+  favoriteTrack                 String                     @default("")
+  favoriteTrackUrl              String?
+  favoriteTrackName             String?
+  accentColor                   String                     @default("#7c5cff")
+  mutedUntil                    DateTime?
+  bannedUntil                   DateTime?
+  messages                      Message[]
+  directMessages                DirectMessage[]
+  messageReactions              MessageReaction[]
+  directMessageReactions        DirectMessageReaction[]
+  sentFriendRequests            FriendRequest[]            @relation("FriendRequestSender")
+  receivedFriendRequests        FriendRequest[]            @relation("FriendRequestReceiver")
+  friendshipsLeft               Friendship[]               @relation("FriendshipLeftUser")
+  friendshipsRight              Friendship[]               @relation("FriendshipRightUser")
+  directConversationsLeft       DirectConversation[]       @relation("DirectConversationLeftUser")
+  directConversationsRight      DirectConversation[]       @relation("DirectConversationRightUser")
+  ownedDirectConversations      DirectConversation[]       @relation("DirectConversationOwner")
   directConversationMemberships DirectConversationMember[]
-  stories                 Story[]
-  storyViews              StoryView[]
-  blockedUsers            UserBlock[]         @relation("UserBlocksFrom")
-  blockedBy               UserBlock[]         @relation("UserBlocksTo")
-  reportsMade             ModerationReport[]  @relation("ReportReporter")
-  reportsTargetingUser    ModerationReport[]  @relation("ReportTargetUser")
-  reportsResolved         ModerationReport[]  @relation("ReportResolver")
-  moderationActions       ModerationAction[]  @relation("ModerationActor")
-  moderationTargets       ModerationAction[]  @relation("ModerationTargetUser")
-  messageBookmarks        MessageBookmark[]
-  messageEditHistory      MessageEditHistory[]
-  pushSubscriptions       PushSubscription[]
-  devicePushTokens        DevicePushToken[]
-  callRecordsCreated      CallRecord[]         @relation("CallRecordCaller")
-  callRecordMemberships   CallRecordParticipant[]
-  activityEvents          ActivityEvent[]       @relation("ActivityRecipient")
-  activityActions         ActivityEvent[]       @relation("ActivityActor")
-  pollsCreated            Poll[]
-  pollVotes               PollVote[]
-  communityEventsCreated  CommunityEvent[]
-  communityEventRsvps     CommunityEventRsvp[]
-  guildInvitesCreated     GuildInvite[]
-  guildMemberships        GuildMember[]
-  guildAuditActions       GuildAuditLog[]      @relation("GuildAuditActor")
-  guildAuditTargets       GuildAuditLog[]      @relation("GuildAuditTarget")
-  scheduledMessages       ScheduledMessage[]
-  createdAt               DateTime            @default(now())
+  stories                       Story[]
+  storyViews                    StoryView[]
+  blockedUsers                  UserBlock[]                @relation("UserBlocksFrom")
+  blockedBy                     UserBlock[]                @relation("UserBlocksTo")
+  reportsMade                   ModerationReport[]         @relation("ReportReporter")
+  reportsTargetingUser          ModerationReport[]         @relation("ReportTargetUser")
+  reportsResolved               ModerationReport[]         @relation("ReportResolver")
+  moderationActions             ModerationAction[]         @relation("ModerationActor")
+  moderationTargets             ModerationAction[]         @relation("ModerationTargetUser")
+  messageBookmarks              MessageBookmark[]
+  messageEditHistory            MessageEditHistory[]
+  pushSubscriptions             PushSubscription[]
+  devicePushTokens              DevicePushToken[]
+  callRecordsCreated            CallRecord[]               @relation("CallRecordCaller")
+  callRecordMemberships         CallRecordParticipant[]
+  activityEvents                ActivityEvent[]            @relation("ActivityRecipient")
+  activityActions               ActivityEvent[]            @relation("ActivityActor")
+  pollsCreated                  Poll[]
+  pollVotes                     PollVote[]
+  communityEventsCreated        CommunityEvent[]
+  communityEventRsvps           CommunityEventRsvp[]
+  guildInvitesCreated           GuildInvite[]
+  guildMemberships              GuildMember[]
+  guildAuditActions             GuildAuditLog[]            @relation("GuildAuditActor")
+  guildAuditTargets             GuildAuditLog[]            @relation("GuildAuditTarget")
+  scheduledMessages             ScheduledMessage[]
+  sessions                      UserSession[]
+  clientErrorReports            ClientErrorReport[]
+  channelPermissions            ChannelPermission[]
+  createdAt                     DateTime                   @default(now())
+}
+
+model UserSession {
+  id         String              @id @default(uuid())
+  userId     Int
+  secretHash String
+  deviceName String
+  platform   String              @default("WEB")
+  userAgent  String?
+  ipAddress  String?
+  createdAt  DateTime            @default(now())
+  lastSeenAt DateTime            @default(now())
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  user       User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  errors     ClientErrorReport[]
+
+  @@index([userId, revokedAt, lastSeenAt])
+  @@index([expiresAt])
+}
+
+model ClientErrorReport {
+  id          Int          @id @default(autoincrement())
+  userId      Int?
+  sessionId   String?
+  platform    String
+  appVersion  String
+  message     String
+  stack       String?
+  context     Json?
+  fingerprint String
+  createdAt   DateTime     @default(now())
+  resolvedAt  DateTime?
+  user        User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  session     UserSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+
+  @@index([fingerprint, createdAt])
+  @@index([userId, createdAt])
+  @@index([resolvedAt, createdAt])
 }
 
 model Guild {
-  id          Int       @id @default(autoincrement())
+  id          Int              @id @default(autoincrement())
   name        String
-  description String    @default("")
+  description String           @default("")
   iconUrl     String?
   bannerUrl   String?
-  accentColor String    @default("#7c5cff")
+  accentColor String           @default("#7c5cff")
   channels    Channel[]
   events      CommunityEvent[]
   invites     GuildInvite[]
   members     GuildMember[]
   auditLog    GuildAuditLog[]
-  createdAt   DateTime  @default(now())
+  createdAt   DateTime         @default(now())
 }
 
 model GuildMember {
@@ -176,46 +218,49 @@ model GuildAuditLog {
 }
 
 model Channel {
-  id        Int         @id @default(autoincrement())
-  name      String
-  type      ChannelType @default(TEXT)
-  guildId   Int
-  guild     Guild       @relation(fields: [guildId], references: [id], onDelete: Cascade)
-  messages  Message[]
-  polls     Poll[]
+  id                Int                 @id @default(autoincrement())
+  name              String
+  type              ChannelType         @default(TEXT)
+  guildId           Int
+  guild             Guild               @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  messages          Message[]
+  polls             Poll[]
   scheduledMessages ScheduledMessage[]
-  slowModeSeconds Int @default(0)
-  createdAt DateTime    @default(now())
+  slowModeSeconds   Int                 @default(0)
+  isPrivate         Boolean             @default(false)
+  minimumRole       GuildMemberRole     @default(MEMBER)
+  permissions       ChannelPermission[]
+  createdAt         DateTime            @default(now())
 
   @@index([guildId])
 }
 
 model Message {
-  id             Int             @id @default(autoincrement())
-  content        String
-  attachmentUrl  String?
-  attachmentType AttachmentType?
-  attachmentName String?
-  transcript     String?
+  id                Int                  @id @default(autoincrement())
+  content           String
+  attachmentUrl     String?
+  attachmentType    AttachmentType?
+  attachmentName    String?
+  transcript        String?
   forwardedFromName String?
-  pinnedAt       DateTime?
-  pinnedById     Int?
-  replyToId      Int?
-  editedAt       DateTime?
-  deletedAt      DateTime?
-  silent         Boolean         @default(false)
-  channelId      Int
-  authorId       Int
-  createdAt      DateTime        @default(now())
-  channel        Channel         @relation(fields: [channelId], references: [id], onDelete: Cascade)
-  author         User            @relation(fields: [authorId], references: [id], onDelete: Cascade)
-  replyTo        Message?        @relation("MessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
-  replies        Message[]       @relation("MessageReplies")
-  reactions      MessageReaction[]
-  reports        ModerationReport[]
-  bookmarks      MessageBookmark[]
-  editHistory    MessageEditHistory[]
-  poll           Poll?
+  pinnedAt          DateTime?
+  pinnedById        Int?
+  replyToId         Int?
+  editedAt          DateTime?
+  deletedAt         DateTime?
+  silent            Boolean              @default(false)
+  channelId         Int
+  authorId          Int
+  createdAt         DateTime             @default(now())
+  channel           Channel              @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  author            User                 @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  replyTo           Message?             @relation("MessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies           Message[]            @relation("MessageReplies")
+  reactions         MessageReaction[]
+  reports           ModerationReport[]
+  bookmarks         MessageBookmark[]
+  editHistory       MessageEditHistory[]
+  poll              Poll?
 
   @@index([channelId, createdAt])
   @@index([channelId, pinnedAt])
@@ -251,12 +296,12 @@ model FriendRequest {
 }
 
 model Friendship {
-  id         Int      @id @default(autoincrement())
-  userOneId  Int
-  userTwoId  Int
-  createdAt  DateTime @default(now())
-  userOne    User     @relation("FriendshipLeftUser", fields: [userOneId], references: [id], onDelete: Cascade)
-  userTwo    User     @relation("FriendshipRightUser", fields: [userTwoId], references: [id], onDelete: Cascade)
+  id        Int      @id @default(autoincrement())
+  userOneId Int
+  userTwoId Int
+  createdAt DateTime @default(now())
+  userOne   User     @relation("FriendshipLeftUser", fields: [userOneId], references: [id], onDelete: Cascade)
+  userTwo   User     @relation("FriendshipRightUser", fields: [userTwoId], references: [id], onDelete: Cascade)
 
   @@unique([userOneId, userTwoId])
   @@index([userOneId])
@@ -264,22 +309,22 @@ model Friendship {
 }
 
 model DirectConversation {
-  id         Int             @id @default(autoincrement())
-  type       DirectConversationType @default(DIRECT)
-  title      String?
-  avatarUrl  String?
-  ownerId    Int?
-  userOneId  Int?
-  userTwoId  Int?
-  createdAt  DateTime        @default(now())
-  updatedAt  DateTime        @updatedAt
-  owner      User?           @relation("DirectConversationOwner", fields: [ownerId], references: [id], onDelete: SetNull)
-  userOne    User?           @relation("DirectConversationLeftUser", fields: [userOneId], references: [id], onDelete: Cascade)
-  userTwo    User?           @relation("DirectConversationRightUser", fields: [userTwoId], references: [id], onDelete: Cascade)
-  members    DirectConversationMember[]
-  messages   DirectMessage[]
-  callRecords CallRecord[]
-  polls       Poll[]
+  id                Int                        @id @default(autoincrement())
+  type              DirectConversationType     @default(DIRECT)
+  title             String?
+  avatarUrl         String?
+  ownerId           Int?
+  userOneId         Int?
+  userTwoId         Int?
+  createdAt         DateTime                   @default(now())
+  updatedAt         DateTime                   @updatedAt
+  owner             User?                      @relation("DirectConversationOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  userOne           User?                      @relation("DirectConversationLeftUser", fields: [userOneId], references: [id], onDelete: Cascade)
+  userTwo           User?                      @relation("DirectConversationRightUser", fields: [userTwoId], references: [id], onDelete: Cascade)
+  members           DirectConversationMember[]
+  messages          DirectMessage[]
+  callRecords       CallRecord[]
+  polls             Poll[]
   scheduledMessages ScheduledMessage[]
 
   @@unique([userOneId, userTwoId])
@@ -302,32 +347,32 @@ model DirectConversationMember {
 }
 
 model DirectMessage {
-  id             Int             @id @default(autoincrement())
-  content        String
-  attachmentUrl  String?
-  attachmentType AttachmentType?
-  attachmentName String?
-  transcript     String?
+  id                Int                     @id @default(autoincrement())
+  content           String
+  attachmentUrl     String?
+  attachmentType    AttachmentType?
+  attachmentName    String?
+  transcript        String?
   forwardedFromName String?
-  pinnedAt       DateTime?
-  pinnedById     Int?
-  replyToId      Int?
-  editedAt       DateTime?
-  deletedAt      DateTime?
-  readAt         DateTime?
-  silent         Boolean          @default(false)
-  conversationId Int
-  authorId       Int
-  createdAt      DateTime        @default(now())
-  conversation   DirectConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  author         User            @relation(fields: [authorId], references: [id], onDelete: Cascade)
-  replyTo        DirectMessage?   @relation("DirectMessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
-  replies        DirectMessage[]  @relation("DirectMessageReplies")
-  reactions      DirectMessageReaction[]
-  reports        ModerationReport[]
-  bookmarks      MessageBookmark[]
-  editHistory    MessageEditHistory[]
-  poll           Poll?
+  pinnedAt          DateTime?
+  pinnedById        Int?
+  replyToId         Int?
+  editedAt          DateTime?
+  deletedAt         DateTime?
+  readAt            DateTime?
+  silent            Boolean                 @default(false)
+  conversationId    Int
+  authorId          Int
+  createdAt         DateTime                @default(now())
+  conversation      DirectConversation      @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  author            User                    @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  replyTo           DirectMessage?          @relation("DirectMessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies           DirectMessage[]         @relation("DirectMessageReplies")
+  reactions         DirectMessageReaction[]
+  reports           ModerationReport[]
+  bookmarks         MessageBookmark[]
+  editHistory       MessageEditHistory[]
+  poll              Poll?
 
   @@index([conversationId, createdAt])
   @@index([conversationId, pinnedAt])
@@ -433,6 +478,22 @@ model StoryView {
   @@index([viewerId])
 }
 
+model ChannelPermission {
+  id        Int      @id @default(autoincrement())
+  channelId Int
+  userId    Int
+  canView   Boolean  @default(true)
+  canPost   Boolean  @default(true)
+  canManage Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  channel   Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([channelId, userId])
+  @@index([userId, canView])
+}
+
 model MessageBookmark {
   id              Int            @id @default(autoincrement())
   userId          Int
@@ -465,19 +526,19 @@ model MessageEditHistory {
 }
 
 model PushSubscription {
-  id        Int      @id @default(autoincrement())
-  userId    Int
-  endpoint  String   @unique
-  p256dh    String
-  auth      String
-  notificationMode String @default("all")
-  quietHoursEnabled Boolean @default(false)
-  quietHoursStart String @default("22:00")
-  quietHoursEnd String @default("08:00")
-  timezoneOffset Int @default(0)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                Int      @id @default(autoincrement())
+  userId            Int
+  endpoint          String   @unique
+  p256dh            String
+  auth              String
+  notificationMode  String   @default("all")
+  quietHoursEnabled Boolean  @default(false)
+  quietHoursStart   String   @default("22:00")
+  quietHoursEnd     String   @default("08:00")
+  timezoneOffset    Int      @default(0)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
 }
@@ -515,34 +576,34 @@ model CallRecord {
 }
 
 model CallRecordParticipant {
-  id        Int        @id @default(autoincrement())
-  callId    String
-  userId    Int
-  joinedAt  DateTime?
-  leftAt    DateTime?
-  call      CallRecord @relation(fields: [callId], references: [id], onDelete: Cascade)
-  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id       Int        @id @default(autoincrement())
+  callId   String
+  userId   Int
+  joinedAt DateTime?
+  leftAt   DateTime?
+  call     CallRecord @relation(fields: [callId], references: [id], onDelete: Cascade)
+  user     User       @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([callId, userId])
   @@index([userId, callId])
 }
 
 model ActivityEvent {
-  id              Int      @id @default(autoincrement())
+  id              Int       @id @default(autoincrement())
   userId          Int
   actorId         Int?
   kind            String
   title           String
-  body            String   @default("")
+  body            String    @default("")
   channelId       Int?
   conversationId  Int?
   messageId       Int?
   directMessageId Int?
   metadata        Json?
   readAt          DateTime?
-  createdAt       DateTime @default(now())
-  user            User     @relation("ActivityRecipient", fields: [userId], references: [id], onDelete: Cascade)
-  actor           User?    @relation("ActivityActor", fields: [actorId], references: [id], onDelete: SetNull)
+  createdAt       DateTime  @default(now())
+  user            User      @relation("ActivityRecipient", fields: [userId], references: [id], onDelete: Cascade)
+  actor           User?     @relation("ActivityActor", fields: [actorId], references: [id], onDelete: SetNull)
 
   @@index([userId, readAt, createdAt])
   @@index([userId, kind, createdAt])
@@ -572,12 +633,12 @@ model Poll {
 }
 
 model PollOption {
-  id        Int        @id @default(autoincrement())
-  pollId    Int
-  label     String
-  position  Int
-  poll      Poll       @relation(fields: [pollId], references: [id], onDelete: Cascade)
-  votes     PollVote[]
+  id       Int        @id @default(autoincrement())
+  pollId   Int
+  label    String
+  position Int
+  poll     Poll       @relation(fields: [pollId], references: [id], onDelete: Cascade)
+  votes    PollVote[]
 
   @@unique([pollId, position])
   @@index([pollId])
@@ -645,24 +706,24 @@ model GuildInvite {
 }
 
 model ScheduledMessage {
-  id              Int      @id @default(autoincrement())
-  senderId        Int
-  channelId       Int?
-  conversationId  Int?
-  content         String
-  attachmentUrl   String?
-  attachmentType  AttachmentType?
-  attachmentName  String?
-  replyToId       Int?
-  sendAt          DateTime
-  silent          Boolean  @default(false)
-  status          String   @default("PENDING")
-  failureReason   String   @default("")
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  sender          User     @relation(fields: [senderId], references: [id], onDelete: Cascade)
-  channel         Channel? @relation(fields: [channelId], references: [id], onDelete: Cascade)
-  conversation    DirectConversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  id             Int                 @id @default(autoincrement())
+  senderId       Int
+  channelId      Int?
+  conversationId Int?
+  content        String
+  attachmentUrl  String?
+  attachmentType AttachmentType?
+  attachmentName String?
+  replyToId      Int?
+  sendAt         DateTime
+  silent         Boolean             @default(false)
+  status         String              @default("PENDING")
+  failureReason  String              @default("")
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  sender         User                @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  channel        Channel?            @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  conversation   DirectConversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
   @@index([status, sendAt])
   @@index([senderId, createdAt])

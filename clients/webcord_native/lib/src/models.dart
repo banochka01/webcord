@@ -103,6 +103,60 @@ class AuthSession {
   }
 }
 
+class ClientSession {
+  const ClientSession({
+    required this.id,
+    required this.deviceName,
+    required this.platform,
+    required this.lastSeenAt,
+    this.ipAddress,
+    this.current = false,
+  });
+
+  final String id;
+  final String deviceName;
+  final String platform;
+  final DateTime lastSeenAt;
+  final String? ipAddress;
+  final bool current;
+
+  factory ClientSession.fromJson(Map<String, dynamic> json) => ClientSession(
+    id: '${json['id'] ?? ''}',
+    deviceName: '${json['deviceName'] ?? 'WebCord client'}',
+    platform: '${json['platform'] ?? 'UNKNOWN'}',
+    lastSeenAt:
+        DateTime.tryParse('${json['lastSeenAt'] ?? ''}') ?? DateTime.now(),
+    ipAddress: _asNullableString(json['ipAddress']),
+    current: json['current'] == true,
+  );
+}
+
+class ClientRelease {
+  const ClientRelease({
+    required this.version,
+    required this.updateAvailable,
+    required this.required,
+    required this.downloadUrl,
+  });
+
+  final String version;
+  final bool updateAvailable;
+  final bool required;
+  final String downloadUrl;
+
+  factory ClientRelease.fromJson(Map<String, dynamic> json) {
+    final download = json['download'] is Map
+        ? Map<String, dynamic>.from(json['download'] as Map)
+        : const <String, dynamic>{};
+    return ClientRelease(
+      version: '${json['version'] ?? ''}',
+      updateAvailable: json['updateAvailable'] == true,
+      required: json['required'] == true,
+      downloadUrl: '${download['url'] ?? ''}',
+    );
+  }
+}
+
 class Guild {
   const Guild({
     required this.id,

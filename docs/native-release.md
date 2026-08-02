@@ -4,6 +4,8 @@ WebCord native builds are produced sequentially because Flutter and Gradle share
 
 ## Android signing
 
+Every release APK is checked against the currently published certificate SHA-256 before packaging. This prevents an accidental key change from producing an APK that existing users cannot install as an update. Override `WEBCORD_ANDROID_EXPECTED_CERT_SHA256` only during an explicitly planned signing-key migration.
+
 Copy `clients/webcord_native/android/key.properties.example` to `clients/webcord_native/android/key.properties` and point it at the upload keystore. The real properties file and keystores are ignored by Git.
 
 CI may use these environment variables instead:

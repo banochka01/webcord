@@ -49,7 +49,14 @@ class WebCordApi {
     final json = await _send(
       'POST',
       '/auth/login',
-      body: {'username': username, 'password': password},
+      body: {
+        'username': username,
+        'password': password,
+        'platform': Platform.isAndroid ? 'ANDROID' : 'WINDOWS',
+        'deviceName': Platform.isAndroid
+            ? 'WebCord for Android'
+            : 'WebCord for Windows',
+      },
     );
     return AuthSession.fromJson(json);
   }
@@ -58,7 +65,14 @@ class WebCordApi {
     final json = await _send(
       'POST',
       '/auth/register',
-      body: {'username': username, 'password': password},
+      body: {
+        'username': username,
+        'password': password,
+        'platform': Platform.isAndroid ? 'ANDROID' : 'WINDOWS',
+        'deviceName': Platform.isAndroid
+            ? 'WebCord for Android'
+            : 'WebCord for Windows',
+      },
     );
     return AuthSession.fromJson(json);
   }
@@ -156,6 +170,68 @@ class WebCordApi {
       '/me/client-state',
       token: token,
       body: {'state': state},
+    );
+  }
+
+  Future<void> logout(String token) async {
+    await _send('POST', '/auth/logout', token: token);
+  }
+
+  Future<List<ClientSession>> sessions(String token) async {
+    final json = await _send('GET', '/me/sessions', token: token);
+    final data = json is Map
+        ? Map<String, dynamic>.from(json)
+        : const <String, dynamic>{};
+    return (data['sessions'] as List? ?? const [])
+        .whereType<Map>()
+        .map((item) => ClientSession.fromJson(Map<String, dynamic>.from(item)))
+        .toList();
+  }
+
+  Future<bool> revokeSession(String token, String sessionId) async {
+    final json = await _send(
+      'DELETE',
+      '/me/sessions/${Uri.encodeComponent(sessionId)}',
+      token: token,
+    );
+    return json is Map && json['currentRevoked'] == true;
+  }
+
+  Future<int> revokeOtherSessions(String token) async {
+    final json = await _send('DELETE', '/me/sessions', token: token);
+    return json is Map ? int.tryParse('${json['revoked'] ?? 0}') ?? 0 : 0;
+  }
+
+  Future<ClientRelease> currentRelease({
+    required String platform,
+    required String version,
+  }) async {
+    final json = await _send(
+      'GET',
+      '/client/releases/current?platform=${Uri.encodeQueryComponent(platform)}&version=${Uri.encodeQueryComponent(version)}',
+    );
+    return ClientRelease.fromJson(
+      Map<String, dynamic>.from(json as Map? ?? const {}),
+    );
+  }
+
+  Future<void> reportClientError({
+    required String token,
+    required String message,
+    String? stack,
+    Map<String, dynamic>? context,
+  }) async {
+    await _send(
+      'POST',
+      '/client-errors',
+      token: token,
+      body: {
+        'message': message,
+        'stack': stack,
+        'platform': Platform.isAndroid ? 'ANDROID' : 'WINDOWS',
+        'appVersion': '4.2.0',
+        'context': context,
+      },
     );
   }
 

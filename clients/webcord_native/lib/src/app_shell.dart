@@ -8753,12 +8753,61 @@ class SettingsDialog extends StatelessWidget {
                       ListTile(
                         leading: const Icon(Icons.system_update_rounded),
                         title: const Text('Client updates'),
-                        subtitle: const Text(
-                          'Download the latest signed build from webcordes.ru',
+                        subtitle: Text(
+                          state.clientRelease?.updateAvailable == true
+                              ? 'WebCord ${state.clientRelease!.version} is available${state.clientRelease!.required ? ' and required' : ''}'
+                              : 'WebCord ${WebCordState.clientVersion} is up to date',
                         ),
                         trailing: const Icon(Icons.open_in_new_rounded),
                         onTap: state.openClientUpdate,
                       ),
+                      const SectionLabel('Security'),
+                      ListTile(
+                        leading: const Icon(Icons.devices_rounded),
+                        title: const Text('Active sessions'),
+                        subtitle: Text(
+                          state.clientSessionsLoading
+                              ? 'Checking signed-in devices...'
+                              : '${state.clientSessions.length} signed-in client(s)',
+                        ),
+                        trailing: IconButton(
+                          tooltip: 'Refresh sessions',
+                          onPressed: state.refreshClientSessions,
+                          icon: const Icon(Icons.refresh_rounded),
+                        ),
+                      ),
+                      ...state.clientSessions.map(
+                        (session) => ListTile(
+                          dense: true,
+                          leading: Icon(
+                            session.platform == 'ANDROID'
+                                ? Icons.phone_android_rounded
+                                : session.platform == 'WINDOWS'
+                                ? Icons.desktop_windows_rounded
+                                : Icons.language_rounded,
+                          ),
+                          title: Text(
+                            '${session.deviceName}${session.current ? ' · This device' : ''}',
+                          ),
+                          subtitle: Text(
+                            '${session.platform} · ${session.ipAddress ?? 'IP unavailable'}\nLast active ${session.lastSeenAt.toLocal()}',
+                          ),
+                          isThreeLine: true,
+                          trailing: TextButton(
+                            onPressed: () => state.revokeClientSession(session),
+                            child: Text(session.current ? 'Log out' : 'End'),
+                          ),
+                        ),
+                      ),
+                      if (state.clientSessions.length > 1)
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: TextButton.icon(
+                            onPressed: state.revokeOtherClientSessions,
+                            icon: const Icon(Icons.phonelink_erase_rounded),
+                            label: const Text('End all other sessions'),
+                          ),
+                        ),
                     ],
                   ),
                 ),

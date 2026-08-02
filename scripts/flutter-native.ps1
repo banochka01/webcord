@@ -82,7 +82,11 @@ if ($FlutterArgs[0] -eq 'build') {
 Push-Location $clientRoot
 try {
   & (Join-Path $flutterRoot "bin\flutter.bat") @FlutterArgs
-  exit $LASTEXITCODE
+  $flutterExitCode = $LASTEXITCODE
+  if ($flutterExitCode -eq 0 -and $FlutterArgs[0] -eq 'build' -and $FlutterArgs -contains 'apk' -and $FlutterArgs -contains '--release') {
+    & (Join-Path $PSScriptRoot 'verify-android-signing.ps1') -ApkPath (Join-Path $clientRoot 'build\app\outputs\flutter-apk\app-release.apk')
+  }
+  exit $flutterExitCode
 } finally {
   Pop-Location
 }

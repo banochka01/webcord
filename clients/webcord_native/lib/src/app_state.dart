@@ -138,6 +138,7 @@ class WebCordState extends ChangeNotifier {
   static const _chatPreferencesKey = 'webcord_native_chat_preferences_v2';
   static const _chatDraftsKey = 'webcord_native_chat_drafts_v2';
   static const _messagePageSize = 100;
+  static const clientVersion = '4.2.0';
 
   final WebCordApi api;
   NativeStore? _store;
@@ -175,6 +176,9 @@ class WebCordState extends ChangeNotifier {
   List<ChatMessage> pinnedMessages = [];
   List<SavedMessage> savedMessages = [];
   List<CallRecord> callHistory = [];
+  List<ClientSession> clientSessions = [];
+  ClientRelease? clientRelease;
+  bool clientSessionsLoading = false;
   List<ChatMessage> sharedMedia = [];
   int? sharedMediaCursor;
   bool sharedMediaLoading = false;
@@ -460,7 +464,13 @@ class WebCordState extends ChangeNotifier {
   Future<void> logout({bool silent = false}) async {
     final currentToken = token;
     if (currentToken != null) {
-      await PushService.instance.clearSession(api: api, authToken: currentToken);
+      await PushService.instance.clearSession(
+        api: api,
+        authToken: currentToken,
+      );
+      try {
+        await api.logout(currentToken);
+      } catch (_) {}
     }
     await _cleanupVoice(emitLeave: true);
     _socket?.dispose();
@@ -480,6 +490,8 @@ class WebCordState extends ChangeNotifier {
     activityUnreadCount = 0;
     savedMessages = [];
     callHistory = [];
+    clientSessions = [];
+    clientRelease = null;
     activeCall = null;
     incomingCall = null;
     unreadChannelIds.clear();
@@ -556,6 +568,8 @@ class WebCordState extends ChangeNotifier {
     unawaited(refreshSpaces(notify: false));
     await refreshSavedMessages(notify: false);
     unawaited(refreshCallHistory());
+    unawaited(refreshClientSessions(notify: false));
+    unawaited(checkClientRelease(notify: false));
     if (workspace == WorkspaceKind.direct && selectedConversationId != null) {
       await loadDirectMessages(selectedConversationId!);
     } else {
@@ -583,7 +597,9 @@ class WebCordState extends ChangeNotifier {
       final uri = Uri.parse(url);
       final targetWorkspace = uri.queryParameters['workspace'];
       final channelId = int.tryParse(uri.queryParameters['channel'] ?? '');
-      final conversationId = int.tryParse(uri.queryParameters['conversation'] ?? '');
+      final conversationId = int.tryParse(
+        uri.queryParameters['conversation'] ?? '',
+      );
       if (targetWorkspace == 'dm' && conversationId != null) {
         await selectConversation(conversationId);
       } else if (targetWorkspace == 'server' && channelId != null) {
@@ -2308,7 +2324,10 @@ class WebCordState extends ChangeNotifier {
       if (value) {
         await _configurePush(currentToken);
       } else {
-        await PushService.instance.clearSession(api: api, authToken: currentToken);
+        await PushService.instance.clearSession(
+          api: api,
+          authToken: currentToken,
+        );
       }
     }
     notifyListeners();
@@ -2323,6 +2342,60 @@ class WebCordState extends ChangeNotifier {
       error = 'Could not open the WebCord download page';
       notifyListeners();
     }
+  }
+
+  Future<void> checkClientRelease({bool notify = true}) async {
+    try {
+      clientRelease = await api.currentRelease(
+        platform: Platform.isAndroid ? 'android' : 'windows',
+        version: clientVersion,
+      );
+    } catch (_) {
+      // Update checks never block the client from opening.
+    }
+    if (notify) notifyListeners();
+  }
+
+  Future<void> refreshClientSessions({bool notify = true}) async {
+    final currentToken = token;
+    if (currentToken == null) return;
+    clientSessionsLoading = true;
+    if (notify) notifyListeners();
+    try {
+      clientSessions = await api.sessions(currentToken);
+    } catch (exception, stackTrace) {
+      unawaited(
+        api
+            .reportClientError(
+              token: currentToken,
+              message: 'Could not load active sessions: $exception',
+              stack: '$stackTrace',
+              context: {'screen': 'settings.devices'},
+            )
+            .catchError((_) {}),
+      );
+    } finally {
+      clientSessionsLoading = false;
+      if (notify) notifyListeners();
+    }
+  }
+
+  Future<void> revokeClientSession(ClientSession session) async {
+    final currentToken = token;
+    if (currentToken == null) return;
+    final currentRevoked = await api.revokeSession(currentToken, session.id);
+    if (currentRevoked) {
+      await logout();
+      return;
+    }
+    await refreshClientSessions();
+  }
+
+  Future<void> revokeOtherClientSessions() async {
+    final currentToken = token;
+    if (currentToken == null) return;
+    await api.revokeOtherSessions(currentToken);
+    await refreshClientSessions();
   }
 
   Future<void> setCompactMessages(bool value) async {
@@ -3426,8 +3499,31 @@ class WebCordState extends ChangeNotifier {
       await action();
     } on ApiException catch (exception) {
       error = exception.message;
-    } catch (exception) {
+      if ((exception.statusCode ?? 0) >= 500 && token != null) {
+        unawaited(
+          api
+              .reportClientError(
+                token: token!,
+                message: exception.message,
+                context: {'source': 'api'},
+              )
+              .catchError((_) {}),
+        );
+      }
+    } catch (exception, stackTrace) {
       error = '$exception';
+      if (token != null) {
+        unawaited(
+          api
+              .reportClientError(
+                token: token!,
+                message: '$exception',
+                stack: '$stackTrace',
+                context: {'source': 'state'},
+              )
+              .catchError((_) {}),
+        );
+      }
     } finally {
       busy = false;
       notifyListeners();

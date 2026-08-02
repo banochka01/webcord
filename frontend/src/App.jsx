@@ -34,6 +34,9 @@ import {
 gsap.registerPlugin(useGSAP);
 
 const IconFamilyContext = React.createContext('telegram');
+const APP_VERSION = '4.2.0';
+const SessionCenter = lazy(() => import('./reliability-panels.jsx').then((module) => ({ default: module.SessionCenter })));
+const ReleaseBanner = lazy(() => import('./release-banner.jsx'));
 
 const REMOTE_ORIGIN = import.meta.env.VITE_REMOTE_ORIGIN || 'https://webcordes.ru';
 const DOWNLOAD_PAGE_URL = `${REMOTE_ORIGIN}/#download`;
@@ -3366,6 +3369,17 @@ function VoiceStage({
             <div className="share-caption">
               <strong>{spotlight.username}</strong>
               <span>{spotlight.label}</span>
+              {'pictureInPictureEnabled' in document ? (
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    const video = event.currentTarget.closest('.share-frame')?.querySelector('video');
+                    if (!video) return;
+                    if (document.pictureInPictureElement) document.exitPictureInPicture?.().catch(() => {});
+                    else video.requestPictureInPicture?.().catch(() => {});
+                  }}
+                >Picture in picture</button>
+              ) : null}
             </div>
           </div>
           <div className="voice-filmstrip">
@@ -3483,6 +3497,8 @@ function SettingsModal({
   onUploadChatWallpaper,
   onClearChatWallpaper,
   onChatWallpaperDimChange,
+  apiUrl,
+  token,
   onLogout
 }) {
   if (!open) return null;
@@ -3783,6 +3799,9 @@ function SettingsModal({
               <div className="settings-row"><span>Close to tray</span><button type="button" onClick={() => onClientSettingChange('minimizeToTray', !clientSettings.minimizeToTray)}>{clientSettings.minimizeToTray ? 'Enabled' : 'Disabled'}</button></div>
               <div className="settings-row"><span>Media cache</span><button type="button" onClick={() => onClientSettingChange('autoDownloadMedia', !clientSettings.autoDownloadMedia)}>{clientSettings.autoDownloadMedia ? 'Automatic' : 'On demand'}</button></div>
             </div>
+            <Suspense fallback={<div className="session-center-loading">Loading security center...</div>}>
+              <SessionCenter apiUrl={apiUrl} token={token} onCurrentRevoked={onLogout} />
+            </Suspense>
           </div>
         ) : null}
       </section>
@@ -3815,6 +3834,7 @@ function AdminPanel({
   onChangeUserRole,
   onModerateUser,
   onUpdateReport,
+  onResolveClientError,
   onUploadDownload,
   onDeleteDownload
 }) {
@@ -4023,6 +4043,24 @@ function AdminPanel({
               </div>
             )}
           </section>
+
+          <section className="admin-panel-card">
+            <p className="section-label">Client diagnostics</p>
+            {(overview.clientErrors || []).length === 0 ? <p className="muted">No unresolved client errors.</p> : (
+              <div className="admin-user-list">
+                {(overview.clientErrors || []).map((report) => (
+                  <div className="admin-report-row" key={`client-error-${report.id}`}>
+                    <div>
+                      <strong>{report.platform} {report.appVersion} · {report.message}</strong>
+                      <span>@{report.user?.username || 'unknown'} · {new Intl.DateTimeFormat(undefined, { dateStyle: 'short', timeStyle: 'short' }).format(new Date(report.createdAt))}</span>
+                      {report.stack ? <details><summary>Stack trace</summary><pre>{report.stack}</pre></details> : null}
+                    </div>
+                    <button type="button" disabled={moderationUpdating === `client-error:${report.id}`} onClick={() => onResolveClientError(report.id)}>Resolve</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
         </>
       ) : null}
     </main>
@@ -4126,6 +4164,9 @@ function SpacesWorkspace({ token, user, onOpenChannel }) {
   const [managementError, setManagementError] = useState('');
   const [inviteBusy, setInviteBusy] = useState(false);
   const [slowModeBusy, setSlowModeBusy] = useState(null);
+  const [channelPermissions, setChannelPermissions] = useState({});
+  const [spaceDraft, setSpaceDraft] = useState({ name: '', description: '' });
+  const [spaceCreating, setSpaceCreating] = useState(false);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -4154,6 +4195,14 @@ function SpacesWorkspace({ token, user, onOpenChannel }) {
           setMembers(Array.isArray(memberItems) ? memberItems : []);
           setAuditLog(Array.isArray(auditItems) ? auditItems : []);
           setInvites(Array.isArray(inviteItems) ? inviteItems : []);
+          if ((roleRank[role] || 0) >= roleRank.ADMIN) {
+            const permissionPayloads = await Promise.all((spaces.guild.channels || []).map((channel) => (
+              apiFetch(`/channels/${channel.id}/permissions`, {}, token).catch(() => null)
+            )));
+            setChannelPermissions(Object.fromEntries(permissionPayloads.filter(Boolean).map((channel) => [channel.id, channel.permissions || []])));
+          } else {
+            setChannelPermissions({});
+          }
           setManagementError('');
         } catch (error) {
           setManagementError(error?.message || 'Community controls did not load.');
@@ -4291,6 +4340,61 @@ function SpacesWorkspace({ token, user, onOpenChannel }) {
     }
   }
 
+  async function createSpace(event) {
+    event.preventDefault();
+    setSpaceCreating(true);
+    setManagementError('');
+    try {
+      await apiFetch('/spaces', { method: 'POST', body: JSON.stringify(spaceDraft) }, token);
+      setSpaceDraft({ name: '', description: '' });
+      await refresh();
+    } catch (error) {
+      setManagementError(error?.message || 'Could not create community.');
+    } finally {
+      setSpaceCreating(false);
+    }
+  }
+
+  async function updateChannelAccess(channel, patch) {
+    setSlowModeBusy(channel.id);
+    try {
+      const updated = await apiFetch(`/channels/${channel.id}/permissions`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          isPrivate: patch.isPrivate ?? channel.isPrivate,
+          minimumRole: patch.minimumRole ?? channel.minimumRole ?? 'MEMBER'
+        })
+      }, token);
+      setData((current) => ({
+        ...current,
+        guild: { ...current.guild, channels: current.guild.channels.map((item) => item.id === updated.id ? { ...item, ...updated } : item) }
+      }));
+    } catch (error) {
+      setManagementError(error?.message || 'Could not update channel access.');
+    } finally {
+      setSlowModeBusy(null);
+    }
+  }
+
+  async function toggleChannelMemberAccess(channel, member) {
+    const current = channelPermissions[channel.id] || [];
+    const existing = current.find((permission) => permission.userId === member.userId);
+    try {
+      if (existing) {
+        await apiFetch(`/channels/${channel.id}/permissions/${member.userId}`, { method: 'DELETE' }, token);
+        setChannelPermissions((value) => ({ ...value, [channel.id]: current.filter((permission) => permission.userId !== member.userId) }));
+      } else {
+        const permission = await apiFetch(`/channels/${channel.id}/permissions/${member.userId}`, {
+          method: 'PUT',
+          body: JSON.stringify({ canView: true, canPost: true })
+        }, token);
+        setChannelPermissions((value) => ({ ...value, [channel.id]: [...current, { ...permission, user: member.user }] }));
+      }
+    } catch (error) {
+      setManagementError(error?.message || 'Could not update member channel access.');
+    }
+  }
+
   if (loading && !data) {
     return <div className="spaces-workspace workspace-scroll"><div className="spaces-skeleton" /><div className="spaces-card-grid">{[1, 2, 3].map((id) => <div className="spaces-card skeleton" key={id} />)}</div></div>;
   }
@@ -4311,11 +4415,15 @@ function SpacesWorkspace({ token, user, onOpenChannel }) {
   if (!data?.guild) {
     return (
       <div className="spaces-workspace workspace-scroll">
-        <div className="workspace-empty">
+        <form className="workspace-empty space-create-card" onSubmit={createSpace}>
           <AppIcon name="zap" size={30} />
-          <h3>No community space yet</h3>
-          <p>Create the first community from the administration panel.</p>
-        </div>
+          <h3>Create your first community</h3>
+          <p>Start with a ready-made text channel, voice lounge and owner permissions.</p>
+          <input required minLength={2} maxLength={80} value={spaceDraft.name} onChange={(event) => setSpaceDraft((draft) => ({ ...draft, name: event.target.value }))} placeholder="Community name" />
+          <textarea maxLength={600} rows={3} value={spaceDraft.description} onChange={(event) => setSpaceDraft((draft) => ({ ...draft, description: event.target.value }))} placeholder="What is this space about?" />
+          {managementError ? <p className="inline-error">{managementError}</p> : null}
+          <button type="submit" disabled={spaceCreating}>{spaceCreating ? 'Creating...' : 'Create community'}</button>
+        </form>
       </div>
     );
   }
@@ -4396,6 +4504,27 @@ function SpacesWorkspace({ token, user, onOpenChannel }) {
                 </label>
               ))}
             </div>
+            {canAdminSpace ? <div className="community-control-section">
+              <strong>Channel privacy</strong>
+              {(data.guild.channels || []).map((channel) => (
+                <React.Fragment key={channel.id}>
+                  <div className="channel-access-row">
+                    <span><AppIcon name={channel.type === 'TEXT' ? 'hash' : 'volume'} size={15} />{channel.name}</span>
+                    <button type="button" disabled={slowModeBusy === channel.id} onClick={() => updateChannelAccess(channel, { isPrivate: !channel.isPrivate })}>{channel.isPrivate ? 'Private' : 'Visible'}</button>
+                    <select disabled={slowModeBusy === channel.id} value={channel.minimumRole || 'MEMBER'} onChange={(event) => updateChannelAccess(channel, { minimumRole: event.target.value })} aria-label={`Minimum role for ${channel.name}`}>
+                      <option value="MEMBER">Everyone</option><option value="MODERATOR">Moderators</option><option value="ADMIN">Admins</option><option value="OWNER">Owners</option>
+                    </select>
+                  </div>
+                  {channel.isPrivate ? <div className="channel-access-members" aria-label={`Members with access to ${channel.name}`}>
+                    {members.filter((member) => !['MODERATOR', 'ADMIN', 'OWNER'].includes(member.role)).map((member) => {
+                      const granted = (channelPermissions[channel.id] || []).some((permission) => permission.userId === member.userId && permission.canView);
+                      return <button className={granted ? 'active' : ''} type="button" key={member.userId} onClick={() => toggleChannelMemberAccess(channel, member)}>{granted ? '✓ ' : '+ '}{getDisplayName(member.user)}</button>;
+                    })}
+                  </div> : null}
+                </React.Fragment>
+              ))}
+              <p className="muted">Private channels require an explicit member grant. Moderators and above retain emergency access.</p>
+            </div> : null}
             <div className="community-control-section">
               <strong>Members and roles</strong>
               <div className="space-member-list">
@@ -4423,6 +4552,7 @@ function SpacesWorkspace({ token, user, onOpenChannel }) {
               )) : <p className="muted">No moderation actions yet.</p>}
             </div>
           </section>
+
         ) : null}
       </div>
 
@@ -4762,9 +4892,40 @@ export default function App() {
   const chatPreferencesRef = useRef(chatPreferences);
   const browserDeepLinkHandledRef = useRef(false);
   const browserInviteHandledRef = useRef(false);
+  const reportedClientErrorsRef = useRef(new Set());
 
   const isAdminRoute = ADMIN_PATHS.has(currentPath);
   const isAuthed = Boolean(token && user);
+  useEffect(() => {
+    if (!isAuthed) return undefined;
+    const submit = (reason, context = {}) => {
+      const errorObject = reason instanceof Error ? reason : new Error(String(reason || 'Unknown client error'));
+      const key = `${errorObject.message}\n${String(errorObject.stack || '').split('\n')[1] || ''}`;
+      if (reportedClientErrorsRef.current.has(key)) return;
+      reportedClientErrorsRef.current.add(key);
+      if (reportedClientErrorsRef.current.size > 50) {
+        reportedClientErrorsRef.current.delete(reportedClientErrorsRef.current.values().next().value);
+      }
+      apiFetch('/client-errors', {
+        method: 'POST',
+        body: JSON.stringify({
+          message: errorObject.message,
+          stack: errorObject.stack,
+          platform: IS_TAURI_CLIENT ? 'WINDOWS' : /Android/i.test(navigator.userAgent) ? 'ANDROID' : 'WEB',
+          appVersion: APP_VERSION,
+          context: { workspace: workspaceRef.current, online: navigator.onLine !== false, ...context }
+        })
+      }, token).catch(() => {});
+    };
+    const onError = (event) => submit(event.error || event.message, { source: 'window.error' });
+    const onRejection = (event) => submit(event.reason, { source: 'unhandledrejection' });
+    window.addEventListener('error', onError);
+    window.addEventListener('unhandledrejection', onRejection);
+    return () => {
+      window.removeEventListener('error', onError);
+      window.removeEventListener('unhandledrejection', onRejection);
+    };
+  }, [isAuthed, token]);
   useEffect(() => {
     if (!isAuthed || isAdminRoute) return undefined;
     let active = true;
@@ -5786,7 +5947,8 @@ export default function App() {
     setAdminError('');
     try {
       const overview = await apiFetch('/admin/overview', {}, token);
-      setAdminOverview(overview);
+      const clientErrors = await apiFetch('/admin/client-errors', {}, token).catch(() => ({ reports: [] }));
+      setAdminOverview({ ...overview, clientErrors: clientErrors.reports || [] });
       setAdminStatus('allowed');
       if (overview.admin) setUser(overview.admin);
     } catch (err) {
@@ -6014,6 +6176,19 @@ export default function App() {
     }
     updateClientSetting('notificationsEnabled', nextEnabled);
     pushToast(nextEnabled ? 'Notifications enabled' : 'Notifications disabled');
+  }
+
+  async function resolveAdminClientError(reportId) {
+    setAdminModerationUpdating(`client-error:${reportId}`);
+    try {
+      await apiFetch(`/admin/client-errors/${reportId}`, { method: 'PATCH' }, token);
+      setAdminOverview((prev) => prev ? { ...prev, clientErrors: (prev.clientErrors || []).filter((item) => item.id !== reportId) } : prev);
+      pushToast('Client error resolved', 'success');
+    } catch (err) {
+      setAdminError(err.message);
+    } finally {
+      setAdminModerationUpdating(null);
+    }
   }
 
   async function stopCameraPreview() {
@@ -6661,7 +6836,12 @@ export default function App() {
     try {
       const data = await apiFetch(`/auth/${mode}`, {
         method: 'POST',
-        body: JSON.stringify({ username, password })
+        body: JSON.stringify({
+          username,
+          password,
+          platform: IS_TAURI_CLIENT ? 'WINDOWS' : /Android/i.test(navigator.userAgent) ? 'ANDROID' : 'WEB',
+          deviceName: IS_TAURI_CLIENT ? 'WebCord for Windows' : /Android/i.test(navigator.userAgent) ? 'WebCord for Android' : 'WebCord Web'
+        })
       });
       setToken(data.token);
       setUser(data.user);
@@ -6675,6 +6855,7 @@ export default function App() {
   }
 
   function handleLogout() {
+    if (token) apiFetch('/auth/logout', { method: 'POST' }, token).catch(() => {});
     cleanupVoice();
     setVoiceJoined(false);
     setGuild(null);
@@ -8275,6 +8456,7 @@ export default function App() {
         onChangeUserRole={changeAdminUserRole}
         onModerateUser={applyAdminModeration}
         onUpdateReport={updateAdminReport}
+        onResolveClientError={resolveAdminClientError}
         onUploadDownload={uploadAdminDownload}
         onDeleteDownload={deleteAdminDownload}
       />
@@ -8291,6 +8473,9 @@ export default function App() {
       <input ref={storyMusicInputRef} type="file" accept="audio/*,.mp3,.m4a,.aac,.ogg,.oga,.opus,.wav,.flac,.webm" hidden onChange={(e) => selectStoryMusic(e.target.files?.[0])} />
       <input ref={wallpaperInputRef} type="file" accept="image/*" hidden onChange={(e) => uploadChatWallpaper(e.target.files?.[0])} />
       {isDesktopShell ? <DesktopTitleBar user={user} onOpenSettings={() => setShowSettingsModal(true)} onWindowAction={handleWindowAction} /> : null}
+      <Suspense fallback={null}>
+        <ReleaseBanner apiUrl={API_URL} version={APP_VERSION} platform={/Android/i.test(navigator.userAgent) ? 'android' : 'windows'} />
+      </Suspense>
       <div className={mobileSidebarOpen ? 'mobile-overlay active' : 'mobile-overlay'} onClick={() => setMobileSidebarOpen(false)} />
 
       <main ref={appShellRef} className={`${isMobile && mobileChatOpen ? 'app-shell mobile-chat-open' : 'app-shell'}${isDesktopShell ? ' desktop-shell' : ''}${voiceExpanded && voiceJoined ? ' voice-expanded-mode' : ''}`}>
@@ -9068,6 +9253,8 @@ export default function App() {
         onUploadChatWallpaper={() => wallpaperInputRef.current?.click()}
         onClearChatWallpaper={() => setClientSettings((prev) => ({ ...prev, chatWallpaper: '', chatWallpaperName: '' }))}
         onChatWallpaperDimChange={(value) => setClientSettings((prev) => ({ ...prev, chatWallpaperDim: value }))}
+        apiUrl={API_URL}
+        token={token}
         onLogout={handleLogout}
       />
       <UserProfileModal

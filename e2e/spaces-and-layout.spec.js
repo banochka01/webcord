@@ -13,6 +13,7 @@ const channels = [
   { id: 2, guildId: 1, name: 'General Voice', type: 'VOICE', slowModeSeconds: 0 }
 ];
 const guild = { id: 1, name: 'WebCord Community', description: 'A real shared space', accentColor: '#7c5cff', channels };
+const clientSessions = [{ id: 'session-current', deviceName: 'WebCord Web', platform: 'WEB', ipAddress: '127.0.0.1', createdAt: new Date().toISOString(), lastSeenAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 86_400_000).toISOString(), current: true }];
 
 async function mockAuthenticatedApp(page) {
   await page.addInitScript(({ storedUser }) => {
@@ -43,6 +44,10 @@ async function mockAuthenticatedApp(page) {
     else if (path === '/voice/ice-servers') body = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
     else if (path === '/push/vapid-public-key') body = { enabled: false, nativeEnabled: false, publicKey: '' };
     else if (path === '/downloads') body = { downloads: [] };
+    else if (path === '/client/releases/current') body = { version: '4.2.0', updateAvailable: false, required: false, download: { available: true, url: '/downloads/windows' } };
+    else if (path === '/me/sessions') body = route.request().method() === 'DELETE' ? { ok: true, revoked: 0 } : { sessions: clientSessions };
+    else if (path.startsWith('/channels/') && path.endsWith('/permissions')) body = { ...channels[0], isPrivate: true, minimumRole: 'MEMBER' };
+    else if (path === '/client-errors') body = { accepted: true };
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
   });
 }
@@ -72,4 +77,25 @@ test('mobile Spaces has no horizontal overflow', async ({ page }) => {
   await expect(page.locator('.spaces-hero h2', { hasText: 'WebCord Community' })).toBeVisible();
   const widths = await page.evaluate(() => ({ viewport: document.documentElement.clientWidth, content: document.documentElement.scrollWidth }));
   expect(widths.content).toBeLessThanOrEqual(widths.viewport);
+});
+
+test('community owners can configure private channel access', async ({ page }) => {
+  await mockAuthenticatedApp(page);
+  await page.goto('/');
+  await page.locator('[data-workspace="spaces"]').click();
+  await expect(page.getByText('Channel privacy')).toBeVisible();
+  const visibilityButton = page.locator('.channel-access-row').filter({ hasText: 'general' }).getByRole('button').first();
+  await expect(visibilityButton).toHaveText('Visible');
+  await visibilityButton.click();
+  await expect(visibilityButton).toHaveText('Private');
+});
+
+test('device security center loads active server sessions', async ({ page }) => {
+  await mockAuthenticatedApp(page);
+  await page.goto('/');
+  await page.locator('.rail-settings').click();
+  await page.getByRole('button', { name: 'Devices' }).click();
+  await expect(page.getByRole('heading', { name: 'Active sessions' })).toBeVisible();
+  await expect(page.getByText('WebCord Web · This device')).toBeVisible();
+  await expect(page.getByText('127.0.0.1')).toBeVisible();
 });
