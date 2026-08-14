@@ -30,7 +30,7 @@ const app = express();
 const server = http.createServer(app);
 
 const PORT = Number(process.env.PORT || 3001);
-const APP_VERSION = '4.2.0';
+const APP_VERSION = '4.2.1';
 const MAX_UPLOAD_SIZE_MB = Number(process.env.MAX_UPLOAD_SIZE_MB || 25);
 const MAX_CLIENT_DOWNLOAD_SIZE_MB = Number(process.env.CLIENT_DOWNLOAD_MAX_SIZE_MB || 500);
 const DEFAULT_MESSAGE_LIMIT = 100;

@@ -138,7 +138,7 @@ class WebCordState extends ChangeNotifier {
   static const _chatPreferencesKey = 'webcord_native_chat_preferences_v2';
   static const _chatDraftsKey = 'webcord_native_chat_drafts_v2';
   static const _messagePageSize = 100;
-  static const clientVersion = '4.2.0';
+  static const clientVersion = '4.2.1';
 
   final WebCordApi api;
   NativeStore? _store;

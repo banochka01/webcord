@@ -19,6 +19,7 @@ async function mockAuthenticatedApp(page) {
   await page.addInitScript(({ storedUser }) => {
     localStorage.setItem('webcord_token', 'e2e-token');
     localStorage.setItem('webcord_user', JSON.stringify(storedUser));
+    localStorage.setItem('webcord_color_mode', 'dark');
   }, { storedUser: user });
 
   await page.route('**/socket.io/**', (route) => route.abort());
@@ -44,7 +45,7 @@ async function mockAuthenticatedApp(page) {
     else if (path === '/voice/ice-servers') body = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
     else if (path === '/push/vapid-public-key') body = { enabled: false, nativeEnabled: false, publicKey: '' };
     else if (path === '/downloads') body = { downloads: [] };
-    else if (path === '/client/releases/current') body = { version: '4.2.0', updateAvailable: false, required: false, download: { available: true, url: '/downloads/windows' } };
+    else if (path === '/client/releases/current') body = { version: '4.2.1', updateAvailable: false, required: false, download: { available: true, url: '/downloads/windows' } };
     else if (path === '/me/sessions') body = route.request().method() === 'DELETE' ? { ok: true, revoked: 0 } : { sessions: clientSessions };
     else if (path.startsWith('/channels/') && path.endsWith('/permissions')) body = { ...channels[0], isPrivate: true, minimumRole: 'MEMBER' };
     else if (path === '/client-errors') body = { accepted: true };
@@ -77,6 +78,66 @@ test('mobile Spaces has no horizontal overflow', async ({ page }) => {
   await expect(page.locator('.spaces-hero h2', { hasText: 'WebCord Community' })).toBeVisible();
   const widths = await page.evaluate(() => ({ viewport: document.documentElement.clientWidth, content: document.documentElement.scrollWidth }));
   expect(widths.content).toBeLessThanOrEqual(widths.viewport);
+});
+
+test('mobile chat shell stays compact, bottom anchored and touch usable', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockAuthenticatedApp(page);
+  await page.goto('/');
+  await expect(page.locator('.mobile-home-panel')).toBeVisible();
+
+  const homeGeometry = await page.evaluate(() => {
+    const rect = (selector) => document.querySelector(selector)?.getBoundingClientRect();
+    const rail = rect('.rail');
+    const visibleRailItems = [...document.querySelectorAll('.rail .rail-btn')]
+      .filter((element) => getComputedStyle(element).display !== 'none').length;
+    return {
+      railTop: rail?.top,
+      railBottom: rail?.bottom,
+      visibleRailItems,
+      headerHeight: rect('.mobile-home-top')?.height,
+      storiesHeight: rect('.mobile-home-stories')?.height,
+      searchHeight: rect('.mobile-chat-search')?.height,
+      channelHeight: rect('.channel-sections .channel-btn')?.height,
+      sidebarTop: rect('.sidebar')?.top,
+      voiceBottom: rect('.sidebar-bottom')?.bottom,
+      contentWidth: document.documentElement.scrollWidth,
+      viewportWidth: document.documentElement.clientWidth
+    };
+  });
+
+  expect(homeGeometry.visibleRailItems).toBe(5);
+  expect(homeGeometry.railTop).toBeGreaterThan(760);
+  expect(homeGeometry.railBottom).toBeLessThanOrEqual(844);
+  expect(homeGeometry.headerHeight).toBeLessThanOrEqual(58);
+  expect(homeGeometry.storiesHeight).toBeLessThanOrEqual(74);
+  expect(homeGeometry.searchHeight).toBeLessThanOrEqual(46);
+  expect(homeGeometry.channelHeight).toBeLessThanOrEqual(58);
+  expect(homeGeometry.sidebarTop).toBeLessThanOrEqual(1);
+  expect(homeGeometry.voiceBottom).toBeLessThan(homeGeometry.railTop);
+  expect(homeGeometry.railTop - homeGeometry.voiceBottom).toBeLessThanOrEqual(24);
+  expect(homeGeometry.contentWidth).toBeLessThanOrEqual(homeGeometry.viewportWidth);
+
+  await page.locator('.channel-sections .channel-btn').first().click();
+  await expect(page.locator('.app-shell')).toHaveAttribute('data-mobile-surface', 'chat');
+  await expect(page.locator('.mobile-sidebar-toggle.round')).toBeVisible();
+  await expect(page.locator('.message-form')).toBeVisible();
+
+  const chatGeometry = await page.evaluate(() => {
+    const back = document.querySelector('.mobile-sidebar-toggle.round')?.getBoundingClientRect();
+    const composer = document.querySelector('.message-form')?.getBoundingClientRect();
+    return {
+      railDisplay: getComputedStyle(document.querySelector('.rail')).display,
+      backWidth: back?.width,
+      backHeight: back?.height,
+      composerBottom: composer?.bottom,
+      viewportHeight: window.innerHeight
+    };
+  });
+  expect(chatGeometry.railDisplay).toBe('none');
+  expect(Math.abs(chatGeometry.backWidth - chatGeometry.backHeight)).toBeLessThan(1);
+  expect(chatGeometry.backWidth).toBeLessThanOrEqual(48);
+  expect(chatGeometry.composerBottom).toBeLessThanOrEqual(chatGeometry.viewportHeight);
 });
 
 test('community owners can configure private channel access', async ({ page }) => {

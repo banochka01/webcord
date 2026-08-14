@@ -34,7 +34,7 @@ import {
 gsap.registerPlugin(useGSAP);
 
 const IconFamilyContext = React.createContext('telegram');
-const APP_VERSION = '4.2.0';
+const APP_VERSION = '4.2.1';
 const SessionCenter = lazy(() => import('./reliability-panels.jsx').then((module) => ({ default: module.SessionCenter })));
 const ReleaseBanner = lazy(() => import('./release-banner.jsx'));
 
@@ -2174,9 +2174,15 @@ function MobileHomePanel({
   return (
     <div className="mobile-home-panel">
       <div className="mobile-home-top">
-        <h1>{title}</h1>
+        <div className="mobile-home-title">
+          <BrandLogo />
+          <span>
+            <h1>{title}</h1>
+            <small>Чаты, каналы и звонки</small>
+          </span>
+        </div>
         <button className="icon-btn mobile-home-more" type="button" aria-label="Settings" title="Settings" onClick={onOpenSettings}>
-          <AppIcon name="more" />
+          <AppIcon name="settings" />
         </button>
       </div>
       <section className="mobile-home-stories" aria-label="Stories">
@@ -8478,9 +8484,13 @@ export default function App() {
       </Suspense>
       <div className={mobileSidebarOpen ? 'mobile-overlay active' : 'mobile-overlay'} onClick={() => setMobileSidebarOpen(false)} />
 
-      <main ref={appShellRef} className={`${isMobile && mobileChatOpen ? 'app-shell mobile-chat-open' : 'app-shell'}${isDesktopShell ? ' desktop-shell' : ''}${voiceExpanded && voiceJoined ? ' voice-expanded-mode' : ''}`}>
+      <main
+        ref={appShellRef}
+        className={`${isMobile && mobileChatOpen ? 'app-shell mobile-chat-open' : 'app-shell'}${isDesktopShell ? ' desktop-shell' : ''}${voiceExpanded && voiceJoined ? ' voice-expanded-mode' : ''}`}
+        data-mobile-surface={isMobile && mobileChatOpen && ['server', 'dm'].includes(workspace) ? 'chat' : 'workspace'}
+      >
         <div className="theme-ambient" aria-hidden="true" />
-        <aside className="rail">
+        <aside className="rail" aria-label="Основная навигация">
           <div className="rail-brand" aria-label="WebCord">
             <BrandLogo className="rail-logo" />
           </div>
@@ -8488,8 +8498,8 @@ export default function App() {
             ['spaces', 'zap', 'Spaces'],
             ['server', 'menu', 'Чаты'],
             ['friends', 'smile', 'Контакты'],
-            ['dm', 'browser', 'DMs'],
-            ['activity', 'wave', 'Activity'],
+            ['dm', 'browser', 'Личные'],
+            ['activity', 'wave', 'События'],
             ['stories', 'story', 'Сторис']
           ].map(([item, icon, label]) => (
             <button
@@ -8499,6 +8509,7 @@ export default function App() {
               type="button"
               title={label}
               aria-label={label}
+              aria-current={workspace === item ? 'page' : undefined}
               onClick={() => {
                 setWorkspace(item);
                 setMobileSidebarOpen(false);
@@ -8553,7 +8564,7 @@ export default function App() {
               setMobileChatSearch(value);
               if (workspace === 'dm') setDmSearch(value);
             }}
-            onOpenSettings={() => { setSettingsSection('folders'); setShowSettingsModal(true); }}
+            onOpenSettings={() => { setSettingsSection('account'); setShowSettingsModal(true); }}
           />
 
           {!isMobile ? (
@@ -8620,9 +8631,9 @@ export default function App() {
           {workspace === 'server' ? (
             <div className="stack">
               <section className="sidebar-card channel-sections">
-                <p className="section-label">Text channels</p>
+                <p className="section-label">Чаты</p>
                 {filteredTextChannels.length === 0 ? <p className="muted empty-copy">No text channels yet.</p> : filteredTextChannels.map((channel) => <button key={channel.id} className={String(channel.id) === String(channelId) ? 'channel-btn active' : 'channel-btn'} type="button" onClick={() => selectTextChannel(channel.id)}><span className="channel-icon"><AppIcon name="hash" size={16} /></span><span>{channel.name}</span></button>)}
-                <p className="section-label">Voice channels</p>
+                <p className="section-label">Голосовые</p>
                 {filteredVoiceChannels.length === 0 ? <p className="muted empty-copy">No voice channels yet.</p> : filteredVoiceChannels.map((channel) => <button key={channel.id} className={String(channel.id) === String(voiceChannelId) ? 'channel-btn active' : 'channel-btn'} type="button" onClick={() => selectVoiceChannel(channel.id)}><span className="channel-icon"><AppIcon name="wave" size={16} /></span><span>{channel.name}</span></button>)}
                 {selectedMobileFolder ? (
                   <>
@@ -8632,7 +8643,7 @@ export default function App() {
                 ) : null}
               </section>
               <section className="sidebar-card direct-sections">
-                <p className="section-label">Personal messages</p>
+                <p className="section-label">Личные сообщения</p>
                 {social.conversations.length === 0 ? (
                   <p className="muted empty-copy">Your direct conversations will appear here.</p>
                 ) : filteredConversations.slice(0, 8).map((conversation) => (

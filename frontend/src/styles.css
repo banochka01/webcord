@@ -10703,3 +10703,562 @@ body {
   .channel-access-row { grid-template-columns: 1fr auto; }
   .channel-access-row select { grid-column: 1 / -1; }
 }
+
+/* WebCord 4.2.1 — phone-first shell and touch geometry. */
+@media (max-width: 860px) {
+  html,
+  body,
+  #root {
+    height: 100%;
+    overscroll-behavior: none;
+  }
+
+  body {
+    background: var(--bg-color);
+  }
+
+  .app-shell,
+  .app-shell.desktop-shell {
+    width: 100%;
+    height: 100dvh;
+    min-height: 100dvh;
+    position: fixed;
+    inset: 0;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+    overflow: hidden;
+    animation: none;
+    transform: none;
+  }
+
+  .app-shell > .rail,
+  .app-shell > .sidebar,
+  .app-shell > .chat-panel,
+  .app-shell > .activity-panel {
+    grid-area: 1 / 1;
+    grid-row: 1 !important;
+    grid-column: 1 !important;
+  }
+
+  .app-shell > .theme-ambient {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+  }
+
+  .app-shell .rail {
+    position: fixed !important;
+    z-index: 80 !important;
+    top: auto !important;
+    right: max(8px, env(safe-area-inset-right)) !important;
+    bottom: calc(7px + env(safe-area-inset-bottom)) !important;
+    left: max(8px, env(safe-area-inset-left)) !important;
+    width: auto !important;
+    height: 62px;
+    display: grid !important;
+    grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
+    grid-auto-flow: column;
+    gap: 2px;
+    align-content: center;
+    padding: 5px 6px;
+    overflow: hidden;
+    border: 1px solid rgba(160, 150, 245, 0.14);
+    border-radius: 20px;
+    background: color-mix(in srgb, var(--panel-color) 94%, transparent);
+    box-shadow: 0 16px 42px rgba(0, 0, 0, 0.38);
+    backdrop-filter: blur(24px);
+  }
+
+  .app-shell .rail-brand,
+  .app-shell .rail-profile,
+  .app-shell .rail-settings,
+  .app-shell .rail-btn[data-workspace="friends"] {
+    display: none !important;
+  }
+
+  .app-shell .rail-btn {
+    width: auto !important;
+    min-width: 0 !important;
+    height: 52px;
+    min-height: 52px;
+    grid-template-rows: 23px 13px;
+    align-content: center;
+    gap: 2px;
+    padding: 4px 2px;
+    border-radius: 15px;
+  }
+
+  .app-shell .rail-btn span {
+    height: 23px;
+    display: grid;
+    place-items: center;
+  }
+
+  .app-shell .rail-btn em {
+    display: block;
+    max-width: 100%;
+    overflow: hidden;
+    font-size: 10px;
+    font-style: normal;
+    font-weight: 750;
+    line-height: 13px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .app-shell .rail-btn.active,
+  .app-shell .rail-btn:hover {
+    border-radius: 15px;
+    transform: none;
+  }
+
+  .app-shell[data-mobile-surface="chat"] .rail {
+    display: none !important;
+  }
+
+  .app-shell .sidebar {
+    position: absolute !important;
+    inset: 0 !important;
+    width: 100%;
+    height: 100dvh;
+    min-height: 0;
+    gap: 0;
+    padding: max(8px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right)) calc(82px + env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
+    overflow-x: hidden;
+    overflow-y: auto;
+    background: var(--bg-color);
+    scrollbar-width: none;
+  }
+
+  .app-shell:not(.mobile-chat-open) > .sidebar {
+    position: fixed !important;
+    inset: 0 !important;
+  }
+
+  .app-shell .sidebar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .mobile-home-panel {
+    gap: 10px;
+    padding-bottom: 5px;
+  }
+
+  .mobile-home-top {
+    position: sticky;
+    z-index: 4;
+    top: calc(-1 * max(8px, env(safe-area-inset-top)));
+    min-height: 54px;
+    margin-inline: -2px;
+    padding: 7px 4px;
+    background: color-mix(in srgb, var(--bg-color) 92%, transparent);
+    backdrop-filter: blur(18px);
+  }
+
+  .mobile-home-title {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .mobile-home-title > .brand-logo {
+    width: 34px;
+    height: 34px;
+    flex: 0 0 34px;
+  }
+
+  .mobile-home-title > span {
+    min-width: 0;
+    display: grid;
+    gap: 1px;
+  }
+
+  .mobile-home-top h1 {
+    max-width: 100%;
+    font-size: 20px;
+    line-height: 1.1;
+  }
+
+  .mobile-home-title small {
+    overflow: hidden;
+    color: var(--muted-text);
+    font-size: 11px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .mobile-home-more {
+    width: 42px;
+    min-width: 42px;
+    height: 42px;
+    min-height: 42px;
+    border-radius: 14px;
+    background: rgba(123, 107, 255, 0.1);
+  }
+
+  .mobile-home-stories {
+    grid-auto-columns: 60px;
+    gap: 8px;
+    min-height: 72px;
+    padding: 1px 2px;
+  }
+
+  .mobile-story-item {
+    min-height: 72px;
+    gap: 4px;
+  }
+
+  .mobile-story-ring {
+    width: 48px;
+    height: 48px;
+  }
+
+  .mobile-story-ring .profile-avatar {
+    width: 42px;
+    height: 42px;
+    box-shadow: 0 0 0 2px var(--bg-color);
+  }
+
+  .mobile-story-ring i {
+    right: -2px;
+    bottom: 0;
+    width: 20px;
+    height: 20px;
+    border-width: 2px;
+    box-shadow: none;
+  }
+
+  .mobile-story-item strong {
+    max-width: 60px;
+    font-size: 10px;
+  }
+
+  .mobile-chat-search {
+    min-height: 44px;
+    gap: 10px;
+    padding: 0 14px;
+    border: 1px solid rgba(160, 150, 245, 0.1);
+    border-radius: 15px;
+    background: color-mix(in srgb, var(--panel-color) 82%, var(--bg-color));
+  }
+
+  .mobile-chat-search input {
+    min-height: 42px;
+    font-size: 16px;
+  }
+
+  .mobile-folder-tabs {
+    min-height: 40px;
+    padding: 3px;
+    border-radius: 14px;
+  }
+
+  .mobile-folder-tabs button {
+    min-height: 34px;
+    padding-inline: 11px;
+    border-radius: 11px;
+    font-size: 12px;
+  }
+
+  .app-shell .sidebar > .stack {
+    gap: 0;
+    padding: 0 0 6px;
+    overflow: visible;
+  }
+
+  .app-shell .sidebar-card {
+    padding: 0;
+    border: 0;
+    background: transparent !important;
+    box-shadow: none;
+  }
+
+  .app-shell .sidebar-card .section-label {
+    margin: 14px 10px 5px;
+    color: #8d91aa;
+    font-size: 10px;
+    letter-spacing: .08em;
+  }
+
+  .app-shell .channel-btn {
+    width: 100%;
+    min-height: 56px;
+    grid-template-columns: 42px minmax(0, 1fr) auto;
+    gap: 10px;
+    margin: 0;
+    padding: 6px 10px;
+    border: 0;
+    border-radius: 14px;
+    box-shadow: none;
+  }
+
+  .app-shell .channel-btn + .channel-btn {
+    margin-top: 1px;
+  }
+
+  .app-shell .channel-btn.active {
+    border: 0;
+    background: linear-gradient(90deg, rgba(123, 107, 255, .2), rgba(123, 107, 255, .07));
+    box-shadow: inset 3px 0 0 var(--accent-color);
+  }
+
+  .app-shell .channel-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 13px;
+  }
+
+  .app-shell .channel-btn > span:not(.channel-icon),
+  .app-shell .channel-btn > strong {
+    overflow: hidden;
+    font-size: 15px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .chat-list-row-wrap {
+    position: relative;
+  }
+
+  .chat-list-row {
+    width: 100%;
+    min-height: 62px;
+    display: grid;
+    grid-template-columns: 44px minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: center;
+    padding: 7px 9px;
+    border: 0;
+    border-radius: 14px;
+    text-align: left;
+    background: transparent;
+  }
+
+  .chat-list-row.active,
+  .chat-list-row:hover {
+    background: rgba(123, 107, 255, .1);
+  }
+
+  .chat-list-row > .profile-avatar {
+    width: 44px;
+    height: 44px;
+  }
+
+  .chat-list-copy,
+  .chat-list-title,
+  .chat-list-preview {
+    min-width: 0;
+  }
+
+  .chat-list-copy {
+    display: grid;
+    gap: 3px;
+  }
+
+  .chat-list-title {
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+    justify-content: space-between;
+  }
+
+  .chat-list-title strong,
+  .chat-list-preview {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .chat-list-title strong {
+    font-size: 14px;
+  }
+
+  .chat-list-title time,
+  .chat-list-preview {
+    color: var(--muted-text);
+    font-size: 11px;
+  }
+
+  .chat-list-flags {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .chat-list-flags b {
+    min-width: 20px;
+    height: 20px;
+    display: grid;
+    place-items: center;
+    padding-inline: 5px;
+    border-radius: 999px;
+    color: #fff;
+    background: var(--accent-color);
+    font-size: 10px;
+  }
+
+  .sidebar-bottom {
+    position: sticky;
+    z-index: 3;
+    bottom: 0;
+    margin: 8px 0 0;
+    padding-top: 5px;
+    background: linear-gradient(180deg, transparent, var(--bg-color) 28%);
+  }
+
+  .sidebar-bottom button:first-child {
+    min-height: 44px;
+    border-radius: 14px;
+    font-size: 13px;
+    box-shadow: none;
+  }
+
+  .app-shell.mobile-chat-open .chat-panel {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100dvh;
+    min-height: 100dvh;
+    display: flex !important;
+    flex-direction: column;
+    padding-bottom: 0;
+    overflow: hidden;
+  }
+
+  .chat-header {
+    position: relative;
+    flex: 0 0 auto;
+    min-height: calc(58px + env(safe-area-inset-top));
+    align-items: center;
+    padding: max(7px, env(safe-area-inset-top)) max(8px, env(safe-area-inset-right)) 7px max(8px, env(safe-area-inset-left));
+    border-bottom: 1px solid rgba(160, 150, 245, .1);
+    background: color-mix(in srgb, var(--bg-color) 94%, transparent);
+    backdrop-filter: blur(20px);
+  }
+
+  .chat-header-main {
+    align-items: center;
+    gap: 8px;
+  }
+
+  .mobile-sidebar-toggle.round,
+  .mobile-chat-more {
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+    min-height: 44px;
+    margin: 0;
+    border-radius: 14px;
+    background: rgba(123, 107, 255, .1);
+    box-shadow: none;
+  }
+
+  .chat-title-avatar {
+    width: 40px;
+    height: 40px;
+    margin: 0 -48px 0 0;
+    box-shadow: 0 0 0 2px var(--bg-color);
+  }
+
+  .chat-title-copy {
+    min-height: 44px;
+    padding: 4px 8px 4px 54px;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    backdrop-filter: none;
+  }
+
+  .chat-header strong {
+    font-size: 16px;
+  }
+
+  .chat-header .muted {
+    font-size: 11px;
+  }
+
+  .header-badges {
+    flex: 0 0 auto;
+  }
+
+  .app-shell .messages {
+    min-height: 0;
+    flex: 1 1 auto;
+    gap: 6px;
+    padding: 12px max(9px, env(safe-area-inset-right)) 12px max(9px, env(safe-area-inset-left));
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .app-shell .message-card {
+    max-width: 88%;
+  }
+
+  .app-shell .message-card p {
+    font-size: 15px;
+    line-height: 1.4;
+  }
+
+  .app-shell .composer.message-form {
+    width: auto;
+    min-height: 54px;
+    flex: 0 0 auto;
+    grid-template-columns: auto auto auto minmax(0, 1fr) auto;
+    gap: 3px;
+    margin: 0 max(7px, env(safe-area-inset-right)) max(7px, env(safe-area-inset-bottom)) max(7px, env(safe-area-inset-left));
+    padding: 5px 6px;
+    border-radius: 18px;
+    background: color-mix(in srgb, var(--panel-color) 96%, transparent);
+    box-shadow: 0 12px 34px rgba(0, 0, 0, .32);
+  }
+
+  .app-shell .composer .composer-tools-wrapper,
+  .app-shell .composer .emoji-wrapper {
+    display: none;
+  }
+
+  .app-shell .composer button[title*="video circle"] {
+    display: inline-flex;
+  }
+
+  .app-shell .composer textarea {
+    min-height: 42px;
+    max-height: 112px;
+    padding: 10px 8px;
+    font-size: 16px;
+  }
+
+  .app-shell .composer-btn,
+  .app-shell .composer-send {
+    width: 42px;
+    min-width: 42px;
+    height: 42px;
+    min-height: 42px;
+  }
+
+  .app-shell .panel-footer {
+    flex: 0 0 auto;
+    padding: 0 max(9px, env(safe-area-inset-right)) max(7px, env(safe-area-inset-bottom)) max(9px, env(safe-area-inset-left));
+  }
+
+  .workspace-scroll,
+  .stories-workspace,
+  .dashboard-grid {
+    min-height: 0;
+    flex: 1 1 auto;
+    padding-bottom: calc(78px + env(safe-area-inset-bottom));
+    overflow-y: auto;
+  }
+}
+
+@media (max-width: 390px) {
+  .app-shell .rail-btn em {
+    font-size: 9px;
+  }
+
+  .mobile-home-title small {
+    display: none;
+  }
+
+}

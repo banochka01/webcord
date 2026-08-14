@@ -1,4 +1,4 @@
-const CACHE_NAME = 'webcord-app-v9-product-depth';
+const CACHE_NAME = 'webcord-app-v10-mobile-shell';
 const SHELL_ASSETS = [
   '/manifest.webmanifest',
   '/icons/webcord.png',

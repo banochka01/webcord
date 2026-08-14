@@ -4,7 +4,9 @@ Add-Type -AssemblyName System.Drawing
 
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot '..')
 $sourcePath = Join-Path $repoRoot 'frontend\public\icons\webcord.png'
+$foregroundSourcePath = Join-Path $repoRoot 'frontend\public\icons\webcord-white.png'
 $androidRoot = Join-Path $repoRoot 'clients\webcord_native\android\app\src\main\res'
+$webIconsRoot = Join-Path $repoRoot 'frontend\public\icons'
 $windowsIconPath = Join-Path $repoRoot 'clients\webcord_native\windows\runner\resources\app_icon.ico'
 $desktopIconPath = Join-Path $repoRoot 'desktop\build\icon.ico'
 $desktopPngPath = Join-Path $repoRoot 'desktop\build\icon.png'
@@ -12,8 +14,12 @@ $desktopPngPath = Join-Path $repoRoot 'desktop\build\icon.png'
 if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
   throw "Canonical WebCord icon was not found: $sourcePath"
 }
+if (-not (Test-Path -LiteralPath $foregroundSourcePath -PathType Leaf)) {
+  throw "Canonical WebCord foreground was not found: $foregroundSourcePath"
+}
 
 $source = [System.Drawing.Image]::FromFile($sourcePath)
+$foregroundSource = [System.Drawing.Image]::FromFile($foregroundSourcePath)
 
 function New-IconPngBytes {
   param([int] $Size)
@@ -101,6 +107,38 @@ function New-IconDibBytes {
   }
 }
 
+function New-AdaptiveForegroundPngBytes {
+  param([int] $Size)
+
+  $bitmap = New-Object System.Drawing.Bitmap($Size, $Size, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+  $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+  try {
+    $graphics.Clear([System.Drawing.Color]::Transparent)
+    $graphics.CompositingMode = [System.Drawing.Drawing2D.CompositingMode]::SourceOver
+    $graphics.CompositingQuality = [System.Drawing.Drawing2D.CompositingQuality]::HighQuality
+    $graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+    $graphics.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+    $graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
+
+    # Android masks the outer 18dp of adaptive icons. Keep the actual mark in
+    # the central safe zone so circles, squircles and themed icons stay intact.
+    $markSize = [int][Math]::Round($Size * 0.60)
+    $offset = [int](($Size - $markSize) / 2)
+    $graphics.DrawImage($foregroundSource, $offset, $offset, $markSize, $markSize)
+
+    $stream = New-Object System.IO.MemoryStream
+    try {
+      $bitmap.Save($stream, [System.Drawing.Imaging.ImageFormat]::Png)
+      return ,$stream.ToArray()
+    } finally {
+      $stream.Dispose()
+    }
+  } finally {
+    $graphics.Dispose()
+    $bitmap.Dispose()
+  }
+}
+
 function Set-BinaryFileIfChanged {
   param(
     [string] $Path,
@@ -129,7 +167,17 @@ try {
   }
   foreach ($entry in $androidSizes.GetEnumerator()) {
     Set-BinaryFileIfChanged -Path (Join-Path $androidRoot $entry.Key) -Bytes (New-IconPngBytes -Size $entry.Value)
+    $brandedPath = $entry.Key -replace 'ic_launcher\.png$', 'webcord_launcher.png'
+    Set-BinaryFileIfChanged -Path (Join-Path $androidRoot $brandedPath) -Bytes (New-IconPngBytes -Size $entry.Value)
   }
+
+  $adaptiveForeground = New-AdaptiveForegroundPngBytes -Size 432
+  Set-BinaryFileIfChanged -Path (Join-Path $androidRoot 'drawable-nodpi\webcord_launcher_foreground.png') -Bytes $adaptiveForeground
+  Set-BinaryFileIfChanged -Path (Join-Path $androidRoot 'drawable-nodpi\webcord_launcher_monochrome.png') -Bytes $adaptiveForeground
+
+  Set-BinaryFileIfChanged -Path (Join-Path $webIconsRoot 'icon-192.png') -Bytes (New-IconPngBytes -Size 192)
+  Set-BinaryFileIfChanged -Path (Join-Path $webIconsRoot 'icon-512.png') -Bytes (New-IconPngBytes -Size 512)
+  Set-BinaryFileIfChanged -Path (Join-Path $webIconsRoot 'apple-touch-icon.png') -Bytes (New-IconPngBytes -Size 180)
 
   Set-BinaryFileIfChanged -Path $desktopPngPath -Bytes (New-IconPngBytes -Size 512)
 
@@ -169,5 +217,6 @@ try {
   Set-BinaryFileIfChanged -Path $windowsIconPath -Bytes $icoBytes
   Set-BinaryFileIfChanged -Path $desktopIconPath -Bytes $icoBytes
 } finally {
+  $foregroundSource.Dispose()
   $source.Dispose()
 }

@@ -229,7 +229,7 @@ class WebCordApi {
         'message': message,
         'stack': stack,
         'platform': Platform.isAndroid ? 'ANDROID' : 'WINDOWS',
-        'appVersion': '4.2.0',
+        'appVersion': '4.2.1',
         'context': context,
       },
     );
