@@ -44,7 +44,7 @@ jobs:
 
   unsigned-ios-ipa:
     name: Unsigned iOS IPA
-    if: github.ref == 'refs/heads/codex/webcord-4.3-pulse-ios'
+    if: github.ref == 'refs/heads/codex/webcord-4.3-pulse-ios' && !contains(github.event.head_commit.message, '[deploy-release]') && !contains(github.event.head_commit.message, '[cleanup-deploy]')
     runs-on: macos-15
     timeout-minutes: 45
 
@@ -92,3 +92,131 @@ jobs:
             clients/webcord_native/build/ios/ipa/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 14
+
+  deploy-production-release:
+    name: Deploy WebCord 4.3.0 and publish clients
+    if: github.ref == 'refs/heads/codex/webcord-4.3-pulse-ios' && contains(github.event.head_commit.message, '[deploy-release]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download verified client artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/release"
+          gh release download webcord-4.3.0-ci-transfer-32700101608 \
+            --repo banochka01/webcord \
+            --dir "$RUNNER_TEMP/release"
+          test -s "$RUNNER_TEMP/release/WebCord-4.3.0-build.7-windows.zip"
+          test -s "$RUNNER_TEMP/release/WebCord-4.3.0-build.7-android.apk"
+          test -s "$RUNNER_TEMP/release/WebCord-4.3.0-7-ios-unsigned.ipa"
+          sha256sum "$RUNNER_TEMP/release"/*
+
+      - name: Configure temporary SSH access
+        env:
+          DEPLOY_KEY: ${{ secrets.WEBCORD_DEPLOY_SSH_KEY }}
+        run: |
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s' "$DEPLOY_KEY" > "$HOME/.ssh/webcord_deploy"
+          chmod 600 "$HOME/.ssh/webcord_deploy"
+          printf '%s\n' '104.128.140.14 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIB1dmCvPxjtmb2Z/+fPm97xX5AhFTxBAMiXoZJ0eyNXb' > "$HOME/.ssh/known_hosts"
+
+      - name: Back up production state and stage clients
+        env:
+          RELEASE_DIR: ${{ runner.temp }}/release
+        run: |
+          SSH=(ssh -i "$HOME/.ssh/webcord_deploy" -o BatchMode=yes root@104.128.140.14)
+          SCP=(scp -i "$HOME/.ssh/webcord_deploy" -o BatchMode=yes)
+          "${SSH[@]}" 'set -eu; stamp=$(date -u +%Y%m%d-%H%M%S); backup="/opt/webcord_backups/release-$stamp"; mkdir -p "$backup/client-downloads"; docker exec webcord-postgres pg_dump -U webcord -d webcord -Fc > "$backup/postgres.dump"; docker cp webcord-backend:/app/client-downloads/. "$backup/client-downloads/"; printf "BACKUP_DIR=%s\n" "$backup"'
+          "${SSH[@]}" "mkdir -p '/opt/webcord_release_incoming/$GITHUB_RUN_ID'"
+          "${SCP[@]}" "$RELEASE_DIR"/* "root@104.128.140.14:/opt/webcord_release_incoming/$GITHUB_RUN_ID/"
+
+      - name: Deploy selected branch
+        run: |
+          ssh -i "$HOME/.ssh/webcord_deploy" -o BatchMode=yes root@104.128.140.14 \
+            "cd /opt/webcord && BRANCH='$GITHUB_REF_NAME' sh ./scripts/deploy.sh"
+
+      - name: Publish client downloads atomically
+        run: |
+          ssh -i "$HOME/.ssh/webcord_deploy" -o BatchMode=yes root@104.128.140.14 'bash -s' -- "$GITHUB_RUN_ID" <<'REMOTE'
+          set -euo pipefail
+          run_id="$1"
+          incoming="/opt/webcord_release_incoming/$run_id"
+          windows="$incoming/WebCord-4.3.0-build.7-windows.zip"
+          android="$incoming/WebCord-4.3.0-build.7-android.apk"
+          ios="$incoming/WebCord-4.3.0-7-ios-unsigned.ipa"
+          test -s "$windows"
+          test -s "$android"
+          test -s "$ios"
+
+          windows_hash=$(sha256sum "$windows" | awk '{print $1}')
+          android_hash=$(sha256sum "$android" | awk '{print $1}')
+          ios_hash=$(sha256sum "$ios" | awk '{print $1}')
+          test "$windows_hash" = '4c9c6b794171deadb7b32869d09993042cc0a72c4c86b69c057f869fff2cd395'
+          test "$android_hash" = '5d3015e24b38e86448a39094fbc320e95b19a48ab328882c57f329fe5caa9270'
+          test "$ios_hash" = '242298af63abed327642eb8a3da56bb503aafbd8fc1d2b8dc09c3777593725c8'
+
+          windows_size=$(stat -c %s "$windows")
+          android_size=$(stat -c %s "$android")
+          ios_size=$(stat -c %s "$ios")
+          updated_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          manifest=$(mktemp /tmp/webcord-client-manifest.XXXXXX.json)
+          cat > "$manifest" <<JSON
+          {
+            "windows": {
+              "platform": "windows",
+              "fileName": "WebCord-Windows-4.3.0.zip",
+              "storedFileName": "WebCord-Windows-4.3.0.zip",
+              "mimeType": "application/zip",
+              "size": $windows_size,
+              "sha256": "$windows_hash",
+              "updatedAt": "$updated_at",
+              "updatedBy": "codex-release-dfcd922"
+            },
+            "android": {
+              "platform": "android",
+              "fileName": "WebCord-Android-4.3.0.apk",
+              "storedFileName": "WebCord-Android-4.3.0.apk",
+              "mimeType": "application/vnd.android.package-archive",
+              "size": $android_size,
+              "sha256": "$android_hash",
+              "updatedAt": "$updated_at",
+              "updatedBy": "codex-release-dfcd922"
+            },
+            "ios": {
+              "platform": "ios",
+              "fileName": "WebCord-iOS-4.3.0-unsigned.ipa",
+              "storedFileName": "WebCord-iOS-4.3.0-unsigned.ipa",
+              "mimeType": "application/octet-stream",
+              "size": $ios_size,
+              "sha256": "$ios_hash",
+              "updatedAt": "$updated_at",
+              "updatedBy": "codex-release-dfcd922"
+            }
+          }
+          JSON
+
+          docker cp "$windows" webcord-backend:/app/client-downloads/WebCord-Windows-4.3.0.zip
+          docker cp "$android" webcord-backend:/app/client-downloads/WebCord-Android-4.3.0.apk
+          docker cp "$ios" webcord-backend:/app/client-downloads/WebCord-iOS-4.3.0-unsigned.ipa
+          docker cp "$manifest" webcord-backend:/app/client-downloads/manifest.json.new
+          docker exec webcord-backend sh -lc 'mv /app/client-downloads/manifest.json.new /app/client-downloads/manifest.json'
+          rm -f "$manifest"
+          docker exec webcord-backend cat /app/client-downloads/manifest.json
+          curl -fsS http://127.0.0.1:8080/api/downloads
+          REMOTE
+
+      - name: Verify production endpoints
+        run: |
+          curl -fsS https://webcordes.ru/api/health
+          curl -fsS https://webcordes.ru/api/ready
+          curl -fsS https://webcordes.ru/api/downloads
+          curl -fsSI https://webcordes.ru/downloads/windows
+          curl -fsSI https://webcordes.ru/downloads/android
+          curl -fsSI https://webcordes.ru/downloads/ios
