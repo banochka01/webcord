@@ -958,6 +958,7 @@ class VoiceParticipant {
     this.camera = false,
     this.screen = false,
     this.speaking = false,
+    this.handRaised = false,
     this.audioProfile = 'voiceFocus',
     this.audioBitrate = 64000,
   });
@@ -970,6 +971,7 @@ class VoiceParticipant {
   final bool camera;
   final bool screen;
   final bool speaking;
+  final bool handRaised;
   final String audioProfile;
   final int audioBitrate;
 
@@ -994,6 +996,7 @@ class VoiceParticipant {
       camera: _asBool(json['camera']),
       screen: _asBool(json['screen']),
       speaking: _asBool(json['speaking']),
+      handRaised: _asBool(json['handRaised']),
       audioProfile: '${json['audioProfile'] ?? 'voiceFocus'}',
       audioBitrate: _asInt(json['audioBitrate']) == 0
           ? 64000

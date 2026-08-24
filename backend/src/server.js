@@ -30,7 +30,7 @@ const app = express();
 const server = http.createServer(app);
 
 const PORT = Number(process.env.PORT || 3001);
-const APP_VERSION = '4.2.1';
+const APP_VERSION = '4.3.0';
 const MAX_UPLOAD_SIZE_MB = Number(process.env.MAX_UPLOAD_SIZE_MB || 25);
 const MAX_CLIENT_DOWNLOAD_SIZE_MB = Number(process.env.CLIENT_DOWNLOAD_MAX_SIZE_MB || 500);
 const DEFAULT_MESSAGE_LIMIT = 100;
@@ -146,6 +146,12 @@ const CLIENT_DOWNLOAD_PLATFORMS = {
     defaultFileName: 'WebCord-Android.apk',
     extensions: new Set(['.apk', '.aab']),
     contentType: 'application/vnd.android.package-archive'
+  },
+  ios: {
+    label: 'iPhone / iPad',
+    defaultFileName: 'WebCord-iOS.ipa',
+    extensions: new Set(['.ipa']),
+    contentType: 'application/octet-stream'
   }
 };
 
@@ -4334,6 +4340,7 @@ function serializeVoiceParticipant(socketId, participant = {}) {
     camera: Boolean(participant.camera),
     screen: Boolean(participant.screen),
     speaking: Boolean(participant.speaking),
+    handRaised: Boolean(participant.handRaised),
     audioProfile: normalizeVoiceAudioProfile(participant.audioProfile),
     audioBitrate: normalizeVoiceAudioBitrate(participant.audioBitrate)
   };
@@ -4574,6 +4581,7 @@ io.on('connection', (socket) => {
         camera: false,
         screen: false,
         speaking: false,
+        handRaised: false,
         audioProfile: 'voiceFocus',
         audioBitrate: 64000
       });
@@ -4626,6 +4634,7 @@ io.on('connection', (socket) => {
     participant.camera = booleanFromPayload(payload.camera);
     participant.screen = booleanFromPayload(payload.screen);
     participant.speaking = booleanFromPayload(payload.speaking);
+    participant.handRaised = booleanFromPayload(payload.handRaised);
     participant.audioProfile = normalizeVoiceAudioProfile(payload.audioProfile);
     participant.audioBitrate = normalizeVoiceAudioBitrate(payload.audioBitrate);
     participants.set(socket.id, participant);
@@ -4684,6 +4693,7 @@ io.on('connection', (socket) => {
         camera: false,
         screen: false,
         speaking: false,
+        handRaised: false,
         audioProfile: 'voiceFocus',
         audioBitrate: 64000
       });
@@ -4712,6 +4722,7 @@ io.on('connection', (socket) => {
     participant.camera = booleanFromPayload(payload.camera);
     participant.screen = booleanFromPayload(payload.screen);
     participant.speaking = booleanFromPayload(payload.speaking);
+    participant.handRaised = booleanFromPayload(payload.handRaised);
     participant.audioProfile = normalizeVoiceAudioProfile(payload.audioProfile);
     participant.audioBitrate = normalizeVoiceAudioBitrate(payload.audioBitrate);
     participants.set(socket.id, participant);

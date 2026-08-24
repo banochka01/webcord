@@ -30,6 +30,11 @@ test('session secrets are one-way and device metadata has safe defaults', () => 
     deviceName: 'WebCord for Android',
     userAgent: 'Mozilla Android'
   });
+  assert.deepEqual(describeDevice('WebCord iPhone iOS', '', ''), {
+    platform: 'IOS',
+    deviceName: 'WebCord for iPhone and iPad',
+    userAgent: 'WebCord iPhone iOS'
+  });
 });
 
 test('community role checks use the complete role hierarchy', () => {

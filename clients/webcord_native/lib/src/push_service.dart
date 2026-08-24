@@ -1,10 +1,9 @@
 import 'dart:async';
-import 'dart:io';
-
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 
 import 'api_client.dart';
+import 'client_platform.dart';
 import 'native_bridge.dart';
 
 @pragma('vm:entry-point')
@@ -28,7 +27,7 @@ class PushService {
   bool get available => _available;
 
   Future<void> initialize() async {
-    if (!Platform.isAndroid) return;
+    if (!supportsWebCordPush) return;
     try {
       await Firebase.initializeApp();
       FirebaseMessaging.onBackgroundMessage(webCordFirebaseBackgroundHandler);
@@ -70,20 +69,23 @@ class PushService {
       _registeredToken = token;
     }
     await _refreshSubscription?.cancel();
-    _refreshSubscription = FirebaseMessaging.instance.onTokenRefresh.listen(
-      (token) async {
-        try {
-          await api.saveDevicePushToken(authToken: authToken, token: token);
-          _registeredToken = token;
-        } catch (_) {}
-      },
-    );
+    _refreshSubscription = FirebaseMessaging.instance.onTokenRefresh.listen((
+      token,
+    ) async {
+      try {
+        await api.saveDevicePushToken(authToken: authToken, token: token);
+        _registeredToken = token;
+      } catch (_) {}
+    });
     final pending = _pendingOpen;
     _pendingOpen = null;
     if (pending != null) _dispatchOpen(pending);
   }
 
-  Future<void> clearSession({required WebCordApi api, required String authToken}) async {
+  Future<void> clearSession({
+    required WebCordApi api,
+    required String authToken,
+  }) async {
     await _refreshSubscription?.cancel();
     _refreshSubscription = null;
     final token = _registeredToken;

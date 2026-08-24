@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 
 import 'models.dart';
+import 'client_platform.dart';
 
 class ApiException implements Exception {
   const ApiException(this.message, {this.statusCode});
@@ -52,10 +53,8 @@ class WebCordApi {
       body: {
         'username': username,
         'password': password,
-        'platform': Platform.isAndroid ? 'ANDROID' : 'WINDOWS',
-        'deviceName': Platform.isAndroid
-            ? 'WebCord for Android'
-            : 'WebCord for Windows',
+        'platform': webCordPlatformCode,
+        'deviceName': webCordDeviceName,
       },
     );
     return AuthSession.fromJson(json);
@@ -68,10 +67,8 @@ class WebCordApi {
       body: {
         'username': username,
         'password': password,
-        'platform': Platform.isAndroid ? 'ANDROID' : 'WINDOWS',
-        'deviceName': Platform.isAndroid
-            ? 'WebCord for Android'
-            : 'WebCord for Windows',
+        'platform': webCordPlatformCode,
+        'deviceName': webCordDeviceName,
       },
     );
     return AuthSession.fromJson(json);
@@ -228,8 +225,8 @@ class WebCordApi {
       body: {
         'message': message,
         'stack': stack,
-        'platform': Platform.isAndroid ? 'ANDROID' : 'WINDOWS',
-        'appVersion': '4.2.1',
+        'platform': webCordPlatformCode,
+        'appVersion': '4.3.0',
         'context': context,
       },
     );
@@ -243,7 +240,7 @@ class WebCordApi {
       'PUT',
       '/push/device-token',
       token: authToken,
-      body: {'token': token, 'platform': 'ANDROID'},
+      body: {'token': token, 'platform': webCordPlatformCode},
     );
   }
 

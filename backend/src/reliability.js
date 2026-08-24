@@ -53,8 +53,20 @@ export function sanitizeErrorReport(payload = {}) {
 export function describeDevice(userAgent = '', requestedName = '', requestedPlatform = '') {
   const agent = String(userAgent || '');
   const platform = clampText(requestedPlatform, 32).toUpperCase()
-    || (/android/i.test(agent) ? 'ANDROID' : /windows/i.test(agent) ? 'WINDOWS' : 'WEB');
-  const fallback = platform === 'ANDROID' ? 'WebCord for Android' : platform === 'WINDOWS' ? 'WebCord for Windows' : 'WebCord Web';
+    || (/android/i.test(agent)
+      ? 'ANDROID'
+      : /iphone|ipad|ipod|\bios\b/i.test(agent)
+        ? 'IOS'
+        : /windows/i.test(agent)
+          ? 'WINDOWS'
+          : 'WEB');
+  const fallback = platform === 'ANDROID'
+    ? 'WebCord for Android'
+    : platform === 'IOS'
+      ? 'WebCord for iPhone and iPad'
+      : platform === 'WINDOWS'
+        ? 'WebCord for Windows'
+        : 'WebCord Web';
   return {
     platform,
     deviceName: clampText(requestedName, 80) || fallback,

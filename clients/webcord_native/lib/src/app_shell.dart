@@ -2527,7 +2527,7 @@ class _VoiceAudioStage extends StatelessWidget {
                 if (state.voiceParticipants.isEmpty)
                   const EmptyLine('Waiting for others')
                 else
-                  for (final participant in state.voiceParticipants)
+                  for (final participant in state.prioritizedVoiceParticipants)
                     VoiceParticipantPresence(
                       participant: participant,
                       onTap: () => showVoiceParticipantSheet(
@@ -4815,7 +4815,7 @@ class RightPanel extends StatelessWidget {
                     VoiceControlStrip(state: state),
                   ],
                   const SizedBox(height: 10),
-                  for (final participant in state.voiceParticipants)
+                  for (final participant in state.prioritizedVoiceParticipants)
                     Padding(
                       padding: const EdgeInsets.only(top: 6),
                       child: VoiceParticipantPresence(
@@ -4862,6 +4862,12 @@ class VoiceControlStrip extends StatelessWidget {
           icon: state.micMuted ? Icons.mic_off_rounded : Icons.mic_rounded,
           label: state.micMuted ? 'Unmute mic' : 'Mute mic',
           onTap: state.toggleMicrophone,
+        ),
+        VoiceActionButton(
+          active: state.handRaised,
+          icon: Icons.back_hand_rounded,
+          label: state.handRaised ? 'Lower hand' : 'Raise hand',
+          onTap: state.toggleRaisedHand,
         ),
         VoiceActionButton(
           active: state.cameraEnabled,
@@ -5010,6 +5016,18 @@ class VoiceParticipantPresence extends StatelessWidget {
                   const SizedBox(width: 6),
                   _VoiceProfileBadge(participant: participant, compact: true),
                 ],
+                if (participant.handRaised)
+                  const Padding(
+                    padding: EdgeInsets.only(left: 6),
+                    child: Tooltip(
+                      message: 'Hand raised',
+                      child: Icon(
+                        Icons.back_hand_rounded,
+                        size: 16,
+                        color: Colors.amberAccent,
+                      ),
+                    ),
+                  ),
                 _PresenceIcon(
                   active: !participant.muted,
                   icon: participant.muted
@@ -5511,7 +5529,7 @@ class MobileVoiceSheet extends StatelessWidget {
           if (state.voiceParticipants.isEmpty)
             const EmptyLine('No active peers')
           else
-            for (final participant in state.voiceParticipants)
+            for (final participant in state.prioritizedVoiceParticipants)
               Padding(
                 padding: const EdgeInsets.only(bottom: 8),
                 child: VoiceParticipantPresence(
@@ -8782,6 +8800,8 @@ class SettingsDialog extends StatelessWidget {
                           leading: Icon(
                             session.platform == 'ANDROID'
                                 ? Icons.phone_android_rounded
+                                : session.platform == 'IOS'
+                                ? Icons.phone_iphone_rounded
                                 : session.platform == 'WINDOWS'
                                 ? Icons.desktop_windows_rounded
                                 : Icons.language_rounded,

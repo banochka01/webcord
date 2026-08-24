@@ -1,6 +1,6 @@
 # Native release checklist
 
-WebCord native builds are produced sequentially because Flutter and Gradle share caches.
+WebCord Android and Windows builds are produced sequentially because Flutter and Gradle share caches. iOS is built separately on macOS because Xcode and Apple code signing are unavailable on Windows.
 
 ## Android signing
 
@@ -30,3 +30,11 @@ Run `npm.cmd run clients:release:package`. It executes analyze, tests, Android a
 Run `npm.cmd run clients:package` only when verified native build outputs already exist.
 
 Publishing to the website remains a separate explicit release step.
+
+## iOS IPA
+
+Run `npm run native:ios:release` on macOS after configuring the `ru.webcord.webcordNative` bundle identifier, Apple Development Team and provisioning profile in Xcode. Flutter writes signed export output under `clients/webcord_native/build/ios/ipa/`.
+
+For credential-free build verification, manually run the `Build iOS IPA` GitHub Actions workflow. It creates a clearly marked unsigned IPA and SHA-256 checksum. Do not publish that artifact as installable: it must first be signed with the intended Apple identity and provisioning profile.
+
+The backend and landing page accept the final `.ipa` at `/downloads/ios`; uploading or publishing it remains a separate explicit release step.

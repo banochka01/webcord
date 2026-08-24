@@ -6,6 +6,8 @@ $repoRoot = Resolve-Path (Join-Path $PSScriptRoot '..')
 $sourcePath = Join-Path $repoRoot 'frontend\public\icons\webcord.png'
 $foregroundSourcePath = Join-Path $repoRoot 'frontend\public\icons\webcord-white.png'
 $androidRoot = Join-Path $repoRoot 'clients\webcord_native\android\app\src\main\res'
+$iosIconRoot = Join-Path $repoRoot 'clients\webcord_native\ios\Runner\Assets.xcassets\AppIcon.appiconset'
+$iosLaunchRoot = Join-Path $repoRoot 'clients\webcord_native\ios\Runner\Assets.xcassets\LaunchImage.imageset'
 $webIconsRoot = Join-Path $repoRoot 'frontend\public\icons'
 $windowsIconPath = Join-Path $repoRoot 'clients\webcord_native\windows\runner\resources\app_icon.ico'
 $desktopIconPath = Join-Path $repoRoot 'desktop\build\icon.ico'
@@ -22,12 +24,19 @@ $source = [System.Drawing.Image]::FromFile($sourcePath)
 $foregroundSource = [System.Drawing.Image]::FromFile($foregroundSourcePath)
 
 function New-IconPngBytes {
-  param([int] $Size)
+  param(
+    [int] $Size,
+    [switch] $Opaque
+  )
 
   $bitmap = New-Object System.Drawing.Bitmap($Size, $Size, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
   $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
   try {
     $graphics.CompositingMode = [System.Drawing.Drawing2D.CompositingMode]::SourceCopy
+    if ($Opaque) {
+      $graphics.Clear([System.Drawing.Color]::FromArgb(255, 14, 24, 34))
+      $graphics.CompositingMode = [System.Drawing.Drawing2D.CompositingMode]::SourceOver
+    }
     $graphics.CompositingQuality = [System.Drawing.Drawing2D.CompositingQuality]::HighQuality
     $graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
     $graphics.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
@@ -169,6 +178,35 @@ try {
     Set-BinaryFileIfChanged -Path (Join-Path $androidRoot $entry.Key) -Bytes (New-IconPngBytes -Size $entry.Value)
     $brandedPath = $entry.Key -replace 'ic_launcher\.png$', 'webcord_launcher.png'
     Set-BinaryFileIfChanged -Path (Join-Path $androidRoot $brandedPath) -Bytes (New-IconPngBytes -Size $entry.Value)
+  }
+
+  if (Test-Path -LiteralPath $iosIconRoot -PathType Container) {
+    $iosSizes = [ordered]@{
+      'Icon-App-20x20@1x.png' = 20
+      'Icon-App-20x20@2x.png' = 40
+      'Icon-App-20x20@3x.png' = 60
+      'Icon-App-29x29@1x.png' = 29
+      'Icon-App-29x29@2x.png' = 58
+      'Icon-App-29x29@3x.png' = 87
+      'Icon-App-40x40@1x.png' = 40
+      'Icon-App-40x40@2x.png' = 80
+      'Icon-App-40x40@3x.png' = 120
+      'Icon-App-60x60@2x.png' = 120
+      'Icon-App-60x60@3x.png' = 180
+      'Icon-App-76x76@1x.png' = 76
+      'Icon-App-76x76@2x.png' = 152
+      'Icon-App-83.5x83.5@2x.png' = 167
+      'Icon-App-1024x1024@1x.png' = 1024
+    }
+    foreach ($entry in $iosSizes.GetEnumerator()) {
+      Set-BinaryFileIfChanged -Path (Join-Path $iosIconRoot $entry.Key) -Bytes (New-IconPngBytes -Size $entry.Value -Opaque)
+    }
+  }
+
+  if (Test-Path -LiteralPath $iosLaunchRoot -PathType Container) {
+    Set-BinaryFileIfChanged -Path (Join-Path $iosLaunchRoot 'LaunchImage.png') -Bytes (New-IconPngBytes -Size 168)
+    Set-BinaryFileIfChanged -Path (Join-Path $iosLaunchRoot 'LaunchImage@2x.png') -Bytes (New-IconPngBytes -Size 336)
+    Set-BinaryFileIfChanged -Path (Join-Path $iosLaunchRoot 'LaunchImage@3x.png') -Bytes (New-IconPngBytes -Size 504)
   }
 
   $adaptiveForeground = New-AdaptiveForegroundPngBytes -Size 432

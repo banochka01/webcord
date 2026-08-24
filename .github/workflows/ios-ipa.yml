@@ -1,0 +1,58 @@
+name: Build iOS IPA
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unsigned-ipa:
+    name: Unsigned iOS IPA
+    runs-on: macos-15
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out WebCord
+        uses: actions/checkout@v4
+
+      - name: Install Flutter 3.44.4
+        shell: bash
+        run: |
+          git clone --depth 1 --branch 3.44.4 https://github.com/flutter/flutter.git "$RUNNER_TEMP/flutter"
+          echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
+
+      - name: Resolve native dependencies
+        working-directory: clients/webcord_native
+        run: flutter pub get
+
+      - name: Analyze and test native client
+        working-directory: clients/webcord_native
+        run: |
+          flutter analyze
+          flutter test
+
+      - name: Build unsigned iOS application
+        working-directory: clients/webcord_native
+        run: flutter build ios --release --no-codesign --dart-define=WEBCORD_API_URL=https://webcordes.ru/api
+
+      - name: Package IPA
+        shell: bash
+        working-directory: clients/webcord_native
+        run: |
+          version="$(sed -n 's/^version: *//p' pubspec.yaml | head -1 | tr '+' '-')"
+          mkdir -p build/ios/ipa/Payload
+          cp -R build/ios/iphoneos/Runner.app build/ios/ipa/Payload/
+          cd build/ios/ipa
+          /usr/bin/zip -qry "WebCord-${version}-ios-unsigned.ipa" Payload
+          shasum -a 256 "WebCord-${version}-ios-unsigned.ipa" > SHA256SUMS.txt
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WebCord-iOS-unsigned
+          path: |
+            clients/webcord_native/build/ios/ipa/*.ipa
+            clients/webcord_native/build/ios/ipa/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 14

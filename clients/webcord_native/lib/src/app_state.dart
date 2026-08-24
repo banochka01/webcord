@@ -9,6 +9,7 @@ import 'package:socket_io_client/socket_io_client.dart' as io;
 
 import 'api_client.dart';
 import 'app_theme.dart';
+import 'client_platform.dart';
 import 'models.dart';
 import 'native_bridge.dart';
 import 'push_service.dart';
@@ -138,7 +139,7 @@ class WebCordState extends ChangeNotifier {
   static const _chatPreferencesKey = 'webcord_native_chat_preferences_v2';
   static const _chatDraftsKey = 'webcord_native_chat_drafts_v2';
   static const _messagePageSize = 100;
-  static const clientVersion = '4.2.1';
+  static const clientVersion = '4.3.0';
 
   final WebCordApi api;
   NativeStore? _store;
@@ -225,6 +226,7 @@ class WebCordState extends ChangeNotifier {
   bool mediaBusy = false;
   bool voiceJoined = false;
   bool micMuted = false;
+  bool handRaised = false;
   bool cameraEnabled = false;
   bool screenSharing = false;
   bool noiseSuppressionEnabled = true;
@@ -309,6 +311,12 @@ class WebCordState extends ChangeNotifier {
 
   List<Channel> get voiceChannels =>
       channels.where((channel) => channel.kind == ChannelKind.voice).toList();
+
+  List<VoiceParticipant> get prioritizedVoiceParticipants {
+    return [...voiceParticipants]..sort(
+      (left, right) => (right.handRaised ? 1 : 0) - (left.handRaised ? 1 : 0),
+    );
+  }
 
   bool get canManageChannels => user?.canManageChannels ?? false;
 
@@ -497,6 +505,7 @@ class WebCordState extends ChangeNotifier {
     unreadChannelIds.clear();
     unreadConversationIds.clear();
     voiceJoined = false;
+    handRaised = false;
     socketStatus = 'offline';
     await _store?.remove(_tokenKey);
     if (!silent) notifyListeners();
@@ -2212,6 +2221,14 @@ class WebCordState extends ChangeNotifier {
     notifyListeners();
   }
 
+  void toggleRaisedHand() {
+    if (!_ensureVoiceControlAvailable()) return;
+    handRaised = !handRaised;
+    voiceStatus = handRaised ? 'Hand raised' : 'Hand lowered';
+    _emitVoiceState();
+    notifyListeners();
+  }
+
   Future<void> toggleCamera() async {
     if (!_ensureVoiceControlAvailable()) return;
     if (_cameraStream == null) {
@@ -2334,7 +2351,7 @@ class WebCordState extends ChangeNotifier {
   }
 
   Future<void> openClientUpdate() async {
-    final platform = Platform.isAndroid ? 'android' : 'windows';
+    final platform = webCordPlatformSlug;
     final opened = await NativeBridge.openUrl(
       'https://webcordes.ru/downloads/$platform',
     );
@@ -2347,7 +2364,7 @@ class WebCordState extends ChangeNotifier {
   Future<void> checkClientRelease({bool notify = true}) async {
     try {
       clientRelease = await api.currentRelease(
-        platform: Platform.isAndroid ? 'android' : 'windows',
+        platform: webCordPlatformSlug,
         version: clientVersion,
       );
     } catch (_) {
@@ -3411,6 +3428,7 @@ class WebCordState extends ChangeNotifier {
     _participantVolumes.clear();
     voiceJoined = false;
     micMuted = false;
+    handRaised = false;
     cameraEnabled = false;
     screenSharing = false;
     activeCall = null;
@@ -3757,6 +3775,7 @@ class WebCordState extends ChangeNotifier {
             for (final participant in voiceParticipants) {
               unawaited(_createPeerAndOffer(participant.socketId));
             }
+            _emitVoiceState();
           }
           notifyListeners();
         }
@@ -3826,6 +3845,7 @@ class WebCordState extends ChangeNotifier {
       'camera': cameraEnabled,
       'screen': screenSharing,
       'speaking': voiceQuality.speaking,
+      'handRaised': handRaised,
       'noiseSuppression': noiseSuppressionEnabled,
       'audioProfile': voiceAudioProfile.name,
       'audioBitrate': voiceAudioProfile.opusBitrate,

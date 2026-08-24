@@ -45,13 +45,42 @@ async function mockAuthenticatedApp(page) {
     else if (path === '/voice/ice-servers') body = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
     else if (path === '/push/vapid-public-key') body = { enabled: false, nativeEnabled: false, publicKey: '' };
     else if (path === '/downloads') body = { downloads: [] };
-    else if (path === '/client/releases/current') body = { version: '4.2.1', updateAvailable: false, required: false, download: { available: true, url: '/downloads/windows' } };
+    else if (path === '/client/releases/current') body = { version: '4.3.0', updateAvailable: false, required: false, download: { available: true, url: '/downloads/windows' } };
     else if (path === '/me/sessions') body = route.request().method() === 'DELETE' ? { ok: true, revoked: 0 } : { sessions: clientSessions };
     else if (path.startsWith('/channels/') && path.endsWith('/permissions')) body = { ...channels[0], isPrivate: true, minimumRole: 'MEMBER' };
     else if (path === '/client-errors') body = { accepted: true };
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
   });
 }
+
+test('landing exposes the iOS download without mobile overflow', async ({ page }) => {
+  const consoleErrors = [];
+  const failedRequests = [];
+  page.on('console', (message) => {
+    if (message.type() === 'error') consoleErrors.push(message.text());
+  });
+  page.on('requestfailed', (request) => failedRequests.push(request.url()));
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.route('**/api/downloads', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      downloads: [{ platform: 'ios', label: 'iPhone / iPad', available: true, url: '/downloads/ios' }]
+    })
+  }));
+  await page.goto('/');
+
+  const iosDownload = page.getByRole('link', { name: 'iPhone / iPad' });
+  await expect(iosDownload).toBeVisible();
+  await expect(iosDownload).toHaveAttribute('href', '/downloads/ios');
+  const widths = await page.evaluate(() => ({
+    viewport: document.documentElement.clientWidth,
+    content: document.documentElement.scrollWidth
+  }));
+  expect(widths.content).toBeLessThanOrEqual(widths.viewport);
+  expect(consoleErrors).toEqual([]);
+  expect(failedRequests).toEqual([]);
+});
 
 test('Spaces 2.0 renders membership and keeps desktop rail buttons circular', async ({ page }) => {
   await mockAuthenticatedApp(page);

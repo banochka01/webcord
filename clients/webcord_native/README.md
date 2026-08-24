@@ -1,6 +1,6 @@
 # WebCord Native
 
-Flutter client for WebCord Android and Windows.
+Flutter client for WebCord Android, iOS and Windows.
 
 This is a real native Flutter application, not a PWA and not a WebView wrapper. It talks to the existing WebCord backend through REST and Socket.IO.
 
@@ -20,11 +20,11 @@ This is a real native Flutter application, not a PWA and not a WebView wrapper. 
 - WebRTC camera sharing, screen sharing, remote media playback and voice signaling through the existing Socket.IO backend.
 - Voice quality layer: backend-provided STUN/TURN ICE config, Android communication audio mode, Opus SDP tuning, voice quality diagnostics and relay/direct route display.
 - Settings dialog with saved theme, message density, notifications, microphone/headphones/camera selection, microphone sensitivity, master volume and noise suppression preferences.
-- Voice-room controls for microphone mute, camera state and screen-share state, plus in-chat, fullscreen and floating mini call surfaces.
-- Voice presence shows who is muted, speaking, sharing camera or sharing screen.
+- Voice-room controls for microphone mute, raised hands, camera state and screen-share state, plus in-chat, fullscreen and floating mini call surfaces.
+- Voice presence prioritizes raised hands and shows who is muted, speaking, sharing camera or sharing screen.
 - Session unread badges are shown for channels and direct messages in the phone navigation.
-- Voice messages: Android records `.m4a` through `MediaRecorder`; Windows records `.wav` through WinMM.
-- Video circles: Android opens native video capture; Windows uses a native video-file picker fallback.
+- Voice messages: Android and iOS record `.m4a`; Windows records `.wav` through WinMM.
+- Video circles: Android and iOS open native video capture; Windows uses a native video-file picker fallback.
 - In-app media viewing: images open in a zoomable fullscreen viewer; videos and circles play in-app with native controls; voice messages play inline in the chat bubble.
 - Stories support a text description and optional attached music track.
 
@@ -43,7 +43,7 @@ The client also applies Android `inCommunication` audio routing before joining a
 
 ## Remaining Release Integrations
 
-Android push notifications require a Firebase project and `google-services.json`. Release signing requires a real upload keystore and passwords. Keep both outside git and pass them through local/CI secrets.
+Android push notifications require a Firebase project and `google-services.json`; iOS push requires `GoogleService-Info.plist` plus the Push Notifications capability. Android release signing requires a real upload keystore. iOS distribution requires an Apple certificate and provisioning profile. Keep every credential outside git and pass it through local/CI secrets.
 
 ## Local SDK Configuration
 
@@ -72,6 +72,14 @@ npm.cmd run native:android:debug
 npm.cmd run native:android:release
 npm.cmd run native:windows:release
 ```
+
+On macOS with Xcode and Apple signing configured:
+
+```bash
+npm run native:ios:release
+```
+
+The manual `Build iOS IPA` GitHub Actions workflow creates an unsigned verification IPA when signing credentials are unavailable.
 
 Direct Flutter commands:
 

@@ -5,14 +5,14 @@ import gsap from 'gsap';
 import { io } from 'socket.io-client';
 import {
   TbArrowLeft, TbArrowsMaximize, TbArrowsMinimize, TbBolt, TbBrowser, TbCameraRotate,
-  TbBookmark, TbCircleCheck, TbCircleDashed, TbCopy, TbDotsVertical, TbHash, TbMenu2, TbMicrophone, TbMicrophoneOff,
+  TbBookmark, TbCircleCheck, TbCircleDashed, TbCopy, TbDotsVertical, TbHandStop, TbHash, TbMenu2, TbMicrophone, TbMicrophoneOff,
   TbMinus, TbMoodSmile, TbMusic, TbPalette, TbPaperclip, TbPhone, TbPhoneOff, TbPlayerPause,
   TbPlayerPlay, TbPlayerStop, TbPlus, TbPinned, TbScreenShare, TbSearch, TbSend2, TbSettings,
   TbSun, TbMoon, TbShield, TbVideo, TbVideoOff, TbVolume, TbVolumeOff, TbWaveSine, TbX
 } from 'react-icons/tb';
 import {
   MdAdd, MdArrowBackIosNew, MdBookmarkBorder, MdClose, MdContentCopy, MdFullscreen, MdFullscreenExit, MdMenu,
-  MdMoreVert, MdOutlineAttachFile, MdOutlineAutoStories, MdOutlineBolt,
+  MdMoreVert, MdOutlineAttachFile, MdOutlineAutoStories, MdOutlineBackHand, MdOutlineBolt,
   MdOutlineCall, MdOutlineCallEnd, MdOutlineCameraswitch, MdOutlineCheckCircle,
   MdOutlineChatBubbleOutline, MdOutlineGraphicEq, MdOutlineGroup, MdOutlineMic,
   MdOutlineDarkMode, MdOutlineLightMode, MdOutlineMicOff, MdOutlineMusicNote, MdOutlinePalette, MdOutlinePublic, MdOutlineScreenShare,
@@ -24,7 +24,7 @@ import {
 import {
   PiArrowLeft, PiBookmarkSimple, PiBrowser, PiCameraRotate, PiChatCircleDots, PiCheckCircle, PiCopy,
   PiCornersIn, PiCornersOut, PiDotsThreeVertical, PiGear, PiHash, PiImageSquare,
-  PiImagesSquare, PiList, PiMagnifyingGlass, PiMicrophone, PiMicrophoneSlash, PiMoon,
+  PiHand, PiImagesSquare, PiList, PiMagnifyingGlass, PiMicrophone, PiMicrophoneSlash, PiMoon,
   PiMinus, PiMonitorArrowUp, PiMusicNotes, PiPalette, PiPaperPlaneTilt,
   PiPaperclip, PiPause, PiPhoneCall, PiPhoneSlash, PiPlay, PiPlus, PiPushPin, PiSignOut,
   PiShield, PiSmiley, PiSpeakerHigh, PiSpeakerSlash, PiStop, PiSun, PiUserCircle, PiUsersThree,
@@ -34,7 +34,7 @@ import {
 gsap.registerPlugin(useGSAP);
 
 const IconFamilyContext = React.createContext('telegram');
-const APP_VERSION = '4.2.1';
+const APP_VERSION = '4.3.0';
 const SessionCenter = lazy(() => import('./reliability-panels.jsx').then((module) => ({ default: module.SessionCenter })));
 const ReleaseBanner = lazy(() => import('./release-banner.jsx'));
 
@@ -42,7 +42,8 @@ const REMOTE_ORIGIN = import.meta.env.VITE_REMOTE_ORIGIN || 'https://webcordes.r
 const DOWNLOAD_PAGE_URL = `${REMOTE_ORIGIN}/#download`;
 const DOWNLOAD_URLS = {
   windows: '/downloads/windows',
-  android: '/downloads/android'
+  android: '/downloads/android',
+  ios: '/downloads/ios'
 };
 const IS_TAURI_CLIENT = Boolean(window.__TAURI__?.window || window.__TAURI_INTERNALS__);
 const IS_NATIVE_CLIENT = Boolean(
@@ -51,7 +52,7 @@ const IS_NATIVE_CLIENT = Boolean(
   window.webcordWindow ||
   window.electronAPI ||
   window.Capacitor?.isNativePlatform?.() ||
-  /\b(WebCordTauri|WebCordDesktop|WebCordAndroid|Electron)\b/i.test(navigator.userAgent)
+  /\b(WebCordTauri|WebCordDesktop|WebCordAndroid|WebCordiOS|Electron)\b/i.test(navigator.userAgent)
 );
 const API_URL = import.meta.env.VITE_API_URL || (IS_NATIVE_CLIENT ? `${REMOTE_ORIGIN}/api` : '/api');
 const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || (API_URL.startsWith('http') ? new URL(API_URL).origin : window.location.origin);
@@ -1211,6 +1212,16 @@ function AndroidIcon() {
   );
 }
 
+function IOSIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+      <rect x="6" y="2.5" width="12" height="19" rx="3" />
+      <path d="M10 5h4" />
+      <circle cx="12" cy="18.5" r=".8" />
+    </svg>
+  );
+}
+
 function BrowserIcon() {
   return (
     <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
@@ -1231,6 +1242,7 @@ const APP_ICONS = {
   close: <><path d="M18 6 6 18" /><path d="m6 6 12 12" /></>,
   expand: <><path d="M8 3H5a2 2 0 0 0-2 2v3" /><path d="M16 3h3a2 2 0 0 1 2 2v3" /><path d="M8 21H5a2 2 0 0 1-2-2v-3" /><path d="M16 21h3a2 2 0 0 0 2-2v-3" /></>,
   hash: <><path d="M5 9h14" /><path d="M5 15h14" /><path d="M10 3 8 21" /><path d="m16 3-2 18" /></>,
+  hand: <><path d="M7 11V6.5a1.5 1.5 0 0 1 3 0V10" /><path d="M10 10V4.5a1.5 1.5 0 0 1 3 0V10" /><path d="M13 10V5.5a1.5 1.5 0 0 1 3 0V11" /><path d="M16 11V8.5a1.5 1.5 0 0 1 3 0V15c0 4-2.7 7-7 7-3.2 0-5.1-1.6-6.5-3.9L3.3 14.5a1.6 1.6 0 0 1 2.6-1.8L7 14" /></>,
   menu: <><path d="M4 7h16" /><path d="M4 12h16" /><path d="M4 17h16" /></>,
   more: <><circle cx="12" cy="5" r="1.5" /><circle cx="12" cy="12" r="1.5" /><circle cx="12" cy="19" r="1.5" /></>,
   mic: <><path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z" /><path d="M19 10v2a7 7 0 0 1-14 0v-2" /><path d="M12 19v3" /></>,
@@ -1261,7 +1273,7 @@ const APP_ICONS = {
 const ICON_FAMILIES = {
   telegram: {
     arrowLeft: TbArrowLeft, bookmark: TbBookmark, browser: TbBrowser, camera: TbVideo, cameraOff: TbVideoOff,
-    check: TbCircleCheck, copy: TbCopy,
+    check: TbCircleCheck, copy: TbCopy, hand: TbHandStop,
     close: TbX, expand: TbArrowsMaximize, hash: TbHash, menu: TbMenu2, more: TbDotsVertical,
     mic: TbMicrophone, micOff: TbMicrophoneOff, minus: TbMinus, music: TbMusic,
     paperclip: TbPaperclip, pause: TbPlayerPause, phone: TbPhone, phoneOff: TbPhoneOff,
@@ -1273,7 +1285,7 @@ const ICON_FAMILIES = {
   },
   material: {
     arrowLeft: MdArrowBackIosNew, bookmark: MdBookmarkBorder, browser: MdOutlinePublic, camera: MdOutlineVideocam,
-    cameraOff: MdOutlineVideocamOff, check: MdOutlineCheckCircle, copy: MdContentCopy, close: MdClose,
+    cameraOff: MdOutlineVideocamOff, check: MdOutlineCheckCircle, copy: MdContentCopy, close: MdClose, hand: MdOutlineBackHand,
     expand: MdFullscreen, hash: MdOutlineTag, menu: MdMenu, more: MdMoreVert,
     mic: MdOutlineMic, micOff: MdOutlineMicOff, minus: MdRemove,
     music: MdOutlineMusicNote, paperclip: MdOutlineAttachFile, pause: MdPause,
@@ -1288,7 +1300,7 @@ const ICON_FAMILIES = {
   },
   atmosphere: {
     arrowLeft: PiArrowLeft, bookmark: PiBookmarkSimple, browser: PiBrowser, camera: PiVideoCamera,
-    check: PiCheckCircle, copy: PiCopy, cameraOff: PiVideoCameraSlash, close: PiX,
+    check: PiCheckCircle, copy: PiCopy, cameraOff: PiVideoCameraSlash, close: PiX, hand: PiHand,
     expand: PiCornersOut, hash: PiHash, menu: PiList, more: PiDotsThreeVertical,
     mic: PiMicrophone, micOff: PiMicrophoneSlash, minus: PiMinus,
     music: PiMusicNotes, paperclip: PiPaperclip, pause: PiPause, pin: PiPushPin,
@@ -1480,7 +1492,7 @@ function LandingPage({
           if (knownMissing) event.preventDefault();
         }}
       >
-        {platform === 'windows' ? <WindowsIcon /> : <AndroidIcon />}
+        {platform === 'windows' ? <WindowsIcon /> : platform === 'ios' ? <IOSIcon /> : <AndroidIcon />}
         <span>{knownMissing ? label + ' скоро' : label}</span>
       </a>
     );
@@ -1519,6 +1531,7 @@ function LandingPage({
             </button>
             {renderDownloadLink('windows', 'Windows', 'landing-cta-light')}
             {renderDownloadLink('android', 'Android', 'landing-cta-glass')}
+            {renderDownloadLink('ios', 'iPhone / iPad', 'landing-cta-glass')}
           </div>
           <div className="landing-hero-meta" aria-label="Коротко о WebCord">
             <span><i /> браузерный доступ</span>
@@ -3269,6 +3282,7 @@ function VoiceParticipantTile({ participant, compact = false, volume = 100, onVo
         <strong>{participant.username}</strong>
         <span>{participant.status}</span>
       </div>
+      {participant.handRaised ? <span className="voice-chip hand"><AppIcon name="hand" size={14} />Hand raised</span> : null}
       {participant.muted ? <span className="voice-chip">Muted</span> : null}
       {!isSelf ? (
         <label className="voice-volume-control">
@@ -3310,10 +3324,12 @@ function VoiceStage({
   noiseSuppressionEnabled,
   onLeave,
   onToggleMic,
+  onToggleHand,
   onToggleScreen,
   onToggleCamera,
   onToggleExpanded,
   micMuted,
+  handRaised,
   screenSharing,
   cameraEnabled,
   expanded,
@@ -3354,6 +3370,7 @@ function VoiceStage({
         <div className="voice-actions">
           <span className="live-pill">Noise {noiseSuppressionEnabled ? 'on' : 'off'}</span>
           <button type="button" onClick={onToggleMic}><AppIcon name={micMuted ? 'micOff' : 'mic'} size={16} />{micMuted ? 'Unmute' : 'Mute'}</button>
+          <button className={handRaised ? 'active' : ''} type="button" aria-pressed={handRaised} onClick={onToggleHand}><AppIcon name="hand" size={16} />{handRaised ? 'Lower hand' : 'Raise hand'}</button>
           <button type="button" onClick={onToggleScreen}><AppIcon name="screen" size={16} />{screenSharing ? 'Stop share' : 'Share'}</button>
           <button type="button" onClick={onToggleCamera}><AppIcon name={cameraEnabled ? 'cameraOff' : 'camera'} size={16} />{cameraEnabled ? 'Camera off' : 'Camera'}</button>
           <button type="button" onClick={onToggleExpanded}><AppIcon name={expanded ? 'shrink' : 'expand'} size={16} />{expanded ? 'Compact' : 'Expand'}</button>
@@ -3852,7 +3869,8 @@ function AdminPanel({
   const downloads = overview?.downloads || [];
   const downloadAccept = {
     windows: '.zip,.exe,.msi',
-    android: '.apk,.aab'
+    android: '.apk,.aab',
+    ios: '.ipa'
   };
   const statCards = [
     ['Users', stats.users],
@@ -4765,6 +4783,7 @@ export default function App() {
   const [circleCameraSwitching, setCircleCameraSwitching] = useState(false);
   const [voiceJoined, setVoiceJoined] = useState(false);
   const [micMuted, setMicMuted] = useState(false);
+  const [handRaised, setHandRaised] = useState(false);
   const [screenSharing, setScreenSharing] = useState(false);
   const [cameraEnabled, setCameraEnabled] = useState(false);
   const [voiceExpanded, setVoiceExpanded] = useState(false);
@@ -4885,6 +4904,7 @@ export default function App() {
   const voiceStatsTimerRef = useRef(null);
   const lastVoiceStatsRef = useRef({ at: 0, bytesReceived: 0, bytesSent: 0 });
   const micMutedRef = useRef(false);
+  const handRaisedRef = useRef(false);
   const appShellRef = useRef(null);
   const composerPhaseTimerRef = useRef(null);
   const messageSearchTimerRef = useRef(null);
@@ -4917,7 +4937,7 @@ export default function App() {
         body: JSON.stringify({
           message: errorObject.message,
           stack: errorObject.stack,
-          platform: IS_TAURI_CLIENT ? 'WINDOWS' : /Android/i.test(navigator.userAgent) ? 'ANDROID' : 'WEB',
+          platform: IS_TAURI_CLIENT ? 'WINDOWS' : /Android/i.test(navigator.userAgent) ? 'ANDROID' : /iPhone|iPad|iPod/i.test(navigator.userAgent) ? 'IOS' : 'WEB',
           appVersion: APP_VERSION,
           context: { workspace: workspaceRef.current, online: navigator.onLine !== false, ...context }
         })
@@ -5252,6 +5272,7 @@ export default function App() {
 
   useEffect(() => { voiceJoinedRef.current = voiceJoined; }, [voiceJoined]);
   useEffect(() => { micMutedRef.current = micMuted; }, [micMuted]);
+  useEffect(() => { handRaisedRef.current = handRaised; }, [handRaised]);
   useEffect(() => { guildIdRef.current = guild?.id || null; }, [guild?.id]);
   useEffect(() => { channelIdRef.current = channelId; }, [channelId]);
   useEffect(() => { dmConversationIdRef.current = dmConversationId; }, [dmConversationId]);
@@ -5769,6 +5790,12 @@ export default function App() {
         return next;
       });
       setVoiceStatus(participants.length > 0 ? `Voice connected with ${participants.length} peer(s)` : 'Voice connected. Waiting for others.');
+      if (voiceJoinedRef.current) {
+        emitVoiceState({
+          muted: micMutedRef.current,
+          handRaised: handRaisedRef.current
+        });
+      }
     });
     socket.on('voice-user-joined', async (participant) => {
       try {
@@ -6845,8 +6872,8 @@ export default function App() {
         body: JSON.stringify({
           username,
           password,
-          platform: IS_TAURI_CLIENT ? 'WINDOWS' : /Android/i.test(navigator.userAgent) ? 'ANDROID' : 'WEB',
-          deviceName: IS_TAURI_CLIENT ? 'WebCord for Windows' : /Android/i.test(navigator.userAgent) ? 'WebCord for Android' : 'WebCord Web'
+          platform: IS_TAURI_CLIENT ? 'WINDOWS' : /Android/i.test(navigator.userAgent) ? 'ANDROID' : /iPhone|iPad|iPod/i.test(navigator.userAgent) ? 'IOS' : 'WEB',
+          deviceName: IS_TAURI_CLIENT ? 'WebCord for Windows' : /Android/i.test(navigator.userAgent) ? 'WebCord for Android' : /iPhone|iPad|iPod/i.test(navigator.userAgent) ? 'WebCord for iPhone and iPad' : 'WebCord Web'
         })
       });
       setToken(data.token);
@@ -8174,6 +8201,7 @@ export default function App() {
       camera: cameraEnabled,
       screen: screenSharing,
       speaking: false,
+      handRaised: handRaisedRef.current,
       ...overrides
     });
   }
@@ -8217,6 +8245,8 @@ export default function App() {
     voiceAudioContextRef.current = null;
     pendingIceCandidatesRef.current = {};
     setMicMuted(false);
+    handRaisedRef.current = false;
+    setHandRaised(false);
     setVoiceJoined(false);
     setVoiceExpanded(false);
     setVoiceStatus('Voice idle');
@@ -8311,6 +8341,15 @@ export default function App() {
     emitVoiceState({ muted: nextMuted });
   }
 
+  function toggleRaisedHand() {
+    if (!voiceJoinedRef.current) return;
+    const nextRaised = !handRaised;
+    handRaisedRef.current = nextRaised;
+    setHandRaised(nextRaised);
+    setVoiceStatus(nextRaised ? 'Hand raised' : 'Hand lowered');
+    emitVoiceState({ handRaised: nextRaised });
+  }
+
   async function testCamera() {
     if (!navigator.mediaDevices?.getUserMedia) {
       setError('Camera is not supported in this browser');
@@ -8370,14 +8409,18 @@ export default function App() {
       username: getDisplayName(user),
       user,
       muted: micMuted,
-      status: screenSharing ? 'Sharing screen' : cameraEnabled ? 'Camera on' : micMuted ? 'Microphone muted' : 'Speaking ready'
+      handRaised,
+      status: handRaised ? 'Hand raised' : screenSharing ? 'Sharing screen' : cameraEnabled ? 'Camera on' : micMuted ? 'Microphone muted' : 'Speaking ready'
     },
     ...Object.entries(voiceParticipants).map(([socketId, participant]) => ({
       socketId,
       username: participant.username || socketId.slice(0, 8),
       user: participant,
       muted: Boolean(participant.muted),
-      status: participant.speaking
+      handRaised: Boolean(participant.handRaised),
+      status: participant.handRaised
+        ? 'Hand raised'
+        : participant.speaking
         ? 'Speaking'
         : participant.screen
           ? 'Sharing screen'
@@ -8385,7 +8428,7 @@ export default function App() {
             ? 'Video active'
             : 'Connected'
     }))
-  ];
+  ].sort((left, right) => Number(right.handRaised) - Number(left.handRaised));
   const spaceRole = String(guild?.membership?.role || 'MEMBER').toUpperCase();
   const userCanManageChannels = canManageChannels(user) || ['ADMIN', 'OWNER'].includes(spaceRole);
   const userCanModerateMessages = Boolean(user?.isAdmin) || ['ADMIN', 'OWNER'].includes(normalizeUserRole(user?.role)) || ['MODERATOR', 'ADMIN', 'OWNER'].includes(spaceRole);
@@ -8755,6 +8798,7 @@ export default function App() {
               {voiceJoined ? 'Leave voice' : visibleVoiceChannelForJoin ? `Join voice: ${visibleVoiceChannelForJoin.name}` : 'No voice in folder'}
             </button>
             {voiceJoined ? <button type="button" onClick={toggleMicrophone}><AppIcon name={micMuted ? 'micOff' : 'mic'} size={16} />{micMuted ? 'Unmute mic' : 'Mute mic'}</button> : null}
+            {voiceJoined ? <button className={handRaised ? 'active' : ''} type="button" aria-pressed={handRaised} onClick={toggleRaisedHand}><AppIcon name="hand" size={16} />{handRaised ? 'Lower hand' : 'Raise hand'}</button> : null}
             {voiceJoined ? <button type="button" onClick={() => (screenSharing ? stopScreenShare() : startScreenShare())}><AppIcon name="screen" size={16} />{screenSharing ? 'Stop stream' : 'Start stream'}</button> : null}
             {voiceJoined ? <button type="button" onClick={toggleCamera}><AppIcon name={cameraEnabled ? 'cameraOff' : 'camera'} size={16} />{cameraEnabled ? 'Camera off' : 'Camera on'}</button> : null}
             <button className="ghost-btn" type="button" disabled={voiceJoined} onClick={() => setNoiseSuppressionEnabled((prev) => !prev)}>Noise suppression: {noiseSuppressionEnabled ? 'On' : 'Off'}</button>
@@ -8937,10 +8981,12 @@ export default function App() {
               noiseSuppressionEnabled={noiseSuppressionEnabled}
               onLeave={handleJoinVoice}
               onToggleMic={toggleMicrophone}
+              onToggleHand={toggleRaisedHand}
               onToggleScreen={() => (screenSharing ? stopScreenShare() : startScreenShare())}
               onToggleCamera={toggleCamera}
               onToggleExpanded={() => setVoiceExpanded((prev) => !prev)}
               micMuted={micMuted}
+              handRaised={handRaised}
               screenSharing={screenSharing}
               cameraEnabled={cameraEnabled}
               expanded={voiceExpanded}

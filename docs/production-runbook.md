@@ -74,6 +74,7 @@ The public site downloads clients directly from the server:
 
 - `https://webcordes.ru/downloads/windows`
 - `https://webcordes.ru/downloads/android`
+- `https://webcordes.ru/downloads/ios`
 
 Admins whose username is listed in `ADMIN_USERNAMES` can open `https://webcordes.ru/adminka` after normal WebCord login and replace the Windows or Android client files. The backend stores these files and their SHA256 metadata in `CLIENT_DOWNLOAD_DIR`; Docker Compose persists them in the `client_downloads` volume.
 

@@ -7,14 +7,14 @@ class NativeBridge {
   static const MethodChannel _channel = MethodChannel('webcord/native');
 
   static Future<String?> pickFile() async {
-    if (Platform.isAndroid || Platform.isWindows) {
+    if (Platform.isAndroid || Platform.isIOS || Platform.isWindows) {
       return _channel.invokeMethod<String>('pickFile');
     }
     return null;
   }
 
   static Future<bool> openUrl(String url) async {
-    if (Platform.isAndroid || Platform.isWindows) {
+    if (Platform.isAndroid || Platform.isIOS || Platform.isWindows) {
       return await _channel.invokeMethod<bool>('openUrl', {'url': url}) ??
           false;
     }
@@ -22,27 +22,27 @@ class NativeBridge {
   }
 
   static Future<String?> startAudioRecording() async {
-    if (Platform.isAndroid || Platform.isWindows) {
+    if (Platform.isAndroid || Platform.isIOS || Platform.isWindows) {
       return _channel.invokeMethod<String>('startAudioRecording');
     }
     return null;
   }
 
   static Future<String?> stopAudioRecording() async {
-    if (Platform.isAndroid || Platform.isWindows) {
+    if (Platform.isAndroid || Platform.isIOS || Platform.isWindows) {
       return _channel.invokeMethod<String>('stopAudioRecording');
     }
     return null;
   }
 
   static Future<void> cancelAudioRecording() async {
-    if (Platform.isAndroid || Platform.isWindows) {
+    if (Platform.isAndroid || Platform.isIOS || Platform.isWindows) {
       await _channel.invokeMethod<void>('cancelAudioRecording');
     }
   }
 
   static Future<String?> captureCircleVideo() async {
-    if (Platform.isAndroid || Platform.isWindows) {
+    if (Platform.isAndroid || Platform.isIOS || Platform.isWindows) {
       return _channel.invokeMethod<String>('captureCircleVideo');
     }
     return null;
@@ -52,7 +52,7 @@ class NativeBridge {
     required String title,
     required String body,
   }) async {
-    if (!Platform.isAndroid) return false;
+    if (!Platform.isAndroid && !Platform.isIOS) return false;
     return await _channel.invokeMethod<bool>('showNotification', {
           'title': title,
           'body': body,
@@ -70,12 +70,14 @@ class NativeStore {
 
   static const MethodChannel _channel = MethodChannel('webcord/native');
 
+  static bool get _usesPlatformStore => Platform.isAndroid || Platform.isIOS;
+
   static Future<NativeStore> create() async {
     if (_isFlutterTest) {
       return NativeStore._(file: null);
     }
 
-    if (Platform.isAndroid) {
+    if (_usesPlatformStore) {
       return NativeStore._(file: null);
     }
 
@@ -89,7 +91,7 @@ class NativeStore {
       Platform.environment['FLUTTER_TEST'] == 'true';
 
   Future<String?> getString(String key) async {
-    if (Platform.isAndroid) {
+    if (_usesPlatformStore) {
       return _channel.invokeMethod<String>('getString', {'key': key});
     }
     final value = _values[key];
@@ -97,7 +99,7 @@ class NativeStore {
   }
 
   Future<int?> getInt(String key) async {
-    if (Platform.isAndroid) {
+    if (_usesPlatformStore) {
       return _channel.invokeMethod<int>('getInt', {'key': key});
     }
     final value = _values[key];
@@ -107,7 +109,7 @@ class NativeStore {
   }
 
   Future<void> setString(String key, String value) async {
-    if (Platform.isAndroid) {
+    if (_usesPlatformStore) {
       await _channel.invokeMethod<void>('setString', {
         'key': key,
         'value': value,
@@ -119,7 +121,7 @@ class NativeStore {
   }
 
   Future<void> setInt(String key, int value) async {
-    if (Platform.isAndroid) {
+    if (_usesPlatformStore) {
       await _channel.invokeMethod<void>('setInt', {'key': key, 'value': value});
       return;
     }
@@ -128,7 +130,7 @@ class NativeStore {
   }
 
   Future<void> remove(String key) async {
-    if (Platform.isAndroid) {
+    if (_usesPlatformStore) {
       await _channel.invokeMethod<void>('remove', {'key': key});
       return;
     }

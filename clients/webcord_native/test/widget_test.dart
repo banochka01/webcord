@@ -102,6 +102,27 @@ void main() {
     },
   );
 
+  test('voice participants decode and prioritize raised hands', () {
+    final state = WebCordState()
+      ..voiceParticipants = [
+        VoiceParticipant.fromJson({
+          'socketId': 'speaker',
+          'userId': 1,
+          'username': 'speaker',
+        }),
+        VoiceParticipant.fromJson({
+          'socketId': 'raised',
+          'userId': 2,
+          'username': 'raised',
+          'handRaised': true,
+        }),
+      ];
+    addTearDown(state.dispose);
+
+    expect(state.prioritizedVoiceParticipants.first.socketId, 'raised');
+    expect(state.prioritizedVoiceParticipants.first.handRaised, isTrue);
+  });
+
   testWidgets('renders native WebCord app shell', (tester) async {
     await tester.pumpWidget(const WebCordNativeApp());
     await tester.pump(const Duration(milliseconds: 500));

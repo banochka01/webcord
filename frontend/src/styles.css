@@ -561,6 +561,13 @@ p {
   white-space: nowrap;
 }
 
+.voice-chip.hand {
+  gap: 5px;
+  border-color: color-mix(in srgb, var(--warning) 58%, transparent);
+  background: color-mix(in srgb, var(--warning) 16%, var(--surface-2));
+  color: #fff1bf;
+}
+
 .realtime-pill.connected {
   border-color: color-mix(in srgb, var(--success) 52%, transparent);
   background: color-mix(in srgb, var(--success) 18%, var(--surface-2));
@@ -3833,6 +3840,13 @@ p {
 
 .voice-actions button {
   min-width: 84px;
+}
+
+.voice-actions button.active,
+.sidebar-bottom button.active {
+  border-color: color-mix(in srgb, var(--warning) 65%, transparent);
+  background: color-mix(in srgb, var(--warning) 18%, var(--surface-2));
+  color: #fff1bf;
 }
 
 .voice-quality-pill {
@@ -10704,7 +10718,7 @@ body {
   .channel-access-row select { grid-column: 1 / -1; }
 }
 
-/* WebCord 4.2.1 — phone-first shell and touch geometry. */
+/* WebCord 4.3.0 — phone-first shell and touch geometry. */
 @media (max-width: 860px) {
   html,
   body,
