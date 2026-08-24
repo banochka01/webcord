@@ -123,7 +123,7 @@ jobs:
           DEPLOY_KEY: ${{ secrets.WEBCORD_DEPLOY_SSH_KEY }}
         run: |
           install -d -m 700 "$HOME/.ssh"
-          printf '%s' "$DEPLOY_KEY" > "$HOME/.ssh/webcord_deploy"
+          printf '%s' "$DEPLOY_KEY" | tr -d '\r' > "$HOME/.ssh/webcord_deploy"
           chmod 600 "$HOME/.ssh/webcord_deploy"
           printf '%s\n' '104.128.140.14 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIB1dmCvPxjtmb2Z/+fPm97xX5AhFTxBAMiXoZJ0eyNXb' > "$HOME/.ssh/known_hosts"
 
