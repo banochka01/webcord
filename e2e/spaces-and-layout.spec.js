@@ -70,7 +70,7 @@ test('landing exposes the iOS download without mobile overflow', async ({ page }
   }));
   await page.goto('/');
 
-  const iosDownload = page.getByRole('link', { name: 'iPhone / iPad' });
+  const iosDownload = page.getByRole('link', { name: 'iOS · unsigned IPA' });
   await expect(iosDownload).toBeVisible();
   await expect(iosDownload).toHaveAttribute('href', '/downloads/ios');
   const widths = await page.evaluate(() => ({

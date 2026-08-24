@@ -1531,7 +1531,7 @@ function LandingPage({
             </button>
             {renderDownloadLink('windows', 'Windows', 'landing-cta-light')}
             {renderDownloadLink('android', 'Android', 'landing-cta-glass')}
-            {renderDownloadLink('ios', 'iPhone / iPad', 'landing-cta-glass')}
+            {renderDownloadLink('ios', 'iOS · unsigned IPA', 'landing-cta-glass')}
           </div>
           <div className="landing-hero-meta" aria-label="Коротко о WebCord">
             <span><i /> браузерный доступ</span>
