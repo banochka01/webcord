@@ -107,7 +107,7 @@ jobs:
 
       - name: Download verified client artifacts
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.WEBCORD_GITHUB_TOKEN }}
         run: |
           mkdir -p "$RUNNER_TEMP/release"
           gh release download webcord-4.3.0-ci-transfer-32700101608 \
