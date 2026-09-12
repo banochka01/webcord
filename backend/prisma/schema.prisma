@@ -1,108 +1,61 @@
+// ---------------------------------------------------------------------------
+// LOCAL DEVELOPMENT SCHEMA (SQLite)
+// ---------------------------------------------------------------------------
+// SQLite does not support Prisma `enum` or `Json` scalar types, so for local
+// development those are represented as `String` with the same default values
+// the PostgreSQL schema used. The production PostgreSQL schema is preserved in
+// `schema.postgres.prisma`. Keep both in sync when adding new models/fields.
+// ---------------------------------------------------------------------------
+
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
   url      = env("DATABASE_URL")
 }
 
-enum AttachmentType {
-  IMAGE
-  VIDEO
-  AUDIO
-  CIRCLE_VIDEO
-  FILE
-}
-
-enum ChannelType {
-  TEXT
-  VOICE
-}
-
-enum FriendRequestStatus {
-  PENDING
-  ACCEPTED
-  DECLINED
-}
-
-enum DirectConversationType {
-  DIRECT
-  GROUP
-}
-
-enum StoryMediaType {
-  IMAGE
-  VIDEO
-}
-
-enum UserRole {
-  USER
-  ADMIN
-  OWNER
-}
-
-enum ReportStatus {
-  OPEN
-  REVIEWED
-  RESOLVED
-  DISMISSED
-}
-
-enum ReportTargetType {
-  USER
-  MESSAGE
-  DIRECT_MESSAGE
-}
-
-enum ModerationActionType {
-  MUTE
-  UNMUTE
-  BAN
-  UNBAN
-  REPORT_REVIEWED
-  REPORT_RESOLVED
-  REPORT_DISMISSED
-}
-
 model User {
-  id                      Int                 @id @default(autoincrement())
-  username                String              @unique
-  password                String
-  role                    UserRole            @default(USER)
-  displayName             String?
-  avatarUrl               String?
-  bannerUrl               String?
-  bio                     String              @default("")
-  statusText              String              @default("Online")
-  favoriteTrack           String              @default("")
-  favoriteTrackUrl        String?
-  favoriteTrackName       String?
-  accentColor             String              @default("#7c5cff")
-  mutedUntil              DateTime?
-  bannedUntil             DateTime?
-  messages                Message[]
-  directMessages          DirectMessage[]
-  messageReactions        MessageReaction[]
-  directMessageReactions  DirectMessageReaction[]
-  sentFriendRequests      FriendRequest[]     @relation("FriendRequestSender")
-  receivedFriendRequests  FriendRequest[]     @relation("FriendRequestReceiver")
-  friendshipsLeft         Friendship[]        @relation("FriendshipLeftUser")
-  friendshipsRight        Friendship[]        @relation("FriendshipRightUser")
-  directConversationsLeft DirectConversation[] @relation("DirectConversationLeftUser")
-  directConversationsRight DirectConversation[] @relation("DirectConversationRightUser")
-  ownedDirectConversations DirectConversation[] @relation("DirectConversationOwner")
+  id                            Int                        @id @default(autoincrement())
+  username                      String                     @unique
+  password                      String
+  role                          String                     @default("USER")
+  displayName                   String?
+  avatarUrl                     String?
+  bannerUrl                     String?
+  bio                           String                     @default("")
+  statusText                    String                     @default("Online")
+  favoriteTrack                 String                     @default("")
+  favoriteTrackUrl              String?
+  favoriteTrackName             String?
+  accentColor                   String                     @default("#7c5cff")
+  mutedUntil                    DateTime?
+  bannedUntil                   DateTime?
+  messages                      Message[]
+  directMessages                DirectMessage[]
+  messageReactions              MessageReaction[]
+  directMessageReactions        DirectMessageReaction[]
+  sentFriendRequests            FriendRequest[]            @relation("FriendRequestSender")
+  receivedFriendRequests        FriendRequest[]            @relation("FriendRequestReceiver")
+  friendshipsLeft               Friendship[]               @relation("FriendshipLeftUser")
+  friendshipsRight              Friendship[]               @relation("FriendshipRightUser")
+  directConversationsLeft       DirectConversation[]       @relation("DirectConversationLeftUser")
+  directConversationsRight      DirectConversation[]       @relation("DirectConversationRightUser")
+  ownedDirectConversations      DirectConversation[]       @relation("DirectConversationOwner")
   directConversationMemberships DirectConversationMember[]
-  stories                 Story[]
-  storyViews              StoryView[]
-  blockedUsers            UserBlock[]         @relation("UserBlocksFrom")
-  blockedBy               UserBlock[]         @relation("UserBlocksTo")
-  reportsMade             ModerationReport[]  @relation("ReportReporter")
-  reportsTargetingUser    ModerationReport[]  @relation("ReportTargetUser")
-  reportsResolved         ModerationReport[]  @relation("ReportResolver")
-  moderationActions       ModerationAction[]  @relation("ModerationActor")
-  moderationTargets       ModerationAction[]  @relation("ModerationTargetUser")
-  createdAt               DateTime            @default(now())
+  stories                       Story[]
+  storyViews                    StoryView[]
+  blockedUsers                  UserBlock[]                @relation("UserBlocksFrom")
+  blockedBy                     UserBlock[]                @relation("UserBlocksTo")
+  reportsMade                   ModerationReport[]         @relation("ReportReporter")
+  reportsTargetingUser          ModerationReport[]         @relation("ReportTargetUser")
+  reportsResolved               ModerationReport[]         @relation("ReportResolver")
+  moderationActions             ModerationAction[]         @relation("ModerationActor")
+  moderationTargets             ModerationAction[]         @relation("ModerationTargetUser")
+  notifications                 Notification[]             @relation("NotificationRecipient")
+  notificationActions           Notification[]             @relation("NotificationActor")
+  createdAt                     DateTime                   @default(now())
 }
 
 model Guild {
@@ -117,39 +70,41 @@ model Guild {
 }
 
 model Channel {
-  id        Int         @id @default(autoincrement())
+  id        Int       @id @default(autoincrement())
   name      String
-  type      ChannelType @default(TEXT)
+  type      String    @default("TEXT")
   guildId   Int
-  guild     Guild       @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  guild     Guild     @relation(fields: [guildId], references: [id], onDelete: Cascade)
   messages  Message[]
-  createdAt DateTime    @default(now())
+  notifications Notification[]
+  createdAt DateTime  @default(now())
 
   @@index([guildId])
 }
 
 model Message {
-  id             Int             @id @default(autoincrement())
+  id             Int                @id @default(autoincrement())
   content        String
   attachmentUrl  String?
-  attachmentType AttachmentType?
+  attachmentType String?
   attachmentName String?
   transcript     String?
   forwardedFromName String?
-  pinnedAt       DateTime?
-  pinnedById     Int?
   replyToId      Int?
   editedAt       DateTime?
   deletedAt      DateTime?
+  pinnedAt       DateTime?
+  pinnedById     Int?
   channelId      Int
   authorId       Int
-  createdAt      DateTime        @default(now())
-  channel        Channel         @relation(fields: [channelId], references: [id], onDelete: Cascade)
-  author         User            @relation(fields: [authorId], references: [id], onDelete: Cascade)
-  replyTo        Message?        @relation("MessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
-  replies        Message[]       @relation("MessageReplies")
+  createdAt      DateTime           @default(now())
+  channel        Channel            @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  author         User               @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  replyTo        Message?           @relation("MessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies        Message[]          @relation("MessageReplies")
   reactions      MessageReaction[]
   reports        ModerationReport[]
+  notifications Notification[]
 
   @@index([channelId, createdAt])
   @@index([channelId, pinnedAt])
@@ -170,14 +125,14 @@ model MessageReaction {
 }
 
 model FriendRequest {
-  id         Int                 @id @default(autoincrement())
+  id         Int      @id @default(autoincrement())
   senderId   Int
   receiverId Int
-  status     FriendRequestStatus @default(PENDING)
-  createdAt  DateTime            @default(now())
-  updatedAt  DateTime            @updatedAt
-  sender     User                @relation("FriendRequestSender", fields: [senderId], references: [id], onDelete: Cascade)
-  receiver   User                @relation("FriendRequestReceiver", fields: [receiverId], references: [id], onDelete: Cascade)
+  status     String   @default("PENDING")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  sender     User     @relation("FriendRequestSender", fields: [senderId], references: [id], onDelete: Cascade)
+  receiver   User     @relation("FriendRequestReceiver", fields: [receiverId], references: [id], onDelete: Cascade)
 
   @@unique([senderId, receiverId])
   @@index([receiverId, status])
@@ -185,12 +140,12 @@ model FriendRequest {
 }
 
 model Friendship {
-  id         Int      @id @default(autoincrement())
-  userOneId  Int
-  userTwoId  Int
-  createdAt  DateTime @default(now())
-  userOne    User     @relation("FriendshipLeftUser", fields: [userOneId], references: [id], onDelete: Cascade)
-  userTwo    User     @relation("FriendshipRightUser", fields: [userTwoId], references: [id], onDelete: Cascade)
+  id        Int      @id @default(autoincrement())
+  userOneId Int
+  userTwoId Int
+  createdAt DateTime @default(now())
+  userOne   User     @relation("FriendshipLeftUser", fields: [userOneId], references: [id], onDelete: Cascade)
+  userTwo   User     @relation("FriendshipRightUser", fields: [userTwoId], references: [id], onDelete: Cascade)
 
   @@unique([userOneId, userTwoId])
   @@index([userOneId])
@@ -198,20 +153,21 @@ model Friendship {
 }
 
 model DirectConversation {
-  id         Int             @id @default(autoincrement())
-  type       DirectConversationType @default(DIRECT)
-  title      String?
-  avatarUrl  String?
-  ownerId    Int?
-  userOneId  Int?
-  userTwoId  Int?
-  createdAt  DateTime        @default(now())
-  updatedAt  DateTime        @updatedAt
-  owner      User?           @relation("DirectConversationOwner", fields: [ownerId], references: [id], onDelete: SetNull)
-  userOne    User?           @relation("DirectConversationLeftUser", fields: [userOneId], references: [id], onDelete: Cascade)
-  userTwo    User?           @relation("DirectConversationRightUser", fields: [userTwoId], references: [id], onDelete: Cascade)
-  members    DirectConversationMember[]
-  messages   DirectMessage[]
+  id        Int                        @id @default(autoincrement())
+  type      String                     @default("DIRECT")
+  title     String?
+  avatarUrl String?
+  ownerId   Int?
+  userOneId Int?
+  userTwoId Int?
+  createdAt DateTime                   @default(now())
+  updatedAt DateTime                   @updatedAt
+  owner     User?                      @relation("DirectConversationOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  userOne   User?                      @relation("DirectConversationLeftUser", fields: [userOneId], references: [id], onDelete: Cascade)
+  userTwo   User?                      @relation("DirectConversationRightUser", fields: [userTwoId], references: [id], onDelete: Cascade)
+  members   DirectConversationMember[]
+  messages  DirectMessage[]
+  notifications Notification[]
 
   @@unique([userOneId, userTwoId])
   @@index([updatedAt])
@@ -233,28 +189,29 @@ model DirectConversationMember {
 }
 
 model DirectMessage {
-  id             Int             @id @default(autoincrement())
+  id             Int                     @id @default(autoincrement())
   content        String
   attachmentUrl  String?
-  attachmentType AttachmentType?
+  attachmentType String?
   attachmentName String?
   transcript     String?
   forwardedFromName String?
-  pinnedAt       DateTime?
-  pinnedById     Int?
   replyToId      Int?
   editedAt       DateTime?
   deletedAt      DateTime?
+  pinnedAt       DateTime?
+  pinnedById     Int?
   readAt         DateTime?
   conversationId Int
   authorId       Int
-  createdAt      DateTime        @default(now())
-  conversation   DirectConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  author         User            @relation(fields: [authorId], references: [id], onDelete: Cascade)
-  replyTo        DirectMessage?   @relation("DirectMessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
-  replies        DirectMessage[]  @relation("DirectMessageReplies")
+  createdAt      DateTime                @default(now())
+  conversation   DirectConversation      @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  author         User                    @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  replyTo        DirectMessage?          @relation("DirectMessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies        DirectMessage[]         @relation("DirectMessageReplies")
   reactions      DirectMessageReaction[]
   reports        ModerationReport[]
+  notifications Notification[]
 
   @@index([conversationId, createdAt])
   @@index([conversationId, pinnedAt])
@@ -288,23 +245,23 @@ model UserBlock {
 }
 
 model ModerationReport {
-  id              Int              @id @default(autoincrement())
+  id              Int            @id @default(autoincrement())
   reporterId      Int
-  targetType      ReportTargetType
+  targetType      String
   targetUserId    Int?
   messageId       Int?
   directMessageId Int?
   reason          String
-  details         String           @default("")
-  status          ReportStatus     @default(OPEN)
+  details         String         @default("")
+  status          String         @default("OPEN")
   resolvedById    Int?
   resolvedAt      DateTime?
-  createdAt       DateTime         @default(now())
-  reporter        User             @relation("ReportReporter", fields: [reporterId], references: [id], onDelete: Cascade)
-  targetUser      User?            @relation("ReportTargetUser", fields: [targetUserId], references: [id], onDelete: SetNull)
-  message         Message?         @relation(fields: [messageId], references: [id], onDelete: SetNull)
-  directMessage   DirectMessage?   @relation(fields: [directMessageId], references: [id], onDelete: SetNull)
-  resolvedBy      User?            @relation("ReportResolver", fields: [resolvedById], references: [id], onDelete: SetNull)
+  createdAt       DateTime       @default(now())
+  reporter        User           @relation("ReportReporter", fields: [reporterId], references: [id], onDelete: Cascade)
+  targetUser      User?          @relation("ReportTargetUser", fields: [targetUserId], references: [id], onDelete: SetNull)
+  message         Message?       @relation(fields: [messageId], references: [id], onDelete: SetNull)
+  directMessage   DirectMessage? @relation(fields: [directMessageId], references: [id], onDelete: SetNull)
+  resolvedBy      User?          @relation("ReportResolver", fields: [resolvedById], references: [id], onDelete: SetNull)
 
   @@index([status, createdAt])
   @@index([reporterId, createdAt])
@@ -314,34 +271,60 @@ model ModerationReport {
 }
 
 model ModerationAction {
-  id           Int                  @id @default(autoincrement())
+  id           Int      @id @default(autoincrement())
   actorId      Int
   targetUserId Int?
-  action       ModerationActionType
-  reason       String               @default("")
-  metadata     Json?
-  createdAt    DateTime             @default(now())
-  actor        User                 @relation("ModerationActor", fields: [actorId], references: [id], onDelete: Cascade)
-  targetUser   User?                @relation("ModerationTargetUser", fields: [targetUserId], references: [id], onDelete: SetNull)
+  action       String
+  reason       String   @default("")
+  metadata     String?
+  createdAt    DateTime @default(now())
+  actor        User     @relation("ModerationActor", fields: [actorId], references: [id], onDelete: Cascade)
+  targetUser   User?    @relation("ModerationTargetUser", fields: [targetUserId], references: [id], onDelete: SetNull)
 
   @@index([actorId, createdAt])
   @@index([targetUserId, createdAt])
   @@index([action, createdAt])
 }
 
+model Notification {
+  id                Int                 @id @default(autoincrement())
+  type              String
+  title             String
+  body              String              @default("")
+  recipientId       Int
+  actorId           Int?
+  channelId         Int?
+  conversationId    Int?
+  messageId         Int?
+  directMessageId   Int?
+  readAt            DateTime?
+  createdAt         DateTime            @default(now())
+  recipient         User                @relation("NotificationRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
+  actor             User?               @relation("NotificationActor", fields: [actorId], references: [id], onDelete: SetNull)
+  channel           Channel?            @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  conversation      DirectConversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  message           Message?            @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  directMessage     DirectMessage?      @relation(fields: [directMessageId], references: [id], onDelete: Cascade)
+
+  @@index([recipientId, readAt, createdAt])
+  @@index([recipientId, createdAt])
+  @@index([messageId])
+  @@index([directMessageId])
+}
+
 model Story {
-  id              Int            @id @default(autoincrement())
-  caption         String         @default("")
+  id              Int         @id @default(autoincrement())
+  caption         String      @default("")
   mediaUrl        String
-  mediaType       StoryMediaType @default(IMAGE)
+  mediaType       String      @default("IMAGE")
   musicUrl        String?
-  musicTitle      String         @default("")
-  musicArtist     String         @default("")
-  musicAttachment String         @default("")
+  musicTitle      String      @default("")
+  musicArtist     String      @default("")
+  musicAttachment String      @default("")
   authorId        Int
-  createdAt       DateTime       @default(now())
+  createdAt       DateTime    @default(now())
   expiresAt       DateTime
-  author          User           @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  author          User        @relation(fields: [authorId], references: [id], onDelete: Cascade)
   views           StoryView[]
 
   @@index([expiresAt])

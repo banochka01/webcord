@@ -8,6 +8,7 @@
     "dev": "node --watch src/server.js",
     "db:generate": "prisma generate",
     "db:validate": "prisma validate",
+    "db:validate:postgres": "prisma validate --schema prisma/schema.postgres.prisma",
     "db:push": "prisma db push"
   },
   "dependencies": {

@@ -8,12 +8,12 @@ import {
   TbCircleCheck, TbCircleDashed, TbDotsVertical, TbHash, TbMenu2, TbMicrophone, TbMicrophoneOff,
   TbMinus, TbMoodSmile, TbMusic, TbPalette, TbPaperclip, TbPhone, TbPhoneOff, TbPlayerPause,
   TbPlayerPlay, TbPlayerStop, TbPlus, TbPinned, TbScreenShare, TbSearch, TbSend2, TbSettings,
-  TbSun, TbMoon, TbVideo, TbVideoOff, TbVolume, TbVolumeOff, TbWaveSine, TbX
+  TbBell, TbSun, TbMoon, TbVideo, TbVideoOff, TbVolume, TbVolumeOff, TbWaveSine, TbX
 } from 'react-icons/tb';
 import {
   MdAdd, MdArrowBackIosNew, MdClose, MdFullscreen, MdFullscreenExit, MdMenu,
   MdMoreVert, MdOutlineAttachFile, MdOutlineAutoStories, MdOutlineBolt,
-  MdOutlineCall, MdOutlineCallEnd, MdOutlineCameraswitch, MdOutlineCheckCircle,
+  MdOutlineCall, MdOutlineCallEnd, MdOutlineCameraswitch, MdOutlineCheckCircle, MdOutlineNotifications,
   MdOutlineChatBubbleOutline, MdOutlineGraphicEq, MdOutlineGroup, MdOutlineMic,
   MdOutlineDarkMode, MdOutlineLightMode, MdOutlineMicOff, MdOutlineMusicNote, MdOutlinePalette, MdOutlinePublic, MdOutlineScreenShare,
   MdOutlineSearch, MdOutlineSend, MdOutlineSentimentSatisfiedAlt,
@@ -22,7 +22,7 @@ import {
   MdOutlinePushPin, MdPlayArrow, MdRemove, MdStop
 } from 'react-icons/md';
 import {
-  PiArrowLeft, PiBrowser, PiCameraRotate, PiChatCircleDots, PiCheckCircle,
+  PiArrowLeft, PiBell, PiBrowser, PiCameraRotate, PiChatCircleDots, PiCheckCircle,
   PiCornersIn, PiCornersOut, PiDotsThreeVertical, PiGear, PiHash, PiImageSquare,
   PiImagesSquare, PiList, PiMagnifyingGlass, PiMicrophone, PiMicrophoneSlash, PiMoon,
   PiMinus, PiMonitorArrowUp, PiMusicNotes, PiPalette, PiPaperPlaneTilt,
@@ -1161,6 +1161,7 @@ function BrowserIcon() {
 
 const APP_ICONS = {
   arrowLeft: <><path d="m15 18-6-6 6-6" /><path d="M9 12h12" /></>,
+  bell: <><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" /><path d="M10 21h4" /></>,
   browser: <><rect x="4" y="5" width="16" height="14" rx="3" /><path d="M4 9h16" /><path d="M8 7h.01M11 7h.01" /><path d="M9 14h6" /></>,
   camera: <><path d="M15 10.5 20 7v10l-5-3.5" /><rect x="4" y="6" width="11" height="12" rx="2" /></>,
   cameraOff: <><path d="m3 3 18 18" /><path d="M15 10.5 20 7v9.2" /><path d="M13.2 18H6a2 2 0 0 1-2-2V8.8" /><path d="M8.8 6H13a2 2 0 0 1 2 2v2.2" /></>,
@@ -1196,7 +1197,7 @@ const APP_ICONS = {
 
 const ICON_FAMILIES = {
   telegram: {
-    arrowLeft: TbArrowLeft, browser: TbBrowser, camera: TbVideo, cameraOff: TbVideoOff,
+    arrowLeft: TbArrowLeft, bell: TbBell, browser: TbBrowser, camera: TbVideo, cameraOff: TbVideoOff,
     check: TbCircleCheck,
     close: TbX, expand: TbArrowsMaximize, hash: TbHash, menu: TbMenu2, more: TbDotsVertical,
     mic: TbMicrophone, micOff: TbMicrophoneOff, minus: TbMinus, music: TbMusic,
@@ -1208,7 +1209,7 @@ const ICON_FAMILIES = {
     sun: TbSun, moon: TbMoon, theme: TbPalette
   },
   material: {
-    arrowLeft: MdArrowBackIosNew, browser: MdOutlinePublic, camera: MdOutlineVideocam,
+    arrowLeft: MdArrowBackIosNew, bell: MdOutlineNotifications, browser: MdOutlinePublic, camera: MdOutlineVideocam,
     cameraOff: MdOutlineVideocamOff, check: MdOutlineCheckCircle, close: MdClose,
     expand: MdFullscreen, hash: MdOutlineTag, menu: MdMenu, more: MdMoreVert,
     mic: MdOutlineMic, micOff: MdOutlineMicOff, minus: MdRemove,
@@ -1223,7 +1224,7 @@ const ICON_FAMILIES = {
     sun: MdOutlineLightMode, moon: MdOutlineDarkMode
   },
   atmosphere: {
-    arrowLeft: PiArrowLeft, browser: PiBrowser, camera: PiVideoCamera,
+    arrowLeft: PiArrowLeft, bell: PiBell, browser: PiBrowser, camera: PiVideoCamera,
     check: PiCheckCircle, cameraOff: PiVideoCameraSlash, close: PiX,
     expand: PiCornersOut, hash: PiHash, menu: PiList, more: PiDotsThreeVertical,
     mic: PiMicrophone, micOff: PiMicrophoneSlash, minus: PiMinus,
@@ -2760,6 +2761,52 @@ function GlobalSearchPalette({ open, query, loading, results, onQueryChange, onO
   );
 }
 
+function InboxPanel({ open, notifications, unreadCount, loading, onOpen, onReadAll, onClose }) {
+  if (!open) return null;
+  return (
+    <div className="inbox-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+      <aside className="inbox-panel" role="dialog" aria-modal="true" aria-label="Inbox">
+        <header className="inbox-header">
+          <div>
+            <p className="section-label">WebCord 4.0</p>
+            <h2>Inbox</h2>
+            <span>{unreadCount ? `${unreadCount} unread` : 'You are all caught up'}</span>
+          </div>
+          <div className="inbox-header-actions">
+            {unreadCount ? <button className="ghost-btn" type="button" onClick={onReadAll}>Read all</button> : null}
+            <button className="icon-btn" type="button" aria-label="Close Inbox" onClick={onClose}><AppIcon name="close" /></button>
+          </div>
+        </header>
+        <div className="inbox-list">
+          {loading ? <p className="muted inbox-empty">Loading your Inbox…</p> : null}
+          {!loading && notifications.length === 0 ? (
+            <div className="inbox-empty">
+              <span className="inbox-empty-icon"><AppIcon name="bell" size={28} /></span>
+              <strong>No notifications yet</strong>
+              <p className="muted">Mentions, replies and direct messages will appear here.</p>
+            </div>
+          ) : null}
+          {notifications.map((notification) => (
+            <button
+              className={notification.readAt ? 'inbox-item' : 'inbox-item unread'}
+              type="button"
+              key={notification.id}
+              onClick={() => onOpen(notification)}
+            >
+              <UserAvatar user={notification.actor} />
+              <span className="inbox-item-copy">
+                <span><strong>{notification.title}</strong><time>{new Date(notification.createdAt).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}</time></span>
+                <small>{notification.body}</small>
+              </span>
+              {!notification.readAt ? <i aria-label="Unread" /> : null}
+            </button>
+          ))}
+        </div>
+      </aside>
+    </div>
+  );
+}
+
 function UserProfileModal({ open, profile, relationshipLabel, canAddFriend, isBlocked, onAddFriend, onReport, onBlock, onUnblock, onClose }) {
   if (!open || !profile) return null;
   const displayName = getDisplayName(profile);
@@ -3837,6 +3884,10 @@ export default function App() {
   const [globalSearchQuery, setGlobalSearchQuery] = useState('');
   const [globalSearchResults, setGlobalSearchResults] = useState({ users: [], channelMessages: [], directMessages: [] });
   const [globalSearchLoading, setGlobalSearchLoading] = useState(false);
+  const [inboxOpen, setInboxOpen] = useState(false);
+  const [inboxNotifications, setInboxNotifications] = useState([]);
+  const [inboxUnreadCount, setInboxUnreadCount] = useState(0);
+  const [inboxLoading, setInboxLoading] = useState(false);
   const [pinnedPanelOpen, setPinnedPanelOpen] = useState(false);
   const [pinnedMessages, setPinnedMessages] = useState([]);
   const [selectedMessageIds, setSelectedMessageIds] = useState([]);
@@ -4282,6 +4333,7 @@ export default function App() {
         setShowEmojiPicker(false);
         setShowComposerTools(false);
         setGlobalSearchOpen(false);
+        setInboxOpen(false);
         setShowSettingsModal(false);
         setViewedProfile(null);
       }
@@ -4496,6 +4548,32 @@ export default function App() {
   }, [pinnedPanelOpen, workspace, channelId, dmConversationId]);
 
   useEffect(() => {
+    if (!isAuthed || isAdminRoute) return;
+    refreshInbox({ silent: true });
+  }, [isAuthed, isAdminRoute, token]);
+
+  useEffect(() => {
+    if (!isAuthed || isAdminRoute) return;
+    const body = workspace === 'dm' && dmConversationId
+      ? { conversationId: Number(dmConversationId) }
+      : workspace === 'server' && channelId
+        ? { channelId: Number(channelId) }
+        : null;
+    if (!body) return;
+    apiFetch('/notifications/read-scope', { method: 'POST', body: JSON.stringify(body) }, token)
+      .then(() => {
+        setInboxNotifications((current) => current.map((item) => (
+          (body.channelId && Number(item.channelId) === body.channelId) ||
+          (body.conversationId && Number(item.conversationId) === body.conversationId)
+            ? { ...item, readAt: item.readAt || new Date().toISOString() }
+            : item
+        )));
+        refreshInbox({ silent: true });
+      })
+      .catch(() => {});
+  }, [isAuthed, isAdminRoute, token, workspace, channelId, dmConversationId]);
+
+  useEffect(() => {
     if (!isAuthed || isAdminRoute) return undefined;
 
     setSocketStatus(networkOnline ? 'connecting' : 'offline');
@@ -4547,6 +4625,39 @@ export default function App() {
       setError(IS_NATIVE_CLIENT && /websocket|xhr|poll|transport/i.test(rawMessage) ? 'Realtime is reconnecting. Messages are kept in sync by fallback polling.' : rawMessage);
     });
     socket.on('socket-error', (payload) => setError(payload?.error || 'Socket error'));
+    socket.on('notification:new', (notification) => {
+      const scope = scopeRef.current;
+      const targetIsOpen = notification.conversationId
+        ? scope.type === 'dm' && String(notification.conversationId) === scope.id
+        : scope.type === 'channel' && String(notification.channelId) === scope.id;
+      const readImmediately = targetIsOpen && !document.hidden;
+      const nextNotification = readImmediately
+        ? { ...notification, readAt: notification.readAt || new Date().toISOString() }
+        : notification;
+      setInboxNotifications((current) => [
+        nextNotification,
+        ...current.filter((item) => String(item.id) !== String(notification.id))
+      ].slice(0, 100));
+      if (!notification.readAt && !readImmediately) setInboxUnreadCount((count) => count + 1);
+      if (readImmediately && !notification.readAt) {
+        apiFetch(`/notifications/${notification.id}/read`, { method: 'PATCH' }, token).catch(() => {});
+      }
+      if (document.hidden || !targetIsOpen) {
+        showClientNotification(notification.title, notification.body, {
+          direct: notification.type === 'DIRECT_MESSAGE',
+          mention: ['MENTION', 'REPLY'].includes(notification.type)
+        });
+      }
+    });
+    socket.on('notification:read', ({ id, readAt }) => {
+      setInboxNotifications((current) => current.map((item) => String(item.id) === String(id) ? { ...item, readAt } : item));
+      refreshInbox({ silent: true });
+    });
+    socket.on('notification:read-all', ({ readAt }) => {
+      setInboxNotifications((current) => current.map((item) => ({ ...item, readAt: item.readAt || readAt })));
+      setInboxUnreadCount(0);
+    });
+    socket.on('notification:scope-read', () => refreshInbox({ silent: true }));
     socket.on('new-message', (message) => {
       const scope = scopeRef.current;
       if (scope.type === 'channel' && String(message.channelId) === scope.id) {
@@ -5098,6 +5209,66 @@ export default function App() {
     setShowScrollToLatest(false);
     setUnreadAnchorId(null);
     endRef.current?.scrollIntoView({ block: 'end', behavior: 'smooth' });
+  }
+
+  async function refreshInbox({ silent = false } = {}) {
+    if (!token) return;
+    if (!silent) setInboxLoading(true);
+    try {
+      const payload = await apiFetch('/notifications?limit=100', {}, token);
+      setInboxNotifications(payload.notifications || []);
+      setInboxUnreadCount(Number(payload.unreadCount) || 0);
+    } catch (err) {
+      if (!silent) reportError(err, 'Could not load Inbox');
+    } finally {
+      if (!silent) setInboxLoading(false);
+    }
+  }
+
+  async function markAllInboxRead() {
+    try {
+      await apiFetch('/notifications/read-all', { method: 'POST' }, token);
+      const readAt = new Date().toISOString();
+      setInboxNotifications((current) => current.map((item) => ({ ...item, readAt: item.readAt || readAt })));
+      setInboxUnreadCount(0);
+    } catch (err) {
+      reportError(err, 'Could not clear Inbox');
+    }
+  }
+
+  async function openInboxNotification(notification) {
+    try {
+      if (!notification.readAt) {
+        await apiFetch(`/notifications/${notification.id}/read`, { method: 'PATCH' }, token);
+        setInboxUnreadCount((count) => Math.max(0, count - 1));
+      }
+      if (notification.conversationId && notification.directMessageId) {
+        const payload = await apiFetch(`/dms/${notification.conversationId}/messages/${notification.directMessageId}/context`, {}, token);
+        setWorkspace('dm');
+        setDmConversationId(String(notification.conversationId));
+        setMessages(sortMessages(payload.messages || []));
+        setHighlightedMessageId(String(notification.directMessageId));
+      } else if (notification.channelId && notification.messageId) {
+        const payload = await apiFetch(`/messages/${notification.channelId}/context/${notification.messageId}`, {}, token);
+        setWorkspace('server');
+        setChannelId(String(notification.channelId));
+        setMessages(sortMessages(payload.messages || []));
+        setHighlightedMessageId(String(notification.messageId));
+      }
+      setInboxNotifications((current) => current.map((item) => (
+        String(item.id) === String(notification.id) ? { ...item, readAt: item.readAt || new Date().toISOString() } : item
+      )));
+      setInboxOpen(false);
+      setMobileChatOpen(true);
+      const targetId = notification.directMessageId || notification.messageId;
+      window.setTimeout(() => {
+        document.querySelector(`[data-message-id="${targetId}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      }, 80);
+      window.clearTimeout(highlightTimerRef.current);
+      highlightTimerRef.current = window.setTimeout(() => setHighlightedMessageId(null), 1800);
+    } catch (err) {
+      reportError(err, 'Could not open notification');
+    }
   }
 
   async function refreshCurrentMessages({ silent = false } = {}) {
@@ -7005,11 +7176,13 @@ export default function App() {
       ? 'Friends'
       : workspace === 'dm'
         ? (activeConversation?.user ? getDisplayName(activeConversation.user) : 'Direct messages')
-        : workspace === 'stories'
-          ? 'Stories'
-          : activeTextChannel
-            ? `# ${activeTextChannel.name}`
-            : 'Server chat';
+        : workspace === 'calls'
+          ? 'Звонки'
+          : workspace === 'stories'
+            ? 'Stories'
+            : activeTextChannel
+              ? `# ${activeTextChannel.name}`
+              : 'Server chat';
   const chatHeaderAvatarUser = workspace === 'dm' && activeConversation?.user ? activeConversation.user : user;
   const realtimeStatus = networkOnline ? socketStatus : 'offline';
   const realtimeLabel = SOCKET_STATUS_LABELS[realtimeStatus] || SOCKET_STATUS_LABELS.disconnected;
@@ -7043,6 +7216,18 @@ export default function App() {
   const visibleVoiceChannelForJoin = hasMobileFolderFilter
     ? (filteredVoiceChannels.find((channel) => String(channel.id) === String(voiceChannelId)) || filteredVoiceChannels[0] || null)
     : activeVoiceChannel;
+  const railItems = isMobile
+    ? [
+        ['dm', 'menu', 'Чаты'],
+        ['server', 'hash', 'Каналы'],
+        ['calls', 'phone', 'Звонки']
+      ]
+    : [
+        ['server', 'menu', 'Чаты'],
+        ['friends', 'smile', 'Контакты'],
+        ['dm', 'browser', 'DMs'],
+        ['stories', 'story', 'Сторис']
+      ];
 
   function selectMobileFolder(folderId) {
     const nextFolderId = String(folderId || '');
@@ -7137,12 +7322,7 @@ export default function App() {
           <div className="rail-brand" aria-label="WebCord">
             <BrandLogo className="rail-logo" />
           </div>
-          {[
-            ['server', 'menu', 'Чаты'],
-            ['friends', 'smile', 'Контакты'],
-            ['dm', 'browser', 'DMs'],
-            ['stories', 'story', 'Сторис']
-          ].map(([item, icon, label]) => (
+          {railItems.map(([item, icon, label]) => (
             <button
               key={item}
               className={workspace === item ? 'rail-btn active' : 'rail-btn'}
@@ -7152,7 +7332,7 @@ export default function App() {
               onClick={() => {
                 setWorkspace(item);
                 setMobileSidebarOpen(false);
-                if (isMobile) setMobileChatOpen(false);
+                if (isMobile) setMobileChatOpen(item === 'calls');
               }}
             >
               <span>{icon === 'brand' ? <BrandLogo className="rail-logo" /> : <AppIcon name={icon} size={22} />}</span>
@@ -7352,7 +7532,38 @@ export default function App() {
             </div>
           ) : null}
 
-          {workspace === 'stories' ? (
+          {workspace === 'calls' ? (
+            <div className="mobile-calls-panel">
+              <div className="mobile-calls-intro">
+                <span className="mobile-calls-icon"><AppIcon name="wave" size={24} /></span>
+                <div>
+                  <p className="section-label">Голос WebCord</p>
+                  <h2>Звонки без лишних экранов</h2>
+                  <p className="muted">Выберите комнату и подключитесь в одно касание.</p>
+                </div>
+              </div>
+              <div className="mobile-call-list">
+                {filteredVoiceChannels.length === 0 ? <p className="muted">Голосовых комнат пока нет.</p> : filteredVoiceChannels.map((channel) => {
+                  const selected = String(channel.id) === String(voiceChannelId);
+                  return (
+                    <button
+                      className={selected ? 'mobile-call-row active' : 'mobile-call-row'}
+                      key={channel.id}
+                      type="button"
+                      onClick={() => {
+                        selectVoiceChannel(channel.id);
+                        handleJoinVoice(channel.id);
+                      }}
+                    >
+                      <span className="mobile-call-row-icon"><AppIcon name="wave" size={19} /></span>
+                      <span><strong>{channel.name}</strong><small>{selected && voiceJoined ? voiceStatus : 'Нажмите, чтобы войти'}</small></span>
+                      <AppIcon name={selected && voiceJoined ? 'phoneOff' : 'phone'} size={19} />
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ) : workspace === 'stories' ? (
             <div className="stack">
               <section className="sidebar-card">
                 <p className="section-label">Stories</p>
@@ -7401,10 +7612,24 @@ export default function App() {
               {isMobile ? <UserAvatar user={chatHeaderAvatarUser} className="chat-title-avatar" /> : null}
               <button className="chat-title-copy chat-title-button" type="button" onClick={() => setChatInfoOpen(true)}>
                 <strong>{chatTitle}</strong>
-                <p className="muted">{workspace === 'friends' ? 'Requests, friends, and direct conversations.' : workspace === 'dm' ? (activeConversation?.user?.statusText || 'в сети') : workspace === 'stories' ? 'Image and video stories expire after 24 hours.' : 'Server chat synced through the backend.'}</p>
+                <p className="muted">{workspace === 'friends' ? 'Requests, friends, and direct conversations.' : workspace === 'dm' ? (activeConversation?.user?.statusText || 'в сети') : workspace === 'calls' ? 'Голосовые комнаты и быстрые звонки.' : workspace === 'stories' ? 'Image and video stories expire after 24 hours.' : 'Обсуждаем всё, что связано с проектом'}</p>
               </button>
             </div>
             <div className="header-badges">
+              <button
+                className="icon-btn inbox-trigger"
+                type="button"
+                title="Inbox"
+                aria-label={inboxUnreadCount ? `Inbox, ${inboxUnreadCount} unread` : 'Inbox'}
+                aria-expanded={inboxOpen}
+                onClick={() => {
+                  setInboxOpen(true);
+                  refreshInbox();
+                }}
+              >
+                <AppIcon name="bell" />
+                {inboxUnreadCount ? <b>{inboxUnreadCount > 99 ? '99+' : inboxUnreadCount}</b> : null}
+              </button>
               {!isMobile ? (
                 <div className="concept-header-actions">
                   <button
@@ -7459,19 +7684,49 @@ export default function App() {
               {workspace === 'stories' ? <span className="live-pill">{stories.filter((story) => !story.viewed).length} unseen</span> : null}
               {voiceJoined ? <span className="live-pill">Voice active</span> : null}
               {isMobile ? (
-                <button
-                  className="icon-btn mobile-chat-more"
-                  type="button"
-                  aria-label="Chat menu"
-                  title="Chat menu"
-                  onClick={() => setMobileSidebarOpen((prev) => !prev)}
-                  aria-expanded={mobileSidebarOpen}
-                >
-                  <AppIcon name="more" />
-                </button>
+                <>
+                  {workspace === 'server' && visibleVoiceChannelForJoin ? (
+                    <button
+                      className="icon-btn mobile-chat-call"
+                      type="button"
+                      aria-label={voiceJoined ? 'Leave voice' : 'Join voice'}
+                      title={voiceJoined ? 'Leave voice' : 'Join voice'}
+                      onClick={() => handleJoinVoice(visibleVoiceChannelForJoin.id)}
+                    >
+                      <AppIcon name={voiceJoined ? 'phoneOff' : 'phone'} />
+                    </button>
+                  ) : null}
+                  <button
+                    className="icon-btn mobile-chat-more"
+                    type="button"
+                    aria-label="Chat menu"
+                    title="Chat menu"
+                    onClick={() => setMobileSidebarOpen((prev) => !prev)}
+                    aria-expanded={mobileSidebarOpen}
+                  >
+                    <AppIcon name="more" />
+                  </button>
+                </>
               ) : null}
             </div>
           </header>
+          {isMobile && workspace === 'server' && visibleVoiceChannelForJoin ? (
+            <div className={voiceJoined ? 'mobile-voice-strip active' : 'mobile-voice-strip'}>
+              <div className="mobile-voice-avatars" aria-hidden="true">
+                {voiceStageParticipants.slice(0, 2).map((participant) => (
+                  <UserAvatar key={participant.socketId} user={participant.user || { username: participant.username }} />
+                ))}
+              </div>
+              <AppIcon name="wave" size={18} />
+              <div className="mobile-voice-copy">
+                <strong>В голосовой комнате</strong>
+                <span>{Math.max(voiceStageParticipants.length, voiceJoined ? 1 : 0)} участника · {visibleVoiceChannelForJoin.name}</span>
+              </div>
+              <button type="button" onClick={() => handleJoinVoice(visibleVoiceChannelForJoin.id)}>
+                {voiceJoined ? 'Выйти' : 'Войти'}
+              </button>
+            </div>
+          ) : null}
           {realtimeStatus !== 'connected' ? (
             <div className={`realtime-banner ${realtimeStatus}`}>
               {realtimeStatus === 'offline'
@@ -7668,7 +7923,7 @@ export default function App() {
                     }
                   }}
                   aria-label="Message"
-                  placeholder={editingMessage ? 'Edit your message' : isMobile ? 'Message' : workspace === 'dm' ? 'Message your friend' : 'Send a message'}
+                  placeholder={editingMessage ? 'Edit your message' : isMobile ? 'Написать сообщение…' : workspace === 'dm' ? 'Message your friend' : 'Send a message'}
                 />
                 <span className="composer-phase" aria-live="polite">
                   {composerPhase === 'sending' ? 'Sending' : composerPhase === 'saving' ? 'Saving' : composerPhase === 'sent' ? 'Sent' : composerPhase === 'saved' ? 'Saved' : composerPhase === 'error' ? 'Try again' : ''}
@@ -7765,6 +8020,16 @@ export default function App() {
         onQueryChange={setGlobalSearchQuery}
         onOpenResult={openGlobalSearchResult}
         onClose={() => setGlobalSearchOpen(false)}
+      />
+
+      <InboxPanel
+        open={inboxOpen}
+        notifications={inboxNotifications}
+        unreadCount={inboxUnreadCount}
+        loading={inboxLoading}
+        onOpen={openInboxNotification}
+        onReadAll={markAllInboxRead}
+        onClose={() => setInboxOpen(false)}
       />
 
       <div className="toast-stack" aria-live="polite">

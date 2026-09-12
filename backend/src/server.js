@@ -19,6 +19,8 @@ const MAX_UPLOAD_SIZE_MB = Number(process.env.MAX_UPLOAD_SIZE_MB || 25);
 const MAX_CLIENT_DOWNLOAD_SIZE_MB = Number(process.env.CLIENT_DOWNLOAD_MAX_SIZE_MB || 500);
 const DEFAULT_MESSAGE_LIMIT = 100;
 const MAX_MESSAGE_LIMIT = 200;
+const DEFAULT_NOTIFICATION_LIMIT = 40;
+const MAX_NOTIFICATION_LIMIT = 100;
 const CLIENT_ORIGINS = String(process.env.CLIENT_URL || '')
   .split(',')
   .map((origin) => origin.trim())
@@ -588,13 +590,23 @@ function serializeModerationReport(report) {
   };
 }
 
+function parseJsonColumn(value) {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'object') return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
 function serializeModerationAction(action) {
   if (!action) return null;
   return {
     id: action.id,
     action: action.action,
     reason: action.reason || '',
-    metadata: action.metadata || null,
+    metadata: parseJsonColumn(action.metadata),
     createdAt: action.createdAt,
     actor: serializePublicUser(action.actor),
     targetUser: serializePublicUser(action.targetUser)
@@ -1038,6 +1050,107 @@ function emitStoriesRefresh(userIds) {
   });
 }
 
+function notificationPreview(message) {
+  const content = String(message?.content || '').trim().replace(/\s+/g, ' ');
+  if (content) return content.slice(0, 180);
+  if (message?.attachmentName) return `Attachment: ${String(message.attachmentName).slice(0, 120)}`;
+  return 'Sent an attachment';
+}
+
+function serializeNotification(notification) {
+  return {
+    id: notification.id,
+    type: notification.type,
+    title: notification.title,
+    body: notification.body || '',
+    readAt: notification.readAt || null,
+    createdAt: notification.createdAt,
+    channelId: notification.channelId || null,
+    conversationId: notification.conversationId || null,
+    messageId: notification.messageId || null,
+    directMessageId: notification.directMessageId || null,
+    actor: serializePublicUser(notification.actor)
+  };
+}
+
+async function persistNotifications(items) {
+  const uniqueItems = [];
+  const seen = new Set();
+  for (const item of items) {
+    const recipientId = Number(item.recipientId);
+    if (!recipientId || recipientId === Number(item.actorId)) continue;
+    const key = `${recipientId}:${item.type}:${item.messageId || ''}:${item.directMessageId || ''}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    uniqueItems.push({ ...item, recipientId });
+  }
+  if (uniqueItems.length === 0) return;
+
+  try {
+    const created = await prisma.$transaction(
+      uniqueItems.map((item) => prisma.notification.create({
+        data: item,
+        include: { actor: { select: publicUserSelect } }
+      }))
+    );
+    created.forEach((notification) => {
+      const payload = serializeNotification(notification);
+      io.to(`user:${notification.recipientId}`).emit('notification:new', payload);
+    });
+  } catch (error) {
+    // A notification failure must never make a successfully persisted message look failed.
+    console.error('Notification persistence failed:', error);
+  }
+}
+
+function extractMentionUsernames(content) {
+  const usernames = new Set();
+  for (const match of String(content || '').matchAll(/@([\p{L}\p{N}_.-]{1,64})/gu)) {
+    usernames.add(match[1]);
+  }
+  return [...usernames];
+}
+
+async function createChannelNotifications({ message, channel, replyRecipientId }) {
+  const mentionedUsernames = extractMentionUsernames(message.content);
+  const mentionedUsers = mentionedUsernames.length
+    ? await prisma.user.findMany({ where: { username: { in: mentionedUsernames } }, select: { id: true } })
+    : [];
+  const recipients = new Map();
+  mentionedUsers.forEach((user) => recipients.set(user.id, 'MENTION'));
+  if (replyRecipientId) recipients.set(replyRecipientId, 'REPLY');
+  const actorName = message.author?.displayName || message.author?.username || 'Someone';
+
+  await persistNotifications([...recipients].map(([recipientId, type]) => ({
+    type,
+    title: type === 'REPLY' ? `${actorName} replied to you` : `${actorName} mentioned you`,
+    body: notificationPreview(message),
+    recipientId,
+    actorId: message.authorId,
+    channelId: channel.id,
+    messageId: message.id
+  })));
+}
+
+async function createDirectMessageNotifications({ conversation, message, replyRecipientId }) {
+  const actorName = message.author?.displayName || message.author?.username || 'Someone';
+  await persistNotifications(
+    getConversationMemberIds(conversation)
+      .filter((recipientId) => Number(recipientId) !== Number(message.authorId))
+      .map((recipientId) => ({
+        type: Number(recipientId) === Number(replyRecipientId) ? 'REPLY' : 'DIRECT_MESSAGE',
+        title: Number(recipientId) === Number(replyRecipientId)
+          ? `${actorName} replied to you`
+          : `${actorName} sent a message`,
+        body: notificationPreview(message),
+        recipientId,
+        actorId: message.authorId,
+        conversationId: conversation.id,
+        directMessageId: message.id
+      }))
+  );
+}
+
 function serializeCallSession(call) {
   if (!call) return null;
   return {
@@ -1123,15 +1236,17 @@ async function createChannelMessage({ channelId, userId, content, attachmentUrl,
     return null;
   }
 
+  let replyRecipientId = null;
   if (replyToId) {
     const replyTarget = await prisma.message.findUnique({
       where: { id: replyToId },
-      select: { channelId: true }
+      select: { channelId: true, authorId: true }
     });
 
     if (!replyTarget || replyTarget.channelId !== channelId) {
       throw createApiError(400, 'INVALID_REPLY_TARGET', 'Reply target was not found in this channel.');
     }
+    replyRecipientId = replyTarget.authorId;
   }
 
   const message = await prisma.message.create({
@@ -1157,6 +1272,11 @@ async function createChannelMessage({ channelId, userId, content, attachmentUrl,
     }
   });
 
+  try {
+    await createChannelNotifications({ message, channel, replyRecipientId });
+  } catch (error) {
+    console.error('Channel notification creation failed:', error);
+  }
   return { ...message, guildId: channel.guildId };
 }
 
@@ -1185,15 +1305,17 @@ async function createDirectConversationMessage({ conversationId, userId, content
 
   await assertUserCanSend(userId);
 
+  let replyRecipientId = null;
   if (replyToId) {
     const replyTarget = await prisma.directMessage.findUnique({
       where: { id: replyToId },
-      select: { conversationId: true }
+      select: { conversationId: true, authorId: true }
     });
 
     if (!replyTarget || replyTarget.conversationId !== conversationId) {
       throw createApiError(400, 'INVALID_REPLY_TARGET', 'Reply target was not found in this conversation.');
     }
+    replyRecipientId = replyTarget.authorId;
   }
 
   const message = await prisma.directMessage.create({
@@ -1223,6 +1345,12 @@ async function createDirectConversationMessage({ conversationId, userId, content
     where: { id: conversationId },
     data: { updatedAt: new Date() }
   });
+
+  try {
+    await createDirectMessageNotifications({ conversation, message, replyRecipientId });
+  } catch (error) {
+    console.error('Direct-message notification creation failed:', error);
+  }
 
   return { conversation, message };
 }
@@ -1619,7 +1747,7 @@ app.patch('/api/admin/moderation/reports/:reportId', authMiddleware, adminMiddle
             targetUserId: updated.targetUserId,
             action,
             reason,
-            metadata: { reportId: updated.id, targetType: updated.targetType }
+            metadata: JSON.stringify({ reportId: updated.id, targetType: updated.targetType })
           }
         });
       }
@@ -1690,7 +1818,7 @@ app.post('/api/admin/users/:userId/moderation', authMiddleware, adminMiddleware,
           targetUserId: userId,
           action,
           reason,
-          metadata: until ? { until: until.toISOString() } : {}
+          metadata: JSON.stringify(until ? { until: until.toISOString() } : {})
         }
       });
 
@@ -1797,6 +1925,111 @@ app.put('/api/me/client-state', authMiddleware, async (req, res) => {
   } catch (error) {
     console.error(error);
     return sendApiError(res, 500, 'CLIENT_STATE_SAVE_FAILED', 'Failed to save synchronized client state.');
+  }
+});
+
+app.get('/api/notifications', authMiddleware, async (req, res) => {
+  try {
+    const limit = Math.min(
+      MAX_NOTIFICATION_LIMIT,
+      Math.max(1, parsePositiveInt(req.query.limit) || DEFAULT_NOTIFICATION_LIMIT)
+    );
+    const beforeId = parseOptionalPositiveInt(req.query.beforeId);
+    const unreadOnly = String(req.query.unread || '').toLowerCase() === 'true';
+    const where = {
+      recipientId: req.user.userId,
+      ...(beforeId ? { id: { lt: beforeId } } : {}),
+      ...(unreadOnly ? { readAt: null } : {})
+    };
+    const [rows, unreadCount] = await Promise.all([
+      prisma.notification.findMany({
+        where,
+        orderBy: { id: 'desc' },
+        take: limit + 1,
+        include: { actor: { select: publicUserSelect } }
+      }),
+      prisma.notification.count({
+        where: { recipientId: req.user.userId, readAt: null }
+      })
+    ]);
+    const hasMore = rows.length > limit;
+    const page = hasMore ? rows.slice(0, limit) : rows;
+    return res.json({
+      notifications: page.map(serializeNotification),
+      unreadCount,
+      nextBeforeId: hasMore ? page[page.length - 1]?.id || null : null
+    });
+  } catch (error) {
+    console.error(error);
+    return sendApiError(res, 500, 'NOTIFICATIONS_FETCH_FAILED', 'Failed to load notifications.');
+  }
+});
+
+app.patch('/api/notifications/:notificationId/read', authMiddleware, async (req, res) => {
+  try {
+    const notificationId = parsePositiveInt(req.params.notificationId);
+    if (!notificationId) {
+      return sendApiError(res, 400, 'INVALID_NOTIFICATION_ID', 'Invalid notification id.');
+    }
+    const existing = await prisma.notification.findFirst({
+      where: { id: notificationId, recipientId: req.user.userId },
+      include: { actor: { select: publicUserSelect } }
+    });
+    if (!existing) {
+      return sendApiError(res, 404, 'NOTIFICATION_NOT_FOUND', 'Notification not found.');
+    }
+    const notification = existing.readAt
+      ? existing
+      : await prisma.notification.update({
+          where: { id: notificationId },
+          data: { readAt: new Date() },
+          include: { actor: { select: publicUserSelect } }
+        });
+    io.to(`user:${req.user.userId}`).emit('notification:read', { id: notification.id, readAt: notification.readAt });
+    return res.json(serializeNotification(notification));
+  } catch (error) {
+    console.error(error);
+    return sendApiError(res, 500, 'NOTIFICATION_READ_FAILED', 'Failed to mark notification as read.');
+  }
+});
+
+app.post('/api/notifications/read-all', authMiddleware, async (req, res) => {
+  try {
+    const result = await prisma.notification.updateMany({
+      where: { recipientId: req.user.userId, readAt: null },
+      data: { readAt: new Date() }
+    });
+    io.to(`user:${req.user.userId}`).emit('notification:read-all', { readAt: new Date().toISOString() });
+    return res.json({ ok: true, updatedCount: result.count });
+  } catch (error) {
+    console.error(error);
+    return sendApiError(res, 500, 'NOTIFICATIONS_READ_FAILED', 'Failed to mark notifications as read.');
+  }
+});
+
+app.post('/api/notifications/read-scope', authMiddleware, async (req, res) => {
+  try {
+    const channelId = parseOptionalPositiveInt(req.body?.channelId);
+    const conversationId = parseOptionalPositiveInt(req.body?.conversationId);
+    if (Boolean(channelId) === Boolean(conversationId)) {
+      return sendApiError(res, 400, 'INVALID_NOTIFICATION_SCOPE', 'Provide one notification scope.');
+    }
+    if (conversationId && !await isConversationMember(conversationId, req.user.userId)) {
+      return sendApiError(res, 404, 'CONVERSATION_NOT_FOUND', 'Conversation not found.');
+    }
+    const result = await prisma.notification.updateMany({
+      where: {
+        recipientId: req.user.userId,
+        readAt: null,
+        ...(channelId ? { channelId } : { conversationId })
+      },
+      data: { readAt: new Date() }
+    });
+    io.to(`user:${req.user.userId}`).emit('notification:scope-read', { channelId, conversationId });
+    return res.json({ ok: true, updatedCount: result.count });
+  } catch (error) {
+    console.error(error);
+    return sendApiError(res, 500, 'NOTIFICATION_SCOPE_READ_FAILED', 'Failed to update notification scope.');
   }
 });
 

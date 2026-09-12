@@ -4,6 +4,15 @@
 
 WebCord should feel like a fast native chat client first: stable voice rooms, polished media messages, clear moderation, and installable clients that are easy to release. The Flutter clients are the primary Windows and Android clients. Web/PWA remains the broad-access client. Electron, Tauri and Capacitor are legacy shells unless a release explicitly needs them.
 
+## WebCord 4.0 Foundation - Inbox
+
+Status: implemented
+
+- Server-persisted notifications for direct messages, replies, and mentions.
+- Realtime Inbox updates and synchronized read state across clients.
+- Web and Flutter Inbox surfaces with unread badges, read-all, and deep links to message context.
+- Cursor-ready API pagination leaves room for reactions, events, forum activity, and Android push delivery.
+
 ## Phase 1 - Client Polish And Release Clarity
 
 Status: in progress

@@ -21,6 +21,7 @@ The canonical project logo is `webcord.png` in the repository root. The web favi
 - WebRTC voice mesh with reconnect handling and per-peer audio volume.
 - Profile avatar, banner, and bio.
 - Modern Discord-style dark UI with settings, appearance controls, voice controls, and responsive layout.
+- Synchronized Inbox for direct messages, replies, and mentions across web and Flutter clients.
 - Production nginx proxy for `/api`, `/socket.io`, and `/uploads`.
 
 ## Local Setup
